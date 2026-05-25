@@ -1,0 +1,1009 @@
+:root {
+  --bg: #eef1f5;
+  --panel: #f8fafc;
+  --panel-strong: #ffffff;
+  --ink: #111821;
+  --muted: #5c6674;
+  --line: #d3d9e3;
+  --blue: #1268e8;
+  --blue-dark: #0b58cf;
+  --amber: #f59e0b;
+  --green: #0f9f6e;
+  --red: #c2413f;
+  --dark: #0b1016;
+  --shadow: 0 18px 46px rgb(20 28 40 / 12%);
+  color: var(--ink);
+  background: var(--bg);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#physics-app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.physics-topbar {
+  display: grid;
+  grid-template-columns: 160px minmax(260px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #252c36;
+  background: var(--dark);
+  color: #f8fafc;
+}
+
+.back-link,
+.physics-actions button,
+.mode-tabs button,
+.simulation-bar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid #3a4350;
+  border-radius: 5px;
+  background: #111821;
+  color: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-decoration: none;
+}
+
+.physics-brand {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.physics-brand span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.physics-brand strong {
+  overflow: hidden;
+  color: #aeb8c7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.mode-tabs,
+.physics-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.mode-tabs button.is-active,
+.physics-actions button:last-of-type,
+.simulation-bar button.is-active {
+  border-color: #4f8df7;
+  background: linear-gradient(180deg, #1778ff, #075bd8);
+}
+
+.physics-actions .help-button {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  border-color: #526071;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 12%), rgb(255 255 255 / 2%)),
+    #141d29;
+  color: #dbe7f7;
+  font-size: 0.86rem;
+  font-weight: 950;
+}
+
+.physics-actions .help-button:hover {
+  border-color: #8ab4fb;
+  color: #ffffff;
+}
+
+.physics-shell {
+  display: grid;
+  grid-template-columns: 340px minmax(520px, 1fr) 380px;
+  height: calc(100vh - 58px);
+  min-height: 0;
+}
+
+.physics-panel {
+  min-height: 0;
+  overflow: auto;
+  background: var(--panel);
+}
+
+.physics-panel--left {
+  border-right: 1px solid var(--line);
+}
+
+.physics-panel--right {
+  border-left: 1px solid var(--line);
+}
+
+.physics-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.physics-section--tree {
+  min-height: 0;
+}
+
+h1,
+h2,
+h3,
+p,
+dl {
+  margin: 0;
+}
+
+h1 {
+  font-size: 1.02rem;
+  font-weight: 900;
+}
+
+h2 {
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+h3 {
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.summary-strip,
+.viewport-readout,
+.analysis-results,
+.audit-list,
+.audit-group,
+.robot-tree,
+.inspector-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.summary-strip {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.summary-strip div,
+.metric-grid div,
+.tree-card,
+.result-card,
+.audit-item,
+.form-card,
+.analysis-table-card {
+  border: 1px solid #d6dce5;
+  border-radius: 6px;
+  background: var(--panel-strong);
+}
+
+.summary-strip div,
+.metric-grid div {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+.summary-strip span,
+.metric-grid dt,
+.tree-card span,
+.result-card span,
+.audit-item span,
+.form-field span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.summary-strip strong,
+.metric-grid dd {
+  margin: 0;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tree-card,
+.result-card,
+.audit-item,
+.form-card,
+.analysis-table-card {
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+}
+
+.collapsible-card {
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.collapsible-card__toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px 22px;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 5px 0 12px;
+  border: 0;
+  border-bottom: 1px solid rgb(211 217 227 / 76%);
+  border-radius: 0;
+  background: linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%));
+  color: var(--ink);
+  text-align: left;
+}
+
+.collapsible-card.is-collapsed .collapsible-card__toggle {
+  border-bottom-color: transparent;
+}
+
+.collapsible-card__toggle:hover {
+  background: #f3f7fc;
+}
+
+.collapsible-card__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.collapsible-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.collapsible-card__meta {
+  flex: 0 1 auto;
+  max-width: 116px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.66rem;
+  font-weight: 850;
+}
+
+.collapsible-card__chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #657183;
+  border-bottom: 2px solid #657183;
+  transform: rotate(45deg) translateY(-2px);
+  transform-origin: center;
+  transition: transform 180ms ease;
+}
+
+.collapsible-card.is-collapsed .collapsible-card__chevron {
+  transform: rotate(-45deg);
+}
+
+.collapsible-card__dots {
+  justify-self: center;
+  width: 17px;
+  height: 22px;
+  border-radius: 4px;
+  background-image: radial-gradient(circle, #728093 1.05px, transparent 1.15px);
+  background-position: center;
+  background-size: 5px 5px;
+  opacity: 0.58;
+}
+
+.collapsible-card__toggle:hover .collapsible-card__dots {
+  opacity: 0.82;
+}
+
+.collapsible-card__content {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 180ms ease;
+}
+
+.collapsible-card.is-collapsed .collapsible-card__content {
+  grid-template-rows: 0fr;
+}
+
+.collapsible-card__inner {
+  display: grid;
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 9px 9px;
+}
+
+.collapsible-card.is-collapsed .collapsible-card__inner {
+  padding-bottom: 0;
+}
+
+.tree-card {
+  border-left: 3px solid transparent;
+}
+
+.tree-card.is-selected {
+  border-left-color: var(--amber);
+  background: #fff8ea;
+}
+
+.tree-card strong,
+.result-card strong,
+.audit-item strong {
+  font-size: 0.78rem;
+}
+
+.tree-card button,
+.compact-button {
+  min-height: 28px;
+  border: 1px solid #c7ced9;
+  border-radius: 4px;
+  background: #fbfcfe;
+  color: #202936;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.compact-button.is-risk {
+  border-color: #efb3b1;
+  color: var(--red);
+}
+
+.compact-button.is-active {
+  border-color: #6da0f8;
+  background: #eaf2ff;
+  color: var(--blue-dark);
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.form-grid--two {
+  grid-template-columns: 1fr 1fr;
+}
+
+.form-field {
+  display: grid;
+  gap: 4px;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid #c8cfd9;
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0 8px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.form-field textarea {
+  min-height: 58px;
+  padding: 7px 8px;
+  resize: vertical;
+}
+
+.form-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.analysis-kv {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.analysis-kv div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #e0e5ed;
+  border-radius: 5px;
+  background: #f8fafc;
+}
+
+.analysis-kv span,
+.analysis-table th {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 850;
+}
+
+.analysis-kv strong {
+  overflow-wrap: anywhere;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-scroll {
+  overflow: auto;
+}
+
+.table-scroll--fit {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.analysis-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 0.7rem;
+}
+
+.analysis-table th,
+.analysis-table td {
+  padding: 6px 7px;
+  border-bottom: 1px solid #e6ebf2;
+  text-align: left;
+  vertical-align: top;
+}
+
+.analysis-table td {
+  color: #202936;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.analysis-table tr[data-state="warn"] td:first-child {
+  border-left: 3px solid var(--amber);
+}
+
+.analysis-table tr[data-state="risk"] td:first-child {
+  border-left: 3px solid var(--red);
+}
+
+.analysis-table tr[data-state="ok"] td:first-child {
+  border-left: 3px solid var(--green);
+}
+
+.analysis-table tr.is-selected td {
+  background: #fff8ea;
+}
+
+.analysis-table--compact {
+  min-width: 420px;
+}
+
+.analysis-table--fit {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.analysis-table--fit th,
+.analysis-table--fit td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.analysis-table--fit .compact-button {
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 7px;
+  white-space: normal;
+}
+
+.analysis-table__measure {
+  width: 58px;
+}
+
+.analysis-table__action-col {
+  width: 76px;
+}
+
+.analysis-table__action {
+  text-align: right;
+}
+
+.analysis-table--allowed-pairs td:first-child {
+  padding-right: 10px;
+}
+
+.audit-group {
+  padding: 8px;
+  border: 1px solid #d6dce5;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.audit-item b {
+  color: #273244;
+}
+
+.part-assignment-groups,
+.part-group {
+  display: grid;
+  gap: 6px;
+}
+
+.part-group > span,
+.empty-note,
+.inline-check {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+}
+
+.part-checks {
+  display: grid;
+  max-height: 148px;
+  overflow: auto;
+  border: 1px solid #d6dce5;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.part-checks label {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #eef1f5;
+  color: #26303d;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.part-checks label:last-child {
+  border-bottom: 0;
+}
+
+.physics-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 72% 20%, rgb(18 104 232 / 10%), transparent 32%),
+    linear-gradient(180deg, #f8fafc, #eef2f7);
+}
+
+.physics-viewport,
+.physics-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.floating-panel,
+.simulation-bar {
+  position: absolute;
+  border: 1px solid rgb(203 213 225 / 80%);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 88%);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.floating-panel {
+  z-index: 3;
+  display: grid;
+  gap: 0;
+  max-width: min(340px, calc(100% - 32px));
+  overflow: hidden;
+}
+
+.floating-panel.is-dragging {
+  z-index: 12;
+  box-shadow: 0 22px 58px rgb(20 28 40 / 20%);
+}
+
+.floating-panel__bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px;
+  align-items: center;
+  min-height: 29px;
+  border-bottom: 1px solid rgb(211 217 227 / 76%);
+  background: linear-gradient(180deg, rgb(255 255 255 / 78%), rgb(246 248 251 / 82%));
+  cursor: grab;
+  touch-action: none;
+}
+
+.floating-panel.is-collapsed .floating-panel__bar {
+  border-bottom-color: transparent;
+}
+
+.floating-panel.is-dragging .floating-panel__bar,
+.floating-panel.is-dragging .floating-panel__grip {
+  cursor: grabbing;
+}
+
+.floating-panel__toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 29px;
+  padding: 0 2px 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.floating-panel__toggle:hover {
+  background: rgb(232 238 247 / 58%);
+}
+
+.floating-panel__toggle span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  color: #4f5b6b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.floating-panel__chevron {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid #6a7483;
+  border-bottom: 2px solid #6a7483;
+  transform: rotate(45deg) translateY(-1px);
+  transform-origin: center;
+  transition: transform 160ms ease;
+}
+
+.floating-panel.is-collapsed .floating-panel__chevron {
+  transform: rotate(-45deg);
+}
+
+.floating-panel__grip {
+  justify-self: center;
+  width: 17px;
+  height: 22px;
+  border-radius: 4px;
+  background-image: radial-gradient(circle, #728093 1.05px, transparent 1.15px);
+  background-position: center;
+  background-size: 5px 5px;
+  cursor: grab;
+  opacity: 0.76;
+  touch-action: none;
+}
+
+.floating-panel__content {
+  display: grid;
+  gap: 6px;
+  max-height: 230px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 9px 13px 12px;
+  transition:
+    max-height 160ms ease,
+    padding 160ms ease;
+}
+
+.floating-panel.is-collapsed .floating-panel__content {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.physics-overlay {
+  left: 18px;
+  top: 18px;
+  min-width: 182px;
+}
+
+.physics-overlay .floating-panel__content {
+  gap: 2px;
+}
+
+.physics-overlay span,
+.viewport-readout span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.physics-overlay strong,
+.viewport-readout strong {
+  font-size: 0.84rem;
+  font-weight: 900;
+}
+
+.viewport-readout {
+  right: 18px;
+  top: 18px;
+  min-width: min(280px, calc(100% - 36px));
+}
+
+.viewport-readout__content {
+  gap: 7px;
+}
+
+.simulation-bar {
+  left: 50%;
+  bottom: 18px;
+  display: flex;
+  gap: 6px;
+  padding: 7px;
+  transform: translateX(-50%);
+}
+
+.simulation-bar button {
+  min-height: 32px;
+  color: #101822;
+  background: #ffffff;
+  border-color: #c7ced9;
+}
+
+.result-card[data-state="ok"],
+.audit-item[data-state="ok"] {
+  border-left: 4px solid var(--green);
+}
+
+.result-card[data-state="warn"],
+.audit-item[data-state="warn"] {
+  border-left: 4px solid var(--amber);
+}
+
+.result-card[data-state="risk"],
+.audit-item[data-state="risk"] {
+  border-left: 4px solid var(--red);
+}
+
+.result-card p,
+.audit-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.physics-help-dialog {
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  padding: 0;
+  border: 1px solid #c9d2df;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--ink);
+  box-shadow: 0 28px 86px rgb(10 16 24 / 32%);
+}
+
+.physics-help-dialog::backdrop {
+  background: rgb(11 16 22 / 58%);
+  backdrop-filter: blur(3px);
+}
+
+.physics-help-panel {
+  display: grid;
+  max-height: inherit;
+  overflow: hidden;
+}
+
+.physics-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px 15px;
+  border-bottom: 1px solid #dbe2eb;
+  background: linear-gradient(180deg, #ffffff, #f4f7fb);
+}
+
+.physics-help-header span {
+  color: var(--blue-dark);
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.physics-help-header h2 {
+  margin-top: 3px;
+  font-size: 1.12rem;
+}
+
+.help-close-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #c7ced9;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #1d2734;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.physics-help-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  max-height: calc(100vh - 132px);
+  overflow: auto;
+  padding: 16px 20px 20px;
+}
+
+.physics-help-body section {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #dbe2eb;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.physics-help-body section:first-child,
+.physics-help-body section:nth-child(2) {
+  grid-column: 1 / -1;
+}
+
+.physics-help-body p,
+.physics-help-body li {
+  margin: 0;
+  color: #354153;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.physics-help-body ol {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.physics-help-body b {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible,
+.collapsible-card__toggle:focus-visible {
+  outline: 2px solid rgb(18 104 232 / 72%);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-card__content,
+  .collapsible-card__chevron,
+  .floating-panel__content,
+  .floating-panel__chevron {
+    transition: none;
+  }
+}
+
+@media (max-width: 1320px) {
+  .physics-topbar {
+    grid-template-columns: 150px minmax(180px, 1fr) auto;
+  }
+
+  .physics-actions {
+    grid-column: 1 / -1;
+  }
+
+  .physics-shell {
+    grid-template-columns: 320px minmax(460px, 1fr) 340px;
+  }
+}
+
+@media (max-width: 1080px) {
+  body {
+    overflow: auto;
+  }
+
+  .physics-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-tabs,
+  .physics-actions {
+    flex-wrap: wrap;
+  }
+
+  .physics-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .physics-stage {
+    min-height: 560px;
+    order: -1;
+  }
+
+  .physics-help-header {
+    align-items: flex-start;
+    padding: 15px;
+  }
+
+  .physics-help-body {
+    grid-template-columns: 1fr;
+    padding: 12px 15px 15px;
+  }
+
+  .physics-help-body section:first-child,
+  .physics-help-body section:nth-child(2) {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 560px) {
+  .viewport-readout {
+    left: 18px;
+    right: auto;
+    top: 116px;
+  }
+}

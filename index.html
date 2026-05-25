@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>STL Assembly Studio</title>
+    <meta
+      name="description"
+      content="Import, compose, inspect, transform, and export multi-part STL assemblies in a browser-based 3D studio."
+    />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar" aria-label="Studio command bar">
+        <div class="brand">
+          <button class="topbar-icon" type="button" aria-label="Main menu">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <span class="brand__name">STL Assembly Studio</span>
+        </div>
+
+        <nav class="mode-grid" role="toolbar" aria-label="Studio mode">
+          <button class="mode-button" type="button" data-mode="select">
+            <span class="mode-icon mode-icon--select"></span>
+            Select
+          </button>
+          <button class="mode-button" type="button" data-mode="move">
+            <span class="mode-icon mode-icon--move"></span>
+            Move
+          </button>
+          <button class="mode-button" type="button" data-mode="rotate">
+            <span class="mode-icon mode-icon--rotate"></span>
+            Rotate
+          </button>
+          <button class="mode-button is-active" type="button" data-mode="hinge">
+            <span class="mode-icon mode-icon--hinge"></span>
+            Hinge
+          </button>
+        </nav>
+
+        <div class="toolbar-divider"></div>
+        <button id="import-stl" class="toolbar-button toolbar-button--import" type="button">
+          <span class="button-icon button-icon--folder"></span>
+          Import STL
+        </button>
+        <input id="stl-file-input" type="file" accept=".stl,model/stl" multiple hidden />
+        <button id="reset-view" class="toolbar-button" type="button">
+          <span class="button-icon button-icon--target"></span>
+          Reset View
+        </button>
+        <button id="open-physics" class="toolbar-button" type="button">
+          <span class="button-icon button-icon--target"></span>
+          Physics
+        </button>
+
+        <div class="topbar-spacer"></div>
+
+        <button id="save-pose" class="toolbar-button" type="button">
+          <span class="button-icon button-icon--save"></span>
+          Save
+        </button>
+        <button id="load-pose" class="toolbar-button" type="button">
+          <span class="button-icon button-icon--folder"></span>
+          Open
+        </button>
+        <button id="export-glb" class="toolbar-button toolbar-button--primary" type="button">
+          <span class="button-icon button-icon--export"></span>
+          Export GLB
+        </button>
+        <input id="pose-file-input" type="file" accept="application/json,.json" hidden />
+
+        <label class="topbar-toggle" title="Orbit camera">
+          <input id="orbit-toggle" type="checkbox" checked />
+          <span>Orbit</span>
+        </label>
+        <label class="topbar-toggle" title="Zoom camera">
+          <input id="zoom-toggle" type="checkbox" checked />
+          <span>Zoom</span>
+        </label>
+      </header>
+
+      <aside class="parts-panel" aria-label="Parts">
+        <header class="panel-header">
+          <h1>Parts</h1>
+          <p id="workspace-summary">Sample arm loaded</p>
+        </header>
+
+        <div class="parts-search">
+          <label class="search-field" for="part-search">
+            <span class="search-icon"></span>
+            <input id="part-search" type="search" placeholder="Search parts..." autocomplete="off" />
+          </label>
+          <button id="clear-search" class="filter-button" type="button" aria-label="Clear part search">
+            <span></span>
+          </button>
+        </div>
+
+        <div id="parts-list" class="parts-list" aria-live="polite"></div>
+
+        <footer class="parts-footer">
+          <button id="import-stl-secondary" class="add-inferred" type="button">
+            Import STL Files
+            <span>+</span>
+          </button>
+        </footer>
+      </aside>
+
+      <main class="stage">
+        <div id="viewport" class="viewport" aria-label="3D robotic arm studio"></div>
+        <div id="drop-target" class="drop-target" aria-hidden="true">
+          <strong>Drop STL files</strong>
+          <span>They will be added to this assembly workspace.</span>
+        </div>
+
+        <section class="mode-hint" aria-live="polite">
+          <div class="mode-hint__icon"></div>
+          <div>
+            <span>Active Mode</span>
+            <strong id="active-mode-label">Hinge</strong>
+          </div>
+          <ul id="active-mode-instructions">
+            <li>Import STL files or use the arm sample</li>
+            <li>Select parts to move, rotate, scale, or export</li>
+          </ul>
+        </section>
+
+        <section class="stage-status" aria-label="Workspace status">
+          <p><span>Selected:</span> <strong id="stage-selected-name">upper_arm</strong></p>
+          <p><span>Parts:</span> <strong id="stage-part-count">0</strong></p>
+          <p><span>Mode:</span> <strong id="stage-workspace-mode">Assembly</strong></p>
+          <p><span>Layout:</span> <strong id="stage-pose-status">unsaved</strong></p>
+        </section>
+
+        <div class="view-cube" aria-hidden="true">
+          <span class="axis axis--z">Z</span>
+          <span class="axis axis--y">Y</span>
+          <span class="axis axis--x">X</span>
+          <div class="cube-face">view</div>
+        </div>
+
+        <div class="viewport-dock" aria-label="Viewport shortcuts">
+          <button type="button" aria-label="Home view" title="Home view"></button>
+          <button type="button" aria-label="Frame selection" title="Frame selection"></button>
+          <button type="button" aria-label="Fit assembly" title="Fit assembly"></button>
+          <button type="button" aria-label="Toggle grid" title="Toggle grid"></button>
+          <button type="button" aria-label="Viewport settings" title="Viewport settings"></button>
+        </div>
+
+        <div id="loading" class="loading">Loading STL assembly...</div>
+      </main>
+
+      <aside class="inspector-panel" aria-label="Inspector">
+        <div class="inspector-tabs" role="tablist" aria-label="Inspector views">
+          <button class="is-active" type="button" role="tab" aria-selected="true">Inspector</button>
+          <button type="button" role="tab" aria-selected="false">Scene</button>
+        </div>
+
+        <section class="inspector-section" aria-labelledby="joint-controls">
+          <h2 id="joint-controls">Joint</h2>
+          <p class="section-note">Rig controls affect the sample robotic arm. Imported STLs use transform tools.</p>
+          <label class="field field--stack">
+            <span class="visually-hidden">Hinge</span>
+            <select id="joint-select"></select>
+          </label>
+          <div class="field-label-row">
+            <span>Angle</span>
+            <input id="joint-angle-number" type="number" value="0" step="1" />
+          </div>
+          <label class="field field--range">
+            <span class="visually-hidden">Angle</span>
+            <input id="joint-angle-range" type="range" value="0" />
+          </label>
+          <div class="range-scale" aria-hidden="true">
+            <span>-180</span>
+            <span>-90</span>
+            <span>0</span>
+            <span>90</span>
+            <span>180</span>
+          </div>
+          <div class="inspector-button-row">
+            <button id="reset-joint" class="secondary-button" type="button">Reset Joint</button>
+            <button id="reset-pose" class="secondary-button" type="button">Zero Pose</button>
+          </div>
+        </section>
+
+        <section class="inspector-section" aria-labelledby="selection-controls">
+          <h2 id="selection-controls">Selected Part</h2>
+          <label class="inspector-row">
+            <span>Name</span>
+            <output id="selected-part-name" class="selected-name">No part selected</output>
+          </label>
+          <label class="inspector-row">
+            <span>Source</span>
+            <output id="selected-part-source">-</output>
+          </label>
+          <label class="inspector-row">
+            <span>Visible</span>
+            <input id="selected-visible-toggle" class="switch-input" type="checkbox" checked disabled />
+          </label>
+          <label class="inspector-row">
+            <span>Opacity</span>
+            <output id="selected-opacity-value">100%</output>
+            <input id="selected-opacity" type="range" min="15" max="100" value="100" disabled />
+          </label>
+        </section>
+
+        <section class="inspector-section" aria-labelledby="transform-controls">
+          <h2 id="transform-controls">Transform</h2>
+          <div class="transform-grid" aria-label="Selected part local offset">
+            <span>Position (mm)</span>
+            <label>X <input class="offset-input" data-offset-kind="position" data-axis="0" type="number" step="1" value="0" disabled /></label>
+            <label>Y <input class="offset-input" data-offset-kind="position" data-axis="1" type="number" step="1" value="0" disabled /></label>
+            <label>Z <input class="offset-input" data-offset-kind="position" data-axis="2" type="number" step="1" value="0" disabled /></label>
+            <span>Rotation (deg)</span>
+            <label>X <input class="offset-input" data-offset-kind="rotation" data-axis="0" type="number" step="1" value="0" disabled /></label>
+            <label>Y <input class="offset-input" data-offset-kind="rotation" data-axis="1" type="number" step="1" value="0" disabled /></label>
+            <label>Z <input class="offset-input" data-offset-kind="rotation" data-axis="2" type="number" step="1" value="0" disabled /></label>
+            <span>Scale</span>
+            <label>X <input class="scale-input" data-axis="0" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+            <label>Y <input class="scale-input" data-axis="1" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+            <label>Z <input class="scale-input" data-axis="2" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+          </div>
+          <button id="reset-selected" class="secondary-button secondary-button--wide" type="button" disabled>
+            Reset Transform
+          </button>
+          <div class="inspector-button-row">
+            <button id="duplicate-selected" class="secondary-button" type="button" disabled>Duplicate</button>
+            <button id="remove-selected" class="secondary-button secondary-button--danger" type="button" disabled>Remove</button>
+          </div>
+        </section>
+
+        <section class="inspector-section inspector-section--last" aria-labelledby="info-heading">
+          <h2 id="info-heading">Information</h2>
+          <dl class="info-list">
+            <div>
+              <dt>Triangles</dt>
+              <dd id="selected-triangles">-</dd>
+            </div>
+            <div>
+              <dt>Material</dt>
+              <dd id="selected-materials">-</dd>
+            </div>
+            <div>
+              <dt>Bounding Box (mm)</dt>
+              <dd id="selected-bounds">-</dd>
+            </div>
+          </dl>
+        </section>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

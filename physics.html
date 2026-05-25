@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robotics Design Workbench</title>
+    <meta
+      name="description"
+      content="Convert STL assemblies into robot models with links, joints, IK, collision proxies, mass properties, actuators, and browser dynamics."
+    />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="physics-app">
+      <header class="physics-topbar">
+        <a class="back-link" href="/">Assembly Studio</a>
+        <div class="physics-brand">
+          <span>Robotics Design Workbench</span>
+          <strong id="snapshot-status">Loading current assembly</strong>
+        </div>
+        <nav class="mode-tabs" aria-label="Workbench modes">
+          <button class="is-active" type="button" data-mode="model">Model</button>
+          <button type="button" data-mode="analyze">Analyze</button>
+          <button type="button" data-mode="actuators">Actuators</button>
+          <button type="button" data-mode="simulate">Simulate</button>
+          <button type="button" data-mode="audit">Audit</button>
+        </nav>
+        <div class="physics-actions">
+          <button id="physics-help" class="help-button" type="button" aria-haspopup="dialog" aria-label="Open physics help" title="Open physics help">?</button>
+          <button id="frame-assembly" type="button">Frame</button>
+          <button id="save-design" type="button">Save</button>
+          <button id="load-design" type="button">Import</button>
+          <button id="export-design" type="button">JSON</button>
+          <button id="export-urdf" type="button">URDF</button>
+          <input id="design-file-input" type="file" accept="application/json,.json" hidden />
+        </div>
+      </header>
+
+      <main class="physics-shell">
+        <aside class="physics-panel physics-panel--left">
+          <section class="physics-section">
+            <h1>Robot Model</h1>
+            <div id="design-summary" class="summary-strip"></div>
+          </section>
+          <section id="mode-controls" class="physics-section"></section>
+          <section class="physics-section physics-section--tree">
+            <h2>Links & Joints</h2>
+            <div id="robot-tree" class="robot-tree"></div>
+          </section>
+        </aside>
+
+        <section class="physics-stage">
+          <div id="physics-viewport" class="physics-viewport" aria-label="Robotic system physics viewport"></div>
+          <div class="physics-overlay floating-panel" data-floating-panel="snapshot">
+            <div class="floating-panel__bar" data-floating-drag="snapshot">
+              <button class="floating-panel__toggle" type="button" data-toggle-floating-panel="snapshot" aria-expanded="true" aria-controls="floating-panel-snapshot-content">
+                <span>Snapshot</span>
+                <span class="floating-panel__chevron" aria-hidden="true"></span>
+              </button>
+              <span class="floating-panel__grip" aria-hidden="true"></span>
+            </div>
+            <div class="floating-panel__content" id="floating-panel-snapshot-content">
+              <span id="assembly-source">Snapshot</span>
+              <strong id="assembly-name">Current assembly</strong>
+            </div>
+          </div>
+          <div id="viewport-readout" class="viewport-readout floating-panel" data-floating-panel="readout"></div>
+          <div class="simulation-bar">
+            <button id="sim-reset" type="button">Reset</button>
+            <button id="sim-step" type="button">Step</button>
+            <button id="sim-run" type="button">Run</button>
+            <button id="run-audit" type="button">Run Audit</button>
+          </div>
+        </section>
+
+        <aside class="physics-panel physics-panel--right">
+          <section class="physics-section physics-section--metrics">
+            <h2>Metrics</h2>
+            <dl id="metrics-grid" class="metric-grid"></dl>
+          </section>
+          <section class="physics-section">
+            <h2>Inspector</h2>
+            <div id="inspector-panel" class="inspector-panel"></div>
+          </section>
+          <section class="physics-section">
+            <h2>Analysis</h2>
+            <div id="analysis-results" class="analysis-results"></div>
+          </section>
+          <section class="physics-section">
+            <h2>Audit</h2>
+            <div id="audit-list" class="audit-list"></div>
+          </section>
+        </aside>
+      </main>
+
+      <dialog id="physics-help-dialog" class="physics-help-dialog" aria-labelledby="physics-help-title">
+        <div class="physics-help-panel">
+          <header class="physics-help-header">
+            <div>
+              <span>Workbench guide</span>
+              <h2 id="physics-help-title">Operate the physics page</h2>
+            </div>
+            <button id="physics-help-close" class="help-close-button" type="button" aria-label="Close physics help">Close</button>
+          </header>
+          <div class="physics-help-body">
+            <section>
+              <h3>What this page edits</h3>
+              <p>The 3D geometry is the visual reference. The editable robot is the RobotDesign: links, joints, masses, collision proxies, actuators, tools, assumptions, and pose.</p>
+            </section>
+            <section>
+              <h3>Recommended flow</h3>
+              <ol>
+                <li><b>Model</b> - group parts into links, define joints, add collision proxies, and place the tool center.</li>
+                <li><b>Analyze</b> - move joint sliders or solve an inverse-kinematics target.</li>
+                <li><b>Actuators</b> - assign drives and check torque and speed margins.</li>
+                <li><b>Simulate</b> - initialize Rapier proxy bodies, then step or run the simulation.</li>
+                <li><b>Audit</b> - review readiness findings before exporting or iterating.</li>
+              </ol>
+            </section>
+            <section>
+              <h3>Viewport</h3>
+              <p>Drag to rotate, right-drag to pan, and use the wheel to zoom. Use <b>Frame</b> when the arm moves out of view.</p>
+            </section>
+            <section>
+              <h3>Model mode</h3>
+              <p>Select a link or joint from the left tree. Links own visual parts and mass data. Joints connect parent and child links. Collision proxies are simplified shapes used by analysis and simulation. End effectors define tool frames for IK.</p>
+            </section>
+            <section>
+              <h3>Analyze mode</h3>
+              <p>Set a target XYZ position in millimeters and click <b>Solve IK</b>. Use joint sliders for manual posing. <b>Reset Chain Pose</b> returns the selected tool chain to zero angles.</p>
+            </section>
+            <section>
+              <h3>Actuators mode</h3>
+              <p>Assign an actuator to each movable joint. Torque margin compares continuous torque to the recommended load. Speed margin compares actuator speed to the target speed assumption.</p>
+            </section>
+            <section>
+              <h3>Simulate mode</h3>
+              <p>Click <b>Initialize / Reset</b> after changing the model or simulation options. <b>Step</b> advances one timestep. <b>Run</b> starts continuous stepping and becomes <b>Pause</b> while running.</p>
+            </section>
+            <section>
+              <h3>Save and export</h3>
+              <p><b>Save</b> stores the current RobotDesign in this browser. <b>Import</b> loads a RobotDesign JSON file. <b>JSON</b> exports the editable design. <b>URDF</b> exports a URDF-style robot description.</p>
+            </section>
+            <section>
+              <h3>Limits</h3>
+              <p>Simulation uses proxy shapes, not raw STL mesh physics. V1 supports open serial chains for IK. Closed-loop mechanisms are reported as audit limitations.</p>
+            </section>
+          </div>
+        </div>
+      </dialog>
+    </div>
+    <script type="module" src="/src/physics.js"></script>
+  </body>
+</html>
