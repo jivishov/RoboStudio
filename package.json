@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "latest",
+    "@jscad/modeling": "latest",
+    "@jscad/stl-serializer": "latest",
     "three": "latest",
     "vite": "latest"
   }

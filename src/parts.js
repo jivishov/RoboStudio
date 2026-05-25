@@ -1,0 +1,1161 @@
+import "./parts.css";
+import {
+  BOOLEAN_OPERATION_KIND,
+  REVOLVE_KIND,
+  SKETCH_EXTRUDE_KIND,
+  SPUR_GEAR_KIND,
+  uniquePartId
+} from "./parts/contracts.js";
+import {
+  BOOLEAN_OPERATIONS,
+  createBooleanOperationBody,
+  createCircularPatternProfiles,
+  createLinearPatternProfiles,
+  createRevolveBodyFromPreset,
+  listRevolvePresets
+} from "./parts/featureOps.js";
+import { createSpurGearBody } from "./parts/gears.js";
+import {
+  addBody,
+  commitProject,
+  createProjectHistory,
+  deleteBody,
+  duplicateBody,
+  normalizePartProject,
+  redoProject,
+  resetProjectHistory,
+  selectBody,
+  selectedBody,
+  undoProject,
+  updateBody
+} from "./parts/projectState.js";
+import { parsePartProjectJson, serializePartProject } from "./parts/serialization.js";
+import {
+  combinedProfileBounds,
+  createCircularHole,
+  createSlottedHole,
+  profileCenter,
+  profileSize
+} from "./parts/sketch.js";
+import { createBodyFromTemplate, listPartTemplates } from "./parts/templates.js";
+import { validateBody, validatePartProject } from "./parts/validation.js";
+import { createPartPreviewScene } from "./parts/previewScene.js";
+import { createGeneratedAssemblySnapshot } from "./parts/snapshot.js";
+import { CURRENT_SNAPSHOT_KEY, SNAPSHOT_STORE_NAME, writeWorkspaceValue } from "./workspaceDb.js";
+
+const templateSelect = document.querySelector("#template-select");
+const addTemplateButton = document.querySelector("#add-template");
+const addLinearPatternButton = document.querySelector("#add-linear-pattern");
+const addCircularPatternButton = document.querySelector("#add-circular-pattern");
+const revolvePresetSelect = document.querySelector("#revolve-preset-select");
+const addRevolveBodyButton = document.querySelector("#add-revolve-body");
+const addSpurGearButton = document.querySelector("#add-spur-gear");
+const booleanOperationSelect = document.querySelector("#boolean-operation-select");
+const addBooleanBodyButton = document.querySelector("#add-boolean-body");
+const bodyList = document.querySelector("#body-list");
+const bodyCount = document.querySelector("#body-count");
+const bodyProperties = document.querySelector("#body-properties");
+const outerProfileFields = document.querySelector("#outer-profile-fields");
+const cutProfileFields = document.querySelector("#cut-profile-fields");
+const sketchPreview = document.querySelector("#sketch-preview");
+const selectedBodySummary = document.querySelector("#selected-body-summary");
+const projectUpdatedAt = document.querySelector("#project-updated-at");
+const validationCount = document.querySelector("#validation-count");
+const validationList = document.querySelector("#validation-list");
+const newProjectButton = document.querySelector("#new-project");
+const saveProjectButton = document.querySelector("#save-project");
+const openProjectButton = document.querySelector("#open-project");
+const projectFileInput = document.querySelector("#project-file-input");
+const undoButton = document.querySelector("#undo-project");
+const redoButton = document.querySelector("#redo-project");
+const exportStlButton = document.querySelector("#export-stl");
+const sendAssemblyButton = document.querySelector("#send-assembly");
+const duplicateBodyButton = document.querySelector("#duplicate-body");
+const deleteBodyButton = document.querySelector("#delete-body");
+const addCircularHoleButton = document.querySelector("#add-circular-hole");
+const addSlottedHoleButton = document.querySelector("#add-slotted-hole");
+const statusElement = document.querySelector("#part-status");
+const modelPreview = document.querySelector("#model-preview");
+const compileCount = document.querySelector("#compile-count");
+const buildCount = document.querySelector("#build-count");
+const compileList = document.querySelector("#compile-list");
+
+const history = createProjectHistory();
+const cadWorker = new Worker(new URL("./parts/cadWorker.js", import.meta.url), { type: "module" });
+const previewScene = createPartPreviewScene(modelPreview);
+let statusTimer = null;
+let compileTimer = null;
+let workerRequestId = 0;
+let activeCompileRequestId = null;
+let pendingCompileSignature = null;
+let lastCompletedCompileSignature = null;
+let compileResults = new Map();
+let compileErrors = [];
+let compiling = false;
+const pendingStlExports = new Map();
+const compileRequestSignatures = new Map();
+
+function showStatus(message, timeout = 2400) {
+  clearTimeout(statusTimer);
+  statusElement.textContent = message;
+  statusElement.hidden = false;
+  statusTimer = setTimeout(() => {
+    statusElement.hidden = true;
+  }, timeout);
+}
+
+function downloadBlob(content, fileName, type) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function nextWorkerRequestId() {
+  workerRequestId += 1;
+  return workerRequestId;
+}
+
+function selectedCompileResult() {
+  const body = selectedProjectBody();
+  return body ? compileResults.get(body.id) ?? null : null;
+}
+
+function bodySourceKind(body) {
+  return body?.source?.kind ?? SKETCH_EXTRUDE_KIND;
+}
+
+function isSketchBody(body) {
+  return bodySourceKind(body) === SKETCH_EXTRUDE_KIND;
+}
+
+function sourceLabel(body) {
+  const kind = bodySourceKind(body);
+  if (kind === REVOLVE_KIND) return "lathe";
+  if (kind === SPUR_GEAR_KIND) return "gear";
+  if (kind === BOOLEAN_OPERATION_KIND) return body.boolean?.operation ?? "boolean";
+  return `${formatNumber(body?.extrudeDepthMm, 1)} mm`;
+}
+
+function compileResultCount(project) {
+  return project.bodies.filter((body) => compileResults.has(body.id)).length;
+}
+
+function bodyCompileSignature(body) {
+  return {
+    id: body.id,
+    source: body.source,
+    sketch: body.sketch,
+    extrudeDepthMm: body.extrudeDepthMm,
+    revolve: body.revolve,
+    gear: body.gear,
+    boolean: body.boolean
+  };
+}
+
+function projectCompileSignature(project) {
+  return JSON.stringify(project.bodies.map(bodyCompileSignature));
+}
+
+function renderCompileStatus(project = history.current) {
+  const resultCount = compileResultCount(project);
+  const total = project.bodies.length;
+  const hasSelectedResult = Boolean(selectedCompileResult());
+  const hasHandoffResult = resultCount > 0;
+
+  exportStlButton.disabled = !hasSelectedResult || compiling;
+  sendAssemblyButton.disabled = !hasHandoffResult || compiling;
+  compileCount.textContent = compiling ? "Building" : total ? `${resultCount}/${total}` : "Idle";
+  buildCount.textContent = compileErrors.length ? `${compileErrors.length}` : resultCount ? "OK" : "Idle";
+  compileList.replaceChildren();
+
+  if (compiling) {
+    const item = document.createElement("li");
+    item.className = "validation-ok";
+    item.textContent = "Building generated solids";
+    compileList.append(item);
+    return;
+  }
+
+  if (!total) {
+    const item = document.createElement("li");
+    item.textContent = "Add a body to build a solid preview.";
+    compileList.append(item);
+    return;
+  }
+
+  if (!compileErrors.length && resultCount) {
+    const item = document.createElement("li");
+    item.className = "validation-ok";
+    item.textContent = `${resultCount} generated solid${resultCount === 1 ? "" : "s"} ready`;
+    compileList.append(item);
+    return;
+  }
+
+  for (const error of compileErrors.slice(0, 8)) {
+    const item = document.createElement("li");
+    const code = document.createElement("span");
+    code.className = "validation-code";
+    code.textContent = error.bodyId ?? error.code;
+    const message = document.createElement("span");
+    message.textContent = error.issues?.[0]?.message ?? error.message;
+    item.append(code, message);
+    compileList.append(item);
+  }
+}
+
+function updateGeneratedPreview(project = history.current, options = {}) {
+  previewScene.updateBodies(project.bodies, compileResults, project.selectedBodyId, options);
+}
+
+function requestCadCompile(project = history.current) {
+  const signature = projectCompileSignature(project);
+
+  if (!compiling && signature === lastCompletedCompileSignature) {
+    updateGeneratedPreview(project, { fitCamera: false });
+    renderCompileStatus(project);
+    return;
+  }
+
+  if (compiling && signature === pendingCompileSignature) {
+    updateGeneratedPreview(project, { fitCamera: false });
+    renderCompileStatus(project);
+    return;
+  }
+
+  clearTimeout(compileTimer);
+
+  if (!project.bodies.length) {
+    activeCompileRequestId = null;
+    pendingCompileSignature = null;
+    lastCompletedCompileSignature = signature;
+    compiling = false;
+    compileResults = new Map();
+    compileErrors = [];
+    updateGeneratedPreview(project);
+    renderCompileStatus(project);
+    return;
+  }
+
+  compiling = true;
+  pendingCompileSignature = signature;
+  activeCompileRequestId = null;
+  renderCompileStatus(project);
+
+  compileTimer = setTimeout(() => {
+    const requestId = nextWorkerRequestId();
+    activeCompileRequestId = requestId;
+    compileRequestSignatures.set(requestId, signature);
+    cadWorker.postMessage({
+      type: "compileBodies",
+      requestId,
+      bodies: project.bodies
+    });
+  }, 180);
+}
+
+function handleCompileResult(message) {
+  if (message.requestId !== activeCompileRequestId) {
+    compileRequestSignatures.delete(message.requestId);
+    return;
+  }
+  compiling = false;
+  lastCompletedCompileSignature = compileRequestSignatures.get(message.requestId) ?? pendingCompileSignature;
+  pendingCompileSignature = null;
+  compileRequestSignatures.delete(message.requestId);
+  compileResults = new Map(message.results.map((result) => [result.bodyId, result]));
+  compileErrors = message.errors ?? [];
+  updateGeneratedPreview();
+  renderCompileStatus();
+}
+
+function handleStlExportResult(message) {
+  if (!pendingStlExports.has(message.requestId)) return;
+  pendingStlExports.delete(message.requestId);
+  exportStlButton.disabled = false;
+  downloadBlob(message.stl, message.fileName, "model/stl");
+  showStatus("STL export started");
+  renderCompileStatus();
+}
+
+function handleStlExportError(message) {
+  if (!pendingStlExports.has(message.requestId)) return;
+  pendingStlExports.delete(message.requestId);
+  exportStlButton.disabled = false;
+  showStatus(message.error?.message ?? "STL export failed", 5200);
+  renderCompileStatus();
+}
+
+cadWorker.addEventListener("message", (event) => {
+  const message = event.data ?? {};
+  if (message.type === "compileBodiesResult") handleCompileResult(message);
+  if (message.type === "exportStlResult") handleStlExportResult(message);
+  if (message.type === "exportStlError") handleStlExportError(message);
+});
+
+function templateLabel(templateId) {
+  return listPartTemplates().find((template) => template.id === templateId)?.label ?? templateId;
+}
+
+function renderTemplateOptions() {
+  templateSelect.replaceChildren(
+    ...listPartTemplates().map((template) => {
+      const option = document.createElement("option");
+      option.value = template.id;
+      option.textContent = template.label;
+      return option;
+    })
+  );
+}
+
+function renderAdvancedOptions() {
+  revolvePresetSelect.replaceChildren(
+    ...listRevolvePresets().map((preset) => {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.label;
+      return option;
+    })
+  );
+  booleanOperationSelect.replaceChildren(
+    ...BOOLEAN_OPERATIONS.map((operation) => {
+      const option = document.createElement("option");
+      option.value = operation;
+      option.textContent = operation;
+      return option;
+    })
+  );
+}
+
+function selectedProjectBody() {
+  return selectedBody(history.current);
+}
+
+function commit(nextProject, message) {
+  commitProject(history, nextProject);
+  render();
+  if (message) showStatus(message);
+}
+
+function commitSelectedBody(mutator, message = "Body updated") {
+  const body = selectedProjectBody();
+  if (!body) return;
+  commit(updateBody(history.current, body.id, mutator), message);
+}
+
+function formatNumber(value, digits = 1) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "0";
+}
+
+function createField(labelText, input) {
+  const label = document.createElement("label");
+  label.className = "parts-field";
+  const span = document.createElement("span");
+  span.textContent = labelText;
+  label.append(span, input);
+  return label;
+}
+
+function createInput({ value, type = "number", step = "1", min = null, dataset = {}, disabled = false }) {
+  const input = document.createElement("input");
+  input.type = type;
+  input.value = String(value ?? "");
+  input.disabled = disabled;
+  if (step != null) input.step = step;
+  if (min != null) input.min = min;
+  for (const [key, dataValue] of Object.entries(dataset)) {
+    input.dataset[key] = dataValue;
+  }
+  return input;
+}
+
+function createVectorFields(title, values, datasetPrefix, step = "1") {
+  const grid = document.createElement("div");
+  grid.className = "parts-field-grid";
+  const titleElement = document.createElement("span");
+  titleElement.textContent = title;
+  grid.append(titleElement);
+  for (const [index, axis] of ["X", "Y", "Z"].entries()) {
+    grid.append(
+      createField(
+        axis,
+        createInput({
+          value: formatNumber(values[index], datasetPrefix === "scale" ? 3 : 1),
+          step,
+          min: datasetPrefix === "scale" ? "0.001" : null,
+          dataset: { transformKind: datasetPrefix, axis: String(index) }
+        })
+      )
+    );
+  }
+  return grid;
+}
+
+function renderBodyList(project) {
+  bodyCount.textContent = String(project.bodies.length);
+  bodyList.replaceChildren();
+
+  if (!project.bodies.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-note";
+    empty.textContent = "Add a template body";
+    bodyList.append(empty);
+    return;
+  }
+
+  for (const body of project.bodies) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `body-row${body.id === project.selectedBodyId ? " is-selected" : ""}`;
+    row.dataset.bodyId = body.id;
+
+    const swatch = document.createElement("span");
+    swatch.className = "body-row__swatch";
+    swatch.style.background = body.color;
+
+    const name = document.createElement("span");
+    name.className = "body-row__name";
+    name.textContent = body.name;
+
+    const depth = document.createElement("span");
+    depth.className = "body-row__depth";
+    depth.textContent = sourceLabel(body);
+
+    row.append(swatch, name, depth);
+    row.addEventListener("click", () => {
+      history.current = selectBody(project, body.id);
+      render();
+      showStatus(`Selected ${body.name}`);
+    });
+    bodyList.append(row);
+  }
+}
+
+function renderBodyProperties(body) {
+  bodyProperties.replaceChildren();
+  const hasBody = Boolean(body);
+  const sketchEditable = hasBody && isSketchBody(body);
+  duplicateBodyButton.disabled = !hasBody;
+  deleteBodyButton.disabled = !hasBody;
+  addCircularHoleButton.disabled = !sketchEditable;
+  addSlottedHoleButton.disabled = !sketchEditable;
+  addLinearPatternButton.disabled = !sketchEditable;
+  addCircularPatternButton.disabled = !sketchEditable;
+  addBooleanBodyButton.disabled = history.current.bodies.length < 2;
+
+  if (!body) {
+    bodyProperties.append(emptyMessage("No body selected"));
+    return;
+  }
+
+  bodyProperties.append(
+    createField(
+      "Name",
+      createInput({ type: "text", value: body.name, step: null, dataset: { bodyProp: "name" } })
+    ),
+    createField(
+      "Color",
+      createInput({ type: "color", value: body.color, step: null, dataset: { bodyProp: "color" } })
+    ),
+    createVectorFields("Position (mm)", body.transform.position, "position", "1"),
+    createVectorFields("Scale", body.transform.scale, "scale", "0.05")
+  );
+
+  if (sketchEditable) {
+    bodyProperties.insertBefore(
+      createField(
+        "Extrude depth (Y mm)",
+        createInput({
+          value: formatNumber(body.extrudeDepthMm, 2),
+          step: "0.5",
+          min: "0.1",
+          dataset: { bodyProp: "extrudeDepthMm" }
+        })
+      ),
+      bodyProperties.children[2]
+    );
+  } else {
+    bodyProperties.append(createAdvancedBodySummary(body));
+  }
+}
+
+function createAdvancedBodySummary(body) {
+  const summary = document.createElement("div");
+  summary.className = "advanced-summary";
+  const title = document.createElement("span");
+  title.textContent = "Source";
+  const value = document.createElement("strong");
+  const kind = bodySourceKind(body);
+  if (kind === REVOLVE_KIND) {
+    value.textContent = `${body.revolve?.presetId ?? "lathe"} / ${body.revolve?.segments ?? 0} segments`;
+  } else if (kind === SPUR_GEAR_KIND) {
+    value.textContent = `${body.gear?.toothCount ?? 0} teeth / module ${body.gear?.moduleMm ?? 0}`;
+  } else if (kind === BOOLEAN_OPERATION_KIND) {
+    value.textContent = `${body.boolean?.operation ?? "boolean"} / ${(body.boolean?.operandBodyIds ?? []).join(", ")}`;
+  } else {
+    value.textContent = kind;
+  }
+  summary.append(title, value);
+  return summary;
+}
+
+function profileField(label, value, prop, scope, options = {}) {
+  return createField(
+    label,
+    createInput({
+      value: formatNumber(value, options.digits ?? 2),
+      step: options.step ?? "0.5",
+      min: options.min ?? null,
+      dataset: { profileScope: scope, profileProp: prop, ...(options.dataset ?? {}) }
+    })
+  );
+}
+
+function renderProfileFields(container, profile, scope) {
+  container.replaceChildren();
+  if (!profile) {
+    container.append(emptyMessage("Missing profile"));
+    return;
+  }
+
+  if (profile.type === "circle") {
+    container.append(
+      profileField("Center X", profile.x, "x", scope),
+      profileField("Center Z", profile.z, "z", scope),
+      profileField("Radius", profile.radius, "radius", scope, { min: "0.1" })
+    );
+    return;
+  }
+
+  if (profile.type === "roundedSlot") {
+    container.append(
+      profileField("Center X", profile.x, "x", scope),
+      profileField("Center Z", profile.z, "z", scope),
+      profileField("Length", profile.length, "length", scope, { min: "0.1" }),
+      profileField("Width", profile.width, "width", scope, { min: "0.1" })
+    );
+    return;
+  }
+
+  if (profile.type === "polyline") {
+    for (const [index, point] of profile.points.entries()) {
+      const grid = document.createElement("div");
+      grid.className = "parts-field-grid";
+      const title = document.createElement("span");
+      title.textContent = `Point ${index + 1}`;
+      grid.append(
+        title,
+        profileField("X", point[0], "point", scope, { dataset: { pointIndex: String(index), pointAxis: "0" } }),
+        profileField("Z", point[1], "point", scope, { dataset: { pointIndex: String(index), pointAxis: "1" } })
+      );
+      container.append(grid);
+    }
+    return;
+  }
+
+  container.append(
+    profileField("Center X", profile.x, "x", scope),
+    profileField("Center Z", profile.z, "z", scope),
+    profileField("Width", profile.width, "width", scope, { min: "0.1" }),
+    profileField("Height", profile.height, "height", scope, { min: "0.1" }),
+    profileField("Corner radius", profile.cornerRadius, "cornerRadius", scope, { min: "0" })
+  );
+}
+
+function renderCutProfiles(body) {
+  cutProfileFields.replaceChildren();
+  if (!body) {
+    cutProfileFields.append(emptyMessage("No body selected"));
+    return;
+  }
+
+  if (!body.sketch.cutProfiles.length) {
+    cutProfileFields.append(emptyMessage("No holes or cuts"));
+    return;
+  }
+
+  for (const [index, profile] of body.sketch.cutProfiles.entries()) {
+    const card = document.createElement("section");
+    card.className = "cut-card";
+
+    const header = document.createElement("div");
+    header.className = "cut-card__header";
+    const title = document.createElement("strong");
+    title.textContent = `${profile.id} / ${profile.type}`;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "parts-icon-button parts-icon-button--danger";
+    remove.setAttribute("aria-label", `Remove ${profile.id}`);
+    remove.dataset.removeCutIndex = String(index);
+    const removeIcon = document.createElement("span");
+    removeIcon.className = "parts-icon parts-icon--delete";
+    removeIcon.setAttribute("aria-hidden", "true");
+    remove.append(removeIcon);
+    header.append(title, remove);
+
+    const fields = document.createElement("div");
+    fields.className = "inspector-stack";
+    renderProfileFields(fields, profile, `cut:${index}`);
+    card.append(header, fields);
+    cutProfileFields.append(card);
+  }
+}
+
+function emptyMessage(message) {
+  const element = document.createElement("p");
+  element.className = "empty-note";
+  element.textContent = message;
+  return element;
+}
+
+function createMapper(bounds) {
+  const width = Math.max(bounds.maxX - bounds.minX, 1);
+  const height = Math.max(bounds.maxZ - bounds.minZ, 1);
+  const svgWidth = 940;
+  const svgHeight = 560;
+  const padding = 46;
+  const scale = Math.min((svgWidth - padding * 2) / width, (svgHeight - padding * 2) / height);
+  const offsetX = (svgWidth - width * scale) / 2;
+  const offsetY = (svgHeight - height * scale) / 2;
+
+  return {
+    svgWidth,
+    svgHeight,
+    scale,
+    x(value) {
+      return offsetX + (value - bounds.minX) * scale;
+    },
+    z(value) {
+      return svgHeight - (offsetY + (value - bounds.minZ) * scale);
+    }
+  };
+}
+
+function roundedRectPath(x0, y0, x1, y1, radius) {
+  const r = Math.max(0, Math.min(radius, Math.abs(x1 - x0) / 2, Math.abs(y1 - y0) / 2));
+  if (r <= 0.01) return `M ${x0} ${y0} L ${x1} ${y0} L ${x1} ${y1} L ${x0} ${y1} Z`;
+  return [
+    `M ${x0 + r} ${y0}`,
+    `L ${x1 - r} ${y0}`,
+    `Q ${x1} ${y0} ${x1} ${y0 + r}`,
+    `L ${x1} ${y1 - r}`,
+    `Q ${x1} ${y1} ${x1 - r} ${y1}`,
+    `L ${x0 + r} ${y1}`,
+    `Q ${x0} ${y1} ${x0} ${y1 - r}`,
+    `L ${x0} ${y0 + r}`,
+    `Q ${x0} ${y0} ${x0 + r} ${y0}`,
+    "Z"
+  ].join(" ");
+}
+
+function profileToSvg(profile, mapper, className, fill) {
+  const strokeProps = `class="${className}" fill="${fill}" vector-effect="non-scaling-stroke"`;
+  if (profile.type === "circle") {
+    return `<circle ${strokeProps} cx="${mapper.x(profile.x)}" cy="${mapper.z(profile.z)}" r="${profile.radius * mapper.scale}" />`;
+  }
+
+  if (profile.type === "roundedSlot") {
+    const radius = (profile.width / 2) * mapper.scale;
+    const halfStraight = Math.max(0, (profile.length - profile.width) / 2);
+    const left = mapper.x(profile.x - halfStraight);
+    const right = mapper.x(profile.x + halfStraight);
+    const top = mapper.z(profile.z + profile.width / 2);
+    const bottom = mapper.z(profile.z - profile.width / 2);
+    const path = [
+      `M ${left} ${top}`,
+      `L ${right} ${top}`,
+      `A ${radius} ${radius} 0 0 1 ${right} ${bottom}`,
+      `L ${left} ${bottom}`,
+      `A ${radius} ${radius} 0 0 1 ${left} ${top}`,
+      "Z"
+    ].join(" ");
+    return `<path ${strokeProps} d="${path}" />`;
+  }
+
+  if (profile.type === "polyline") {
+    const points = profile.points.map((point) => `${mapper.x(point[0])},${mapper.z(point[1])}`).join(" ");
+    return `<polygon ${strokeProps} points="${points}" />`;
+  }
+
+  const x0 = mapper.x(profile.x - profile.width / 2);
+  const x1 = mapper.x(profile.x + profile.width / 2);
+  const y0 = mapper.z(profile.z + profile.height / 2);
+  const y1 = mapper.z(profile.z - profile.height / 2);
+  const path = roundedRectPath(x0, y0, x1, y1, (profile.cornerRadius ?? 0) * mapper.scale);
+  return `<path ${strokeProps} d="${path}" />`;
+}
+
+function gridStepForBounds(bounds) {
+  const span = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ, 1);
+  const rawStep = span / 28;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  for (const factor of [1, 2, 5, 10]) {
+    if (rawStep <= magnitude * factor) return magnitude * factor;
+  }
+  return magnitude * 10;
+}
+
+function gridSvg(bounds, mapper) {
+  const lines = [];
+  const step = gridStepForBounds(bounds);
+  const startX = Math.floor(bounds.minX / step) * step;
+  const endX = Math.ceil(bounds.maxX / step) * step;
+  const startZ = Math.floor(bounds.minZ / step) * step;
+  const endZ = Math.ceil(bounds.maxZ / step) * step;
+
+  for (let x = startX; x <= endX; x += step) {
+    const className = Math.abs(x) < 0.001 ? "sketch-axis-line" : "sketch-grid-line";
+    lines.push(`<line class="${className}" x1="${mapper.x(x)}" y1="0" x2="${mapper.x(x)}" y2="${mapper.svgHeight}" vector-effect="non-scaling-stroke" />`);
+  }
+  for (let z = startZ; z <= endZ; z += step) {
+    const className = Math.abs(z) < 0.001 ? "sketch-axis-line" : "sketch-grid-line";
+    lines.push(`<line class="${className}" x1="0" y1="${mapper.z(z)}" x2="${mapper.svgWidth}" y2="${mapper.z(z)}" vector-effect="non-scaling-stroke" />`);
+  }
+  return lines.join("");
+}
+
+function renderSketchPreview(body) {
+  sketchPreview.replaceChildren();
+  if (body && !isSketchBody(body)) {
+    const element = document.createElement("p");
+    element.className = "sketch-empty";
+    element.textContent = "Advanced body";
+    sketchPreview.append(element);
+    return;
+  }
+
+  if (!body?.sketch?.outerProfile) {
+    const element = document.createElement("p");
+    element.className = "sketch-empty";
+    element.textContent = "Add a template body";
+    sketchPreview.append(element);
+    return;
+  }
+
+  const profiles = [body.sketch.outerProfile, ...body.sketch.cutProfiles];
+  const rawBounds = combinedProfileBounds(profiles);
+  const margin = 16;
+  const bounds = {
+    minX: rawBounds.minX - margin,
+    maxX: rawBounds.maxX + margin,
+    minZ: rawBounds.minZ - margin,
+    maxZ: rawBounds.maxZ + margin
+  };
+  const mapper = createMapper(bounds);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${mapper.svgWidth} ${mapper.svgHeight}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${body.name} sketch preview`);
+  svg.innerHTML = `
+    <rect width="${mapper.svgWidth}" height="${mapper.svgHeight}" fill="#f8fafc" />
+    ${gridSvg(bounds, mapper)}
+    ${profileToSvg(body.sketch.outerProfile, mapper, "sketch-outer", `${body.color}33`)}
+    ${body.sketch.cutProfiles.map((profile) => profileToSvg(profile, mapper, "sketch-cut", "#ffffff")).join("")}
+  `;
+  sketchPreview.append(svg);
+}
+
+function renderValidation(project) {
+  const issues = validatePartProject(project);
+  validationCount.textContent = issues.length ? `${issues.length}` : "OK";
+  validationList.replaceChildren();
+
+  if (!issues.length) {
+    const ok = document.createElement("li");
+    ok.className = "validation-ok";
+    ok.textContent = "Project validates";
+    validationList.append(ok);
+    return;
+  }
+
+  for (const item of issues.slice(0, 12)) {
+    const row = document.createElement("li");
+    const code = document.createElement("span");
+    code.className = "validation-code";
+    code.textContent = item.code;
+    const message = document.createElement("span");
+    message.textContent = item.message;
+    row.append(code, message);
+    validationList.append(row);
+  }
+}
+
+function render() {
+  history.current = normalizePartProject(history.current);
+  const project = history.current;
+  const body = selectedProjectBody();
+
+  projectUpdatedAt.textContent = project.updatedAt ? new Date(project.updatedAt).toLocaleString() : "-";
+  selectedBodySummary.textContent = body
+    ? `${body.name} / ${isSketchBody(body) ? (body.sketch.outerProfile?.type ?? "no profile") : sourceLabel(body)}`
+    : "No body selected";
+
+  undoButton.disabled = history.undoStack.length === 0;
+  redoButton.disabled = history.redoStack.length === 0;
+  saveProjectButton.disabled = false;
+
+  renderBodyList(project);
+  renderBodyProperties(body);
+  if (body && !isSketchBody(body)) {
+    outerProfileFields.replaceChildren(createAdvancedBodySummary(body));
+  } else {
+    renderProfileFields(outerProfileFields, body?.sketch?.outerProfile ?? null, "outer");
+  }
+  renderCutProfiles(body);
+  renderSketchPreview(body);
+  renderValidation(project);
+  previewScene.setSelectedBodyId(project.selectedBodyId);
+  requestCadCompile(project);
+}
+
+function updateProfileFromInput(input) {
+  const body = selectedProjectBody();
+  if (!body) return;
+
+  const scope = input.dataset.profileScope;
+  const prop = input.dataset.profileProp;
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return;
+
+  commitSelectedBody((draft) => {
+    const profile =
+      scope === "outer"
+        ? draft.sketch.outerProfile
+        : draft.sketch.cutProfiles[Number(scope.split(":")[1])];
+    if (!profile) return draft;
+
+    if (prop === "point") {
+      const point = profile.points?.[Number(input.dataset.pointIndex)];
+      if (point) point[Number(input.dataset.pointAxis)] = value;
+    } else {
+      profile[prop] = value;
+    }
+    return draft;
+  });
+}
+
+function handleBodyPropertyInput(input) {
+  const prop = input.dataset.bodyProp;
+  commitSelectedBody((draft) => {
+    if (prop === "name") draft.name = input.value.trim() || draft.name;
+    if (prop === "color") draft.color = input.value;
+    if (prop === "extrudeDepthMm") draft.extrudeDepthMm = Number(input.value);
+    return draft;
+  });
+}
+
+function handleTransformInput(input) {
+  const kind = input.dataset.transformKind;
+  const axis = Number(input.dataset.axis);
+  const value = Number(input.value);
+  if (!Number.isFinite(value)) return;
+
+  commitSelectedBody((draft) => {
+    draft.transform[kind][axis] = value;
+    return draft;
+  });
+}
+
+function handleInspectorChange(event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  if (input.dataset.bodyProp) handleBodyPropertyInput(input);
+  if (input.dataset.transformKind) handleTransformInput(input);
+  if (input.dataset.profileScope) updateProfileFromInput(input);
+}
+
+function createCutProfile(type) {
+  const body = selectedProjectBody();
+  if (!isSketchBody(body) || !body?.sketch?.outerProfile) return null;
+  const [centerX, centerZ] = profileCenter(body.sketch.outerProfile);
+  const size = profileSize(body.sketch.outerProfile);
+  const existingIds = new Set([
+    body.sketch.outerProfile.id,
+    ...body.sketch.cutProfiles.map((profile) => profile.id)
+  ]);
+
+  if (type === "slot") {
+    return createSlottedHole({
+      id: uniquePartId("slot_hole", existingIds, "slot_hole"),
+      x: centerX,
+      z: centerZ,
+      length: Math.max(12, Math.min(size.width * 0.22, 28)),
+      width: Math.max(4, Math.min(size.height * 0.12, 8))
+    });
+  }
+
+  return createCircularHole({
+    id: uniquePartId("hole", existingIds, "hole"),
+    x: centerX,
+    z: centerZ,
+    radius: Math.max(2, Math.min(size.width, size.height) * 0.06)
+  });
+}
+
+function selectedProfileIds(body) {
+  return new Set([
+    body.sketch.outerProfile.id,
+    ...body.sketch.cutProfiles.map((profile) => profile.id)
+  ]);
+}
+
+function addLinearHolePattern() {
+  const body = selectedProjectBody();
+  if (!isSketchBody(body) || !body?.sketch?.outerProfile) return;
+  const [centerX, centerZ] = profileCenter(body.sketch.outerProfile);
+  const size = profileSize(body.sketch.outerProfile);
+  const hole = createCircularHole({
+    id: "linear_hole",
+    radius: Math.max(1.6, Math.min(size.width, size.height) * 0.04)
+  });
+  const holes = createLinearPatternProfiles(hole, {
+    count: 5,
+    spacingX: Math.max(8, size.width * 0.16),
+    spacingZ: 0,
+    originX: centerX,
+    originZ: centerZ,
+    idPrefix: "linear_hole",
+    existingIds: selectedProfileIds(body)
+  });
+
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.push(...holes);
+    return draft;
+  }, "Linear hole pattern added");
+}
+
+function addCircularHolePattern() {
+  const body = selectedProjectBody();
+  if (!isSketchBody(body) || !body?.sketch?.outerProfile) return;
+  const [centerX, centerZ] = profileCenter(body.sketch.outerProfile);
+  const size = profileSize(body.sketch.outerProfile);
+  const radius = Math.max(8, Math.min(size.width, size.height) * 0.32);
+  const hole = createCircularHole({
+    id: "bolt_hole",
+    radius: Math.max(1.4, Math.min(size.width, size.height) * 0.035)
+  });
+  const holes = createCircularPatternProfiles(hole, {
+    count: 6,
+    radius,
+    centerX,
+    centerZ,
+    idPrefix: "bolt_hole",
+    existingIds: selectedProfileIds(body)
+  });
+
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.push(...holes);
+    return draft;
+  }, "Bolt circle added");
+}
+
+function addRevolvedBody() {
+  const existingIds = new Set(history.current.bodies.map((body) => body.id));
+  const body = createRevolveBodyFromPreset(revolvePresetSelect.value, {}, existingIds);
+  commit(addBody(history.current, body), `${body.name} added`);
+}
+
+function addSpurGear() {
+  const existingIds = new Set(history.current.bodies.map((body) => body.id));
+  const body = createSpurGearBody(
+    {
+      gear: {
+        toothCount: 24,
+        moduleMm: 2,
+        pressureAngleDeg: 20,
+        boreDiameterMm: 6,
+        thicknessMm: 6
+      },
+      color: "#d97706"
+    },
+    existingIds
+  );
+  commit(addBody(history.current, body), "Spur gear added");
+}
+
+function booleanOperandBodies() {
+  const selected = selectedProjectBody();
+  const others = history.current.bodies.filter((body) => body.id !== selected?.id);
+  if (selected) return [selected, ...others].slice(0, 2);
+  return history.current.bodies.slice(0, 2);
+}
+
+function addBooleanBody() {
+  const operands = booleanOperandBodies();
+  if (operands.length < 2) {
+    showStatus("Create at least two bodies before adding a boolean body.", 4200);
+    return;
+  }
+
+  const existingIds = new Set(history.current.bodies.map((body) => body.id));
+  const operation = booleanOperationSelect.value;
+  const body = createBooleanOperationBody(
+    operation,
+    operands,
+    {
+      name: `${operation} ${operands[0].name} ${operands[1].name}`,
+      color: "#14b8a6"
+    },
+    existingIds
+  );
+  commit(addBody(history.current, body), `${operation} body added`);
+}
+
+function exportSelectedStl() {
+  const body = selectedProjectBody();
+  if (!body || !compileResults.has(body.id)) {
+    showStatus("Build a generated body before exporting STL.", 4200);
+    return;
+  }
+
+  const requestId = nextWorkerRequestId();
+  pendingStlExports.set(requestId, body.id);
+  exportStlButton.disabled = true;
+  showStatus("Preparing STL...", 8000);
+  cadWorker.postMessage({ type: "exportStl", requestId, body, bodies: history.current.bodies });
+}
+
+async function sendGeneratedAssembly() {
+  const visibleBodyIds = new Set(previewScene.getVisibleBodyIds());
+  const bodies = history.current.bodies.filter(
+    (body) => visibleBodyIds.has(body.id) && compileResults.has(body.id) && validateBody(body).length === 0
+  );
+
+  if (!bodies.length) {
+    showStatus("Build at least one valid generated body before handoff.", 5200);
+    return;
+  }
+
+  sendAssemblyButton.disabled = true;
+  showStatus("Preparing Assembly Studio handoff...", 10000);
+
+  try {
+    const snapshotCompileResults = new Map(compileResults);
+    const matrixWorldById = previewScene.getMatrixWorldById();
+    const glb = await previewScene.exportVisibleGlb();
+    const snapshot = createGeneratedAssemblySnapshot({
+      glb,
+      bodies,
+      compileResults: snapshotCompileResults,
+      matrixWorldById
+    });
+    await writeWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, snapshot);
+    window.location.href = `${import.meta.env.BASE_URL}?fromParts=1`;
+  } catch (error) {
+    console.error("Part Studio handoff failed", error);
+    sendAssemblyButton.disabled = false;
+    renderCompileStatus();
+    showStatus("Unable to send generated parts to Assembly Studio.", 5200);
+  }
+}
+
+addTemplateButton.addEventListener("click", () => {
+  const existingIds = new Set(history.current.bodies.map((body) => body.id));
+  const templateId = templateSelect.value;
+  const body = createBodyFromTemplate(templateId, { existingIds });
+  commit(addBody(history.current, body), `${templateLabel(templateId)} added`);
+});
+
+addLinearPatternButton.addEventListener("click", addLinearHolePattern);
+addCircularPatternButton.addEventListener("click", addCircularHolePattern);
+addRevolveBodyButton.addEventListener("click", addRevolvedBody);
+addSpurGearButton.addEventListener("click", addSpurGear);
+addBooleanBodyButton.addEventListener("click", addBooleanBody);
+
+newProjectButton.addEventListener("click", () => {
+  resetProjectHistory(history);
+  render();
+  showStatus("New PartProject");
+});
+
+saveProjectButton.addEventListener("click", () => {
+  downloadBlob(serializePartProject(history.current), "robotic-part-project.json", "application/json");
+  showStatus("PartProject JSON saved");
+});
+
+openProjectButton.addEventListener("click", () => projectFileInput.click());
+
+projectFileInput.addEventListener("change", () => {
+  const file = projectFileInput.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    try {
+      resetProjectHistory(history, parsePartProjectJson(reader.result));
+      render();
+      showStatus("PartProject JSON opened");
+    } catch (error) {
+      showStatus(error.message, 5200);
+    } finally {
+      projectFileInput.value = "";
+    }
+  });
+  reader.addEventListener("error", () => {
+    showStatus("PartProject JSON could not be read", 5200);
+    projectFileInput.value = "";
+  });
+  reader.readAsText(file);
+});
+
+undoButton.addEventListener("click", () => {
+  undoProject(history);
+  render();
+});
+
+redoButton.addEventListener("click", () => {
+  redoProject(history);
+  render();
+});
+
+exportStlButton.addEventListener("click", exportSelectedStl);
+sendAssemblyButton.addEventListener("click", sendGeneratedAssembly);
+
+duplicateBodyButton.addEventListener("click", () => {
+  const body = selectedProjectBody();
+  if (!body) return;
+  commit(duplicateBody(history.current, body.id), "Body duplicated");
+});
+
+deleteBodyButton.addEventListener("click", () => {
+  const body = selectedProjectBody();
+  if (!body) return;
+  commit(deleteBody(history.current, body.id), "Body deleted");
+});
+
+addCircularHoleButton.addEventListener("click", () => {
+  const cut = createCutProfile("circle");
+  if (!cut) return;
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.push(cut);
+    return draft;
+  }, "Circular hole added");
+});
+
+addSlottedHoleButton.addEventListener("click", () => {
+  const cut = createCutProfile("slot");
+  if (!cut) return;
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.push(cut);
+    return draft;
+  }, "Slotted hole added");
+});
+
+bodyProperties.addEventListener("change", handleInspectorChange);
+outerProfileFields.addEventListener("change", handleInspectorChange);
+cutProfileFields.addEventListener("change", handleInspectorChange);
+cutProfileFields.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-cut-index]");
+  if (!button) return;
+  const index = Number(button.dataset.removeCutIndex);
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.splice(index, 1);
+    return draft;
+  }, "Cut removed");
+});
+
+renderTemplateOptions();
+renderAdvancedOptions();
+render();

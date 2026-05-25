@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robotic Part Studio</title>
+    <meta
+      name="description"
+      content="Create simple robotic mechanical parts as millimeter sketches for the STL Assembly Studio."
+    />
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="parts-app">
+      <header class="parts-topbar" aria-label="Part Studio command bar">
+        <div class="parts-brand">
+          <span class="parts-brand__mark" aria-hidden="true"></span>
+          <span class="parts-brand__name">Robotic Part Studio</span>
+        </div>
+        <nav class="parts-toolbar" aria-label="Part Studio tools">
+          <button id="new-project" class="parts-button" type="button">New</button>
+          <button id="save-project" class="parts-button" type="button">Save JSON</button>
+          <button id="open-project" class="parts-button" type="button">Open JSON</button>
+          <input id="project-file-input" type="file" accept="application/json,.json" hidden />
+          <span class="parts-toolbar__divider" aria-hidden="true"></span>
+          <button id="undo-project" class="parts-button" type="button" disabled>Undo</button>
+          <button id="redo-project" class="parts-button" type="button" disabled>Redo</button>
+          <span class="parts-toolbar__divider" aria-hidden="true"></span>
+          <button id="export-stl" class="parts-button" type="button" disabled>Export STL</button>
+          <button id="send-assembly" class="parts-button" type="button" disabled>Send Assembly</button>
+        </nav>
+        <a class="parts-link-button" href="./">Assembly</a>
+      </header>
+
+      <aside class="parts-sidebar" aria-label="Templates and bodies">
+        <section class="parts-panel-section" aria-labelledby="templates-heading">
+          <h1 id="templates-heading">Templates</h1>
+          <div class="parts-field">
+            <label for="template-select">Starter</label>
+            <select id="template-select"></select>
+          </div>
+          <button id="add-template" class="parts-primary-button" type="button">Add Body</button>
+        </section>
+
+        <section class="parts-panel-section parts-panel-section--advanced" aria-labelledby="advanced-heading">
+          <h2 id="advanced-heading">Advanced</h2>
+          <div class="advanced-button-grid">
+            <button id="add-linear-pattern" class="parts-button parts-button--light" type="button" disabled>Linear Holes</button>
+            <button id="add-circular-pattern" class="parts-button parts-button--light" type="button" disabled>Bolt Circle</button>
+          </div>
+          <div class="parts-field">
+            <label for="revolve-preset-select">Lathe body</label>
+            <select id="revolve-preset-select"></select>
+          </div>
+          <button id="add-revolve-body" class="parts-button parts-button--light" type="button">Add Lathe Body</button>
+          <button id="add-spur-gear" class="parts-button parts-button--light" type="button">Add Spur Gear</button>
+          <div class="parts-field">
+            <label for="boolean-operation-select">Boolean</label>
+            <select id="boolean-operation-select"></select>
+          </div>
+          <button id="add-boolean-body" class="parts-button parts-button--light" type="button" disabled>Create Boolean Body</button>
+        </section>
+
+        <section class="parts-panel-section parts-panel-section--fill" aria-labelledby="bodies-heading">
+          <div class="parts-section-row">
+            <h2 id="bodies-heading">Bodies</h2>
+            <output id="body-count">0</output>
+          </div>
+          <div id="body-list" class="body-list" aria-live="polite"></div>
+        </section>
+      </aside>
+
+      <main class="parts-stage" aria-label="Sketch and generated part previews">
+        <div class="preview-layout">
+          <section class="sketch-card" aria-labelledby="sketch-heading">
+            <div class="sketch-card__header">
+              <div>
+                <h2 id="sketch-heading">X/Z Sketch</h2>
+                <p id="selected-body-summary">No body selected</p>
+              </div>
+              <output id="project-updated-at">-</output>
+            </div>
+            <div id="sketch-preview" class="sketch-preview"></div>
+          </section>
+          <section class="sketch-card model-card" aria-labelledby="model-heading">
+            <div class="sketch-card__header">
+              <div>
+                <h2 id="model-heading">3D Preview</h2>
+                <p>Generated solids</p>
+              </div>
+              <output id="compile-count">Idle</output>
+            </div>
+            <div id="model-preview" class="model-preview"></div>
+          </section>
+        </div>
+        <section class="validation-panel" aria-label="Validation">
+          <div class="parts-section-row">
+            <h2>Validation</h2>
+            <output id="validation-count">0</output>
+          </div>
+          <ul id="validation-list" class="validation-list"></ul>
+          <div class="parts-section-row">
+            <h2>Build</h2>
+            <output id="build-count">Idle</output>
+          </div>
+          <ul id="compile-list" class="validation-list"></ul>
+        </section>
+      </main>
+
+      <aside class="parts-inspector" aria-label="Selected body inspector">
+        <section class="parts-panel-section" aria-labelledby="body-properties-heading">
+          <div class="parts-section-row">
+            <h2 id="body-properties-heading">Body</h2>
+            <div class="inspector-actions">
+              <button id="duplicate-body" class="parts-icon-button" type="button" aria-label="Duplicate selected body" disabled>
+                <span class="parts-icon parts-icon--duplicate" aria-hidden="true"></span>
+              </button>
+              <button id="delete-body" class="parts-icon-button parts-icon-button--danger" type="button" aria-label="Delete selected body" disabled>
+                <span class="parts-icon parts-icon--delete" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+          <div id="body-properties" class="inspector-stack"></div>
+        </section>
+
+        <section class="parts-panel-section" aria-labelledby="profile-heading">
+          <h2 id="profile-heading">Outer Profile</h2>
+          <div id="outer-profile-fields" class="inspector-stack"></div>
+        </section>
+
+        <section class="parts-panel-section parts-panel-section--fill" aria-labelledby="cuts-heading">
+          <div class="parts-section-row">
+            <h2 id="cuts-heading">Holes / Cuts</h2>
+            <div class="inspector-actions">
+              <button id="add-circular-hole" class="parts-icon-button" type="button" aria-label="Add circular hole" disabled>
+                <span class="parts-icon parts-icon--circle" aria-hidden="true"></span>
+              </button>
+              <button id="add-slotted-hole" class="parts-icon-button" type="button" aria-label="Add slotted hole" disabled>
+                <span class="parts-icon parts-icon--slot" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+          <div id="cut-profile-fields" class="cut-list"></div>
+        </section>
+      </aside>
+
+      <div id="part-status" class="part-status" role="status" hidden></div>
+    </div>
+    <script type="module" src="/src/parts.js"></script>
+  </body>
+</html>

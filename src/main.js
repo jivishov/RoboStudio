@@ -1,6 +1,7 @@
 import "./styles.css";
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
@@ -25,7 +26,12 @@ import {
   serializePose,
   setPartOffsetTransform
 } from "./studio/poseState.js";
-import { CURRENT_SNAPSHOT_KEY, SNAPSHOT_STORE_NAME, writeWorkspaceValue } from "./workspaceDb.js";
+import {
+  generatedSnapshotParts,
+  isPartsHandoffRequested,
+  isValidGeneratedAssemblySnapshot
+} from "./studio/partsHandoff.js";
+import { CURRENT_SNAPSHOT_KEY, SNAPSHOT_STORE_NAME, readWorkspaceValue, writeWorkspaceValue } from "./workspaceDb.js";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 
@@ -169,6 +175,7 @@ let layoutDirty = false;
 let gridVisible = true;
 
 const loader = new STLLoader();
+const gltfLoader = new GLTFLoader();
 const IMPORT_COLORS = ["#2563eb", "#0f9f6e", "#b45309", "#7c3aed", "#c026d3", "#0891b2"];
 const STUDIO_LAYOUT_VERSION = 2;
 
@@ -240,7 +247,7 @@ function markDirty(message = null) {
 function updateWorkspaceSummary() {
   const importedCount = parts.filter((part) => part.userData.type === "imported").length;
   const sampleCount = parts.filter((part) => part.userData.type === "source").length;
-  const generatedCount = parts.filter((part) => part.userData.type === "inferred").length;
+  const generatedCount = parts.filter((part) => ["generated", "inferred"].includes(part.userData.type)).length;
   const segments = [];
 
   if (importedCount) segments.push(`${importedCount} imported`);
@@ -269,6 +276,78 @@ function normalizeImportedGeometry(geometry) {
 
 function arrayBufferToGeometry(buffer) {
   return normalizeImportedGeometry(loader.parse(buffer));
+}
+
+function readCurrentAssemblySnapshot() {
+  return readWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY);
+}
+
+function parseGlbSnapshot(glb) {
+  return new Promise((resolve, reject) => {
+    gltfLoader.parse(glb, "", resolve, reject);
+  });
+}
+
+function normalizeGeneratedSnapshotMesh(mesh, metadata) {
+  mesh.name = metadata?.id ?? mesh.name;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.geometry?.computeBoundingBox?.();
+  mesh.geometry?.computeVertexNormals?.();
+  if (mesh.material) {
+    for (const material of partMaterials(mesh)) {
+      material.side = THREE.DoubleSide;
+      material.needsUpdate = true;
+    }
+  } else {
+    mesh.material = createMaterial("#2563eb", true);
+  }
+  mesh.userData = {
+    ...mesh.userData,
+    id: metadata?.id ?? mesh.userData.id ?? sanitizeId(mesh.name, "generated_part"),
+    label: metadata?.label ?? mesh.userData.label ?? mesh.name,
+    file: null,
+    type: "generated",
+    source: "part-studio",
+    inferredReason: "Generated in Robotic Part Studio.",
+    jointNotes: null
+  };
+}
+
+async function createGeneratedAssemblyFromSnapshot(snapshot) {
+  if (!isValidGeneratedAssemblySnapshot(snapshot)) {
+    throw new Error("Part Studio snapshot is missing generated GLB data.");
+  }
+
+  const gltf = await parseGlbSnapshot(snapshot.glb);
+  const group = gltf.scene ?? new THREE.Group();
+  const generatedParts = generatedSnapshotParts(snapshot);
+  const snapshotParts = new Map(generatedParts.filter((part) => part?.id).map((part) => [part.id, part]));
+  const meshes = [];
+  group.traverse((object) => {
+    if (object.isMesh) meshes.push(object);
+  });
+  if (!meshes.length) {
+    throw new Error("Part Studio snapshot GLB did not contain generated meshes.");
+  }
+
+  for (const [index, mesh] of meshes.entries()) {
+    const metadata =
+      snapshotParts.get(mesh.userData?.id) ??
+      snapshotParts.get(mesh.name) ??
+      generatedParts[index] ??
+      null;
+    normalizeGeneratedSnapshotMesh(mesh, metadata);
+  }
+
+  group.name = "part_studio_generated_assembly";
+  group.userData = {
+    sourceStlCount: 0,
+    generatedFrom: "part-studio",
+    assemblyType: "generated",
+    manifest: meshes.map((mesh) => mesh.userData)
+  };
+  return group;
 }
 
 function createImportedMesh(geometry, fileName, id, label) {
@@ -424,12 +503,15 @@ function updateStageStatus() {
   if (stageWorkspaceMode) {
     const importedCount = parts.filter((part) => part.userData.type === "imported").length;
     const sourceCount = parts.filter((part) => part.userData.type === "source").length;
+    const generatedCount = parts.filter((part) => part.userData.type === "generated").length;
     stageWorkspaceMode.textContent = parts.length
       ? importedCount && sourceCount
         ? "Mixed STL assembly"
         : importedCount
           ? "Imported STL assembly"
-          : "Sample assembly"
+          : generatedCount
+            ? "Generated part assembly"
+            : "Sample assembly"
       : "Empty workspace";
   }
   if (stagePoseStatus) stagePoseStatus.textContent = layoutDirty ? "unsaved changes" : "saved";
@@ -469,7 +551,7 @@ function buildPartsList() {
     {
       key: "inferred",
       label: "Generated parts",
-      parts: parts.filter((part) => part.userData.type === "inferred")
+      parts: parts.filter((part) => ["generated", "inferred"].includes(part.userData.type))
     }
   ];
 
@@ -523,7 +605,7 @@ function buildPartsList() {
       visibility.append(input, eye);
 
       const dot = document.createElement("span");
-      dot.className = `part-dot${part.userData.type === "inferred" ? " part-dot--inferred" : ""}`;
+      dot.className = `part-dot${["generated", "inferred"].includes(part.userData.type) ? " part-dot--inferred" : ""}`;
 
       const name = document.createElement("span");
       name.className = "part-row__name";
@@ -1444,7 +1526,19 @@ async function init() {
     loading.textContent = "Loading STL studio...";
     buildJointSelect();
     let loadedSample = false;
-    if (import.meta.env.DEV) {
+    let loadedGenerated = false;
+    let startupStatus = null;
+    if (isPartsHandoffRequested(window.location.search)) {
+      try {
+        assemblyGroup = await createGeneratedAssemblyFromSnapshot(await readCurrentAssemblySnapshot());
+        loadedGenerated = true;
+        startupStatus = "Loaded generated parts from Part Studio";
+      } catch (error) {
+        console.warn("Part Studio handoff snapshot is unavailable; falling back to sample arm.", error);
+        startupStatus = "Part Studio handoff unavailable; loaded fallback workspace";
+      }
+    }
+    if (!assemblyGroup && import.meta.env.DEV) {
       try {
         assemblyGroup = await createRoboticArmAssembly(loadStlGeometry);
         assemblyGroup.userData.referenceUrl = SOURCE_REFERENCE_URL;
@@ -1471,7 +1565,13 @@ async function init() {
     updateAllControls();
     if (parts.length) fitCameraToObject(assemblyGroup);
     loading.hidden = true;
-    if (!loadedSample) showStatus("Import STL files to begin.", 4200);
+    if (loadedGenerated) {
+      showStatus(startupStatus, 4200);
+    } else if (startupStatus) {
+      showStatus(startupStatus, 5200);
+    } else if (!loadedSample) {
+      showStatus("Import STL files to begin.", 4200);
+    }
   } catch (error) {
     console.error(error);
     loading.textContent = "Unable to load the robotic arm studio.";

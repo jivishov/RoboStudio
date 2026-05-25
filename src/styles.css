@@ -49,6 +49,10 @@ button {
   cursor: pointer;
 }
 
+a.toolbar-button {
+  text-decoration: none;
+}
+
 #app {
   display: grid;
   grid-template-areas:

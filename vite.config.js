@@ -28,7 +28,8 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           main: resolve(__dirname, "index.html"),
-          physics: resolve(__dirname, "physics.html")
+          physics: resolve(__dirname, "physics.html"),
+          parts: resolve(__dirname, "parts.html")
         }
       }
     },
