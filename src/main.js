@@ -172,6 +172,17 @@ const loader = new STLLoader();
 const IMPORT_COLORS = ["#2563eb", "#0f9f6e", "#b45309", "#7c3aed", "#c026d3", "#0891b2"];
 const STUDIO_LAYOUT_VERSION = 2;
 
+function createEmptyAssembly() {
+  const group = new THREE.Group();
+  group.name = "manual_stl_workspace";
+  group.userData = {
+    sourceStlCount: 0,
+    generatedFrom: null,
+    assemblyType: "manual"
+  };
+  return group;
+}
+
 function deg(value) {
   return (value * Math.PI) / 180;
 }
@@ -412,7 +423,14 @@ function updateStageStatus() {
   if (stagePartCount) stagePartCount.textContent = `${parts.filter((part) => part.visible).length}/${parts.length} visible`;
   if (stageWorkspaceMode) {
     const importedCount = parts.filter((part) => part.userData.type === "imported").length;
-    stageWorkspaceMode.textContent = importedCount ? "Mixed STL assembly" : "Sample assembly";
+    const sourceCount = parts.filter((part) => part.userData.type === "source").length;
+    stageWorkspaceMode.textContent = parts.length
+      ? importedCount && sourceCount
+        ? "Mixed STL assembly"
+        : importedCount
+          ? "Imported STL assembly"
+          : "Sample assembly"
+      : "Empty workspace";
   }
   if (stagePoseStatus) stagePoseStatus.textContent = layoutDirty ? "unsaved changes" : "saved";
 }
@@ -528,6 +546,13 @@ function buildPartsList() {
     }
 
     partsList.append(section);
+  }
+
+  if (!partRowsById.size) {
+    const empty = document.createElement("p");
+    empty.className = "parts-empty";
+    empty.textContent = query ? "No matching parts" : "Import STL files to begin.";
+    partsList.append(empty);
   }
 }
 
@@ -1418,8 +1443,20 @@ async function init() {
   try {
     loading.textContent = "Loading STL studio...";
     buildJointSelect();
-    assemblyGroup = await createRoboticArmAssembly(loadStlGeometry);
-    assemblyGroup.userData.referenceUrl = SOURCE_REFERENCE_URL;
+    let loadedSample = false;
+    if (import.meta.env.DEV) {
+      try {
+        assemblyGroup = await createRoboticArmAssembly(loadStlGeometry);
+        assemblyGroup.userData.referenceUrl = SOURCE_REFERENCE_URL;
+        loadedSample = true;
+      } catch (error) {
+        console.warn("Sample STL assets are unavailable; starting with an empty workspace.", error);
+      }
+    }
+    if (!assemblyGroup) {
+      assemblyGroup = createEmptyAssembly();
+      studioMode = "select";
+    }
     scene.add(assemblyGroup);
 
     parts = collectAssemblyParts(assemblyGroup);
@@ -1432,8 +1469,9 @@ async function init() {
     applyCurrentPose();
     selectPart(partsById.get("upper_arm") ?? partsById.get("lower_arm") ?? parts[0] ?? null);
     updateAllControls();
-    fitCameraToObject(assemblyGroup);
+    if (parts.length) fitCameraToObject(assemblyGroup);
     loading.hidden = true;
+    if (!loadedSample) showStatus("Import STL files to begin.", 4200);
   } catch (error) {
     console.error(error);
     loading.textContent = "Unable to load the robotic arm studio.";

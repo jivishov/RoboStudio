@@ -100,6 +100,17 @@ const gltfLoader = new GLTFLoader();
 const overlays = new WorkbenchOverlays(scene);
 const dynamics = new DynamicsRunner();
 
+function createEmptyAssembly() {
+  const group = new THREE.Group();
+  group.name = "manual_robot_workspace";
+  group.userData = {
+    sourceStlCount: 0,
+    generatedFrom: null,
+    assemblyType: "manual"
+  };
+  return group;
+}
+
 const DENSITY_PRESETS = [
   { id: "pla", label: "PLA plastic", densityKgM3: 1240 },
   { id: "petg", label: "PETG plastic", densityKgM3: 1270 },
@@ -2329,11 +2340,28 @@ async function loadAssembly() {
       showStatus("Loaded from Assembly Studio");
       state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, snapshot.parts ?? []);
     } else {
-      state.assemblyRoot = await createRoboticArmAssembly(loadStlGeometry);
-      state.assemblyRoot.name = "sample_robotic_arm";
-      assemblySource.textContent = evalMode ? "Assistant eval sample" : "Fallback sample";
-      assemblyName.textContent = "Robotic arm reference";
-      showStatus(evalMode ? "Loaded sample arm for assistant eval" : "No snapshot found; loaded sample arm");
+      let loadedSample = false;
+      if (import.meta.env.DEV) {
+        try {
+          state.assemblyRoot = await createRoboticArmAssembly(loadStlGeometry);
+          state.assemblyRoot.name = "sample_robotic_arm";
+          loadedSample = true;
+        } catch (error) {
+          console.warn("Sample STL assets are unavailable; starting with an empty workbench.", error);
+        }
+      }
+      if (!state.assemblyRoot) {
+        state.assemblyRoot = createEmptyAssembly();
+      }
+      assemblySource.textContent = loadedSample ? (evalMode ? "Assistant eval sample" : "Fallback sample") : "Manual workspace";
+      assemblyName.textContent = loadedSample ? "Robotic arm reference" : "No assembly snapshot";
+      showStatus(
+        loadedSample
+          ? evalMode
+            ? "Loaded sample arm for assistant eval"
+            : "No snapshot found; loaded sample arm"
+          : "Open the Assembly Studio and import STL files to begin"
+      );
       state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, collectAssemblyParts(state.assemblyRoot));
     }
 

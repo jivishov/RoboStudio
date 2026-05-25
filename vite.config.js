@@ -17,10 +17,12 @@ function assistantProxyPlugin(apiKeyProvider) {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiKeyProvider = () => env.OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  const isProduction = mode === "production";
 
   return {
+    base: isProduction ? "/RoboStudio/" : "/",
     plugins: [assistantProxyPlugin(apiKeyProvider)],
-    publicDir: "STL_files",
+    publicDir: isProduction ? false : "STL_files",
     build: {
       chunkSizeWarningLimit: 2500,
       rollupOptions: {
