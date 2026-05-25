@@ -17,5 +17,9 @@ logs/
 *.png
 *.mp4
 
+AGENTS.md
+plan/
+release_quality_plan_*/
+
 .DS_Store
 Thumbs.db
