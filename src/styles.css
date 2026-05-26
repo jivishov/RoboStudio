@@ -77,9 +77,9 @@ a.toolbar-button {
   grid-area: topbar;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
-  padding: 8px 14px;
+  padding: 8px 10px;
   background:
     linear-gradient(180deg, rgb(255 255 255 / 4%), transparent 52%),
     var(--blackbar);
@@ -91,8 +91,8 @@ a.toolbar-button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 14px;
-  min-width: 222px;
+  gap: 10px;
+  min-width: 190px;
 }
 
 .brand__name {
@@ -125,8 +125,9 @@ a.toolbar-button {
 
 .mode-grid {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -151,8 +152,10 @@ a.toolbar-button {
 }
 
 .mode-button {
-  min-width: 82px;
-  padding: 0 10px;
+  min-width: 0;
+  padding: 0 7px;
+  gap: 5px;
+  font-size: 0.78rem;
   background: transparent;
   color: #f8fafc;
 }
@@ -227,6 +230,24 @@ a.toolbar-button {
   transform: rotate(-18deg);
 }
 
+.mode-icon--resize::before {
+  left: 3px;
+  top: 3px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+}
+
+.mode-icon--resize::after {
+  right: 0;
+  bottom: 0;
+  width: 7px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: -5px -5px 0 currentColor;
+  transform: rotate(-45deg);
+}
+
 .mode-icon--hinge::before {
   left: 2px;
   top: 8px;
@@ -253,7 +274,7 @@ a.toolbar-button {
 }
 
 .toolbar-button {
-  padding: 0 11px;
+  padding: 0 8px;
   border-color: #3a4350;
   background: #0e141c;
   color: #f5f7fb;
@@ -272,7 +293,7 @@ a.toolbar-button {
 }
 
 .toolbar-button--primary {
-  min-width: 126px;
+  min-width: 112px;
   border-color: #4f8df7;
   background: linear-gradient(180deg, #1778ff, #075bd8);
   box-shadow:
@@ -1221,6 +1242,35 @@ select:focus-visible,
   opacity: 1;
 }
 
+.transform-output {
+  grid-column: 1 / -1;
+  min-height: 30px;
+  padding: 7px 8px;
+  border: 1px solid #d4dae3;
+  border-radius: 5px;
+  background: #f7f9fc;
+  color: #222a35;
+  font-size: 0.74rem;
+  font-weight: 760;
+}
+
+.resize-toggle-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: #4b5565;
+  font-size: 0.74rem;
+  font-weight: 780;
+}
+
+.resize-toggle-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
 .info-list {
   display: grid;
   gap: 5px;
@@ -1313,14 +1363,20 @@ select:focus-visible,
   }
 
   .mode-button {
-    min-width: 72px;
-    padding: 0 8px;
+    min-width: 66px;
+    padding: 0 7px;
   }
 
   .toolbar-button {
     padding: 0 8px;
   }
 
+  .topbar-toggle span {
+    display: none;
+  }
+}
+
+@media (max-width: 1500px) {
   .topbar-toggle span {
     display: none;
   }

@@ -317,6 +317,52 @@ output {
   padding: 3px;
 }
 
+.parts-checkbox-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: #374151;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.parts-checkbox-row input {
+  width: 16px;
+  height: 16px;
+  accent-color: #1778ff;
+}
+
+.parts-resize-section {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #d7dde7;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.parts-resize-section__title,
+.parts-resize-options {
+  display: grid;
+  gap: 5px;
+}
+
+.parts-resize-section__title span {
+  color: #202936;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.parts-resize-section__title small,
+.parts-resize-note {
+  margin: 0;
+  color: var(--parts-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .parts-primary-button {
   min-height: 36px;
   padding: 0 12px;
@@ -467,6 +513,7 @@ output {
   width: 100%;
   height: 100%;
   min-height: 360px;
+  touch-action: none;
 }
 
 .sketch-grid-line {
@@ -488,6 +535,38 @@ output {
   stroke: #b42318;
   stroke-dasharray: 4 3;
   stroke-width: 1.6;
+}
+
+.sketch-resize-handle {
+  fill: #ffffff;
+  stroke: #1778ff;
+  stroke-width: 2.2;
+  filter: drop-shadow(0 1px 2px rgb(15 23 32 / 28%));
+}
+
+.sketch-resize-handle:hover,
+.sketch-resize-handle:focus {
+  fill: #dbeafe;
+}
+
+.sketch-resize-handle--e,
+.sketch-resize-handle--w {
+  cursor: ew-resize;
+}
+
+.sketch-resize-handle--n,
+.sketch-resize-handle--s {
+  cursor: ns-resize;
+}
+
+.sketch-resize-handle--ne,
+.sketch-resize-handle--sw {
+  cursor: nesw-resize;
+}
+
+.sketch-resize-handle--nw,
+.sketch-resize-handle--se {
+  cursor: nwse-resize;
 }
 
 .sketch-empty {

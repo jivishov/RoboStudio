@@ -1,4 +1,6 @@
 import "./parts.css";
+import { mountPageAssistant } from "./assistant/chatUi.js";
+import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 import {
   BOOLEAN_OPERATION_KIND,
   REVOLVE_KIND,
@@ -34,6 +36,7 @@ import {
   combinedProfileBounds,
   createCircularHole,
   createSlottedHole,
+  profileBounds,
   profileCenter,
   profileSize
 } from "./parts/sketch.js";
@@ -41,6 +44,12 @@ import { createBodyFromTemplate, listPartTemplates } from "./parts/templates.js"
 import { validateBody, validatePartProject } from "./parts/validation.js";
 import { createPartPreviewScene } from "./parts/previewScene.js";
 import { createGeneratedAssemblySnapshot } from "./parts/snapshot.js";
+import {
+  bodyEffectiveSizeMm,
+  resizePartBodyToTargetSize,
+  targetSizeFromAxisEdit
+} from "./parts/resize.js";
+import { SKETCH_MOUSE_RESIZE_MIN_MM, targetSizeFromSketchResize } from "./parts/sketchResize.js";
 import { CURRENT_SNAPSHOT_KEY, SNAPSHOT_STORE_NAME, writeWorkspaceValue } from "./workspaceDb.js";
 
 const templateSelect = document.querySelector("#template-select");
@@ -83,6 +92,7 @@ const compileList = document.querySelector("#compile-list");
 const history = createProjectHistory();
 const cadWorker = new Worker(new URL("./parts/cadWorker.js", import.meta.url), { type: "module" });
 const previewScene = createPartPreviewScene(modelPreview);
+const SVG_NS = "http://www.w3.org/2000/svg";
 let statusTimer = null;
 let compileTimer = null;
 let workerRequestId = 0;
@@ -92,6 +102,9 @@ let lastCompletedCompileSignature = null;
 let compileResults = new Map();
 let compileErrors = [];
 let compiling = false;
+let resizeUniform = true;
+let resizeKeepCutSizes = true;
+let sketchResizeDrag = null;
 const pendingStlExports = new Map();
 const compileRequestSignatures = new Map();
 
@@ -296,6 +309,24 @@ cadWorker.addEventListener("message", (event) => {
   if (message.type === "exportStlError") handleStlExportError(message);
 });
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCadReady(timeoutMs = 6000) {
+  requestCadCompile(history.current);
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const signature = projectCompileSignature(history.current);
+    if (!compiling && signature === lastCompletedCompileSignature) {
+      renderCompileStatus(history.current);
+      return;
+    }
+    await sleep(50);
+  }
+  throw new Error("Generated solids are still building. Try again after the build status is ready.");
+}
+
 function templateLabel(templateId) {
   return listPartTemplates().find((template) => template.id === templateId)?.label ?? templateId;
 }
@@ -350,6 +381,270 @@ function formatNumber(value, digits = 1) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "0";
 }
 
+function finiteNumber(value, label) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) throw new Error(`${label} must be a finite number.`);
+  return numeric;
+}
+
+function positiveNumber(value, label) {
+  const numeric = finiteNumber(value, label);
+  if (numeric <= 0) throw new Error(`${label} must be positive.`);
+  return numeric;
+}
+
+function vector3ForAssistant(value, label, options = {}) {
+  if (!Array.isArray(value) || value.length !== 3) throw new Error(`${label} must be a three-number vector.`);
+  const vector = value.map((item, index) => finiteNumber(item, `${label}[${index}]`));
+  if (options.positive && vector.some((item) => item <= 0)) throw new Error(`${label} values must be positive.`);
+  return vector;
+}
+
+function optionValues(select) {
+  return [...select.options].map((option) => option.value);
+}
+
+function ensureSelectValue(select, value, label) {
+  if (!optionValues(select).includes(value)) throw new Error(`Unknown ${label}: ${value}`);
+  select.value = value;
+  return value;
+}
+
+function bodyForAssistant(bodyId = history.current.selectedBodyId) {
+  const id = bodyId || history.current.selectedBodyId;
+  const body = history.current.bodies.find((item) => item.id === id);
+  if (!body) throw new Error(id ? `Unknown body id: ${id}` : "No body is selected.");
+  return body;
+}
+
+function selectBodyForAssistant(bodyId) {
+  const body = bodyForAssistant(bodyId);
+  history.current = selectBody(history.current, body.id);
+  render();
+  return selectedProjectBody() ?? body;
+}
+
+function selectedSketchBodyForAssistant(bodyId) {
+  const body = bodyId ? selectBodyForAssistant(bodyId) : selectedProjectBody();
+  if (!body) throw new Error("No body is selected.");
+  if (!isSketchBody(body) || !body.sketch?.outerProfile) {
+    throw new Error(`${body.name} is not an editable sketch body.`);
+  }
+  return body;
+}
+
+function findCutIndex(body, args = {}) {
+  if (args.profileId) {
+    const index = body.sketch.cutProfiles.findIndex((profile) => profile.id === args.profileId);
+    if (index < 0) throw new Error(`Unknown cut profile id: ${args.profileId}`);
+    return index;
+  }
+  if (args.cutIndex !== undefined) {
+    const index = Math.trunc(finiteNumber(args.cutIndex, "cutIndex"));
+    if (index < 0 || index >= body.sketch.cutProfiles.length) throw new Error(`Unknown cut profile index: ${index}`);
+    return index;
+  }
+  if (body.sketch.cutProfiles.length === 1) return 0;
+  throw new Error("Provide profileId or cutIndex for a cut profile.");
+}
+
+function profileSummary(profile, index = null) {
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    type: profile.type,
+    index,
+    x: profile.x,
+    z: profile.z,
+    radius: profile.radius,
+    length: profile.length,
+    width: profile.width,
+    height: profile.height,
+    cornerRadius: profile.cornerRadius,
+    points: profile.points
+  };
+}
+
+function assistantBodySummary(body) {
+  return {
+    id: body.id,
+    name: body.name,
+    color: body.color,
+    sourceKind: bodySourceKind(body),
+    extrudeDepthMm: body.extrudeDepthMm,
+    transform: body.transform,
+    effectiveSizeMm: currentBodySize(body),
+    compileReady: compileResults.has(body.id),
+    valid: validateBody(body).length === 0,
+    outerProfile: profileSummary(body.sketch?.outerProfile ?? null),
+    cutProfiles: (body.sketch?.cutProfiles ?? []).map((profile, index) => profileSummary(profile, index))
+  };
+}
+
+function partsAssistantContext() {
+  const project = history.current;
+  const selected = selectedProjectBody();
+  const resultCount = compileResultCount(project);
+  const issues = validatePartProject(project);
+  return {
+    page: "Robotic Part Studio",
+    ready: true,
+    project: {
+      version: project.version,
+      units: project.units,
+      selectedBodyId: project.selectedBodyId,
+      updatedAt: project.updatedAt
+    },
+    counts: {
+      bodies: project.bodies.length,
+      compiledBodies: resultCount,
+      validationIssues: issues.length,
+      compileErrors: compileErrors.length
+    },
+    controls: {
+      templateId: templateSelect.value,
+      templates: listPartTemplates(),
+      revolvePresetId: revolvePresetSelect.value,
+      revolvePresets: listRevolvePresets(),
+      booleanOperation: booleanOperationSelect.value,
+      booleanOperations: BOOLEAN_OPERATIONS
+    },
+    history: {
+      canUndo: history.undoStack.length > 0,
+      canRedo: history.redoStack.length > 0
+    },
+    selection: selected ? assistantBodySummary(selected) : null,
+    bodies: project.bodies.map(assistantBodySummary),
+    validation: issues.slice(0, 12),
+    compile: {
+      compiling,
+      status: compileCount.textContent,
+      buildStatus: buildCount.textContent,
+      selectedReady: Boolean(selectedCompileResult()),
+      exportReady: Boolean(selectedCompileResult()) && !compiling,
+      handoffReady: resultCount > 0 && !compiling,
+      errors: compileErrors.slice(0, 8)
+    }
+  };
+}
+
+function setBodyPropertiesForAssistant(args = {}) {
+  const body = args.bodyId ? selectBodyForAssistant(args.bodyId) : bodyForAssistant();
+  commitSelectedBody((draft) => {
+    if (typeof args.name === "string" && args.name.trim()) draft.name = args.name.trim();
+    if (typeof args.color === "string") {
+      if (!/^#[0-9a-f]{6}$/i.test(args.color)) throw new Error("Color must be a six-digit hex value.");
+      draft.color = args.color;
+    }
+    if (args.extrudeDepthMm !== undefined) {
+      if (!isSketchBody(draft)) throw new Error("Only sketch bodies expose extrusion depth.");
+      draft.extrudeDepthMm = positiveNumber(args.extrudeDepthMm, "extrudeDepthMm");
+    }
+    if (Array.isArray(args.position)) draft.transform.position = vector3ForAssistant(args.position, "position");
+    if (Array.isArray(args.scale)) draft.transform.scale = vector3ForAssistant(args.scale, "scale", { positive: true });
+    return draft;
+  }, `${body.name} updated`);
+  return "Body properties updated.";
+}
+
+function resizeBodyForAssistant(args = {}) {
+  const body = args.bodyId ? selectBodyForAssistant(args.bodyId) : bodyForAssistant();
+  if (!Array.isArray(args.targetSizeMm)) throw new Error("targetSizeMm must be an [X, Y, Z] millimeter vector.");
+  const currentSize = currentBodySize(body);
+  const requestedSize = vector3ForAssistant(args.targetSizeMm, "targetSizeMm", { positive: true });
+  const uniformAxis = currentSize.reduce((bestAxis, size, axis) => (size > currentSize[bestAxis] ? axis : bestAxis), 0);
+  const targetSize = args.uniform === false
+    ? requestedSize
+    : targetSizeFromAxisEdit(currentSize, uniformAxis, requestedSize[uniformAxis], true);
+  commitSelectedBody(
+    (draft) =>
+      resizePartBodyToTargetSize(draft, targetSize, {
+        currentSizeMm: currentSize,
+        keepCutSizes: args.keepCutSizes !== false
+      }),
+    `${body.name} resized`
+  );
+  return `${body.name} resized to ${targetSize.map((value) => formatNumber(value, 1)).join(" x ")} mm.`;
+}
+
+function applyProfileArguments(profile, args = {}) {
+  for (const prop of ["x", "z"]) {
+    if (args[prop] !== undefined) profile[prop] = finiteNumber(args[prop], prop);
+  }
+  for (const prop of ["radius", "length", "width", "height"]) {
+    if (args[prop] !== undefined) profile[prop] = positiveNumber(args[prop], prop);
+  }
+  if (args.cornerRadius !== undefined) profile.cornerRadius = Math.max(0, finiteNumber(args.cornerRadius, "cornerRadius"));
+  if (args.points !== undefined) {
+    if (profile.type !== "polyline") throw new Error("Only polyline profiles expose editable points.");
+    if (!Array.isArray(args.points) || args.points.length < 3) throw new Error("Polyline profiles need at least three points.");
+    profile.points = args.points.map((point, index) => {
+      if (!Array.isArray(point) || point.length !== 2) throw new Error(`points[${index}] must be an [x, z] pair.`);
+      return [finiteNumber(point[0], `points[${index}][0]`), finiteNumber(point[1], `points[${index}][1]`)];
+    });
+  }
+}
+
+function setProfileForAssistant(args = {}) {
+  const body = selectedSketchBodyForAssistant(args.bodyId);
+  if (args.target === "cut") {
+    const cutIndex = findCutIndex(body, args);
+    commitSelectedBody((draft) => {
+      applyProfileArguments(draft.sketch.cutProfiles[cutIndex], args);
+      return draft;
+    }, "Cut profile updated");
+    return "Cut profile updated.";
+  }
+  commitSelectedBody((draft) => {
+    if (!draft.sketch.outerProfile) throw new Error("The selected body has no outer profile.");
+    applyProfileArguments(draft.sketch.outerProfile, args);
+    return draft;
+  }, "Outer profile updated");
+  return "Outer profile updated.";
+}
+
+function addTemplateBody(templateId = templateSelect.value) {
+  ensureSelectValue(templateSelect, templateId, "template id");
+  const existingIds = new Set(history.current.bodies.map((body) => body.id));
+  const body = createBodyFromTemplate(templateSelect.value, { existingIds });
+  commit(addBody(history.current, body), `${templateLabel(templateSelect.value)} added`);
+  return body;
+}
+
+function addCutProfileForAssistant(args = {}) {
+  selectedSketchBodyForAssistant(args.bodyId);
+  const cut = createCutProfile(args.type);
+  if (!cut) throw new Error("Unable to create a cut profile for the selected body.");
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.push(cut);
+    return draft;
+  }, args.type === "slot" ? "Slotted hole added" : "Circular hole added");
+  return `${cut.id} added.`;
+}
+
+function removeCutProfileForAssistant(args = {}) {
+  const body = selectedSketchBodyForAssistant(args.bodyId);
+  const index = findCutIndex(body, args);
+  const profile = body.sketch.cutProfiles[index];
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.splice(index, 1);
+    return draft;
+  }, "Cut removed");
+  return `${profile.id} removed.`;
+}
+
+function duplicateBodyForAssistant(bodyId) {
+  const body = bodyId ? selectBodyForAssistant(bodyId) : bodyForAssistant();
+  commit(duplicateBody(history.current, body.id), "Body duplicated");
+  return `${body.name} duplicated.`;
+}
+
+function deleteBodyForAssistant(bodyId) {
+  const body = bodyId ? selectBodyForAssistant(bodyId) : bodyForAssistant();
+  commit(deleteBody(history.current, body.id), "Body deleted");
+  return `${body.name} deleted.`;
+}
+
 function createField(labelText, input) {
   const label = document.createElement("label");
   label.className = "parts-field";
@@ -392,6 +687,97 @@ function createVectorFields(title, values, datasetPrefix, step = "1") {
     );
   }
   return grid;
+}
+
+function createOutputField(labelText, value) {
+  const label = document.createElement("label");
+  label.className = "parts-field";
+  const span = document.createElement("span");
+  span.textContent = labelText;
+  const output = document.createElement("output");
+  output.textContent = value;
+  label.append(span, output);
+  return label;
+}
+
+function createCheckboxRow(labelText, checked, dataset = {}) {
+  const label = document.createElement("label");
+  label.className = "parts-checkbox-row";
+  const input = document.createElement("input");
+  input.type = "checkbox";
+  input.checked = checked;
+  for (const [key, value] of Object.entries(dataset)) {
+    input.dataset[key] = value;
+  }
+  const span = document.createElement("span");
+  span.textContent = labelText;
+  label.append(input, span);
+  return label;
+}
+
+function currentBodySize(body) {
+  const compileResult = bodySourceKind(body) === BOOLEAN_OPERATION_KIND ? compileResults.get(body.id) ?? null : null;
+  return bodyEffectiveSizeMm(body, compileResult);
+}
+
+function createResizeSection(body) {
+  const section = document.createElement("div");
+  section.className = "parts-resize-section";
+
+  const title = document.createElement("div");
+  title.className = "parts-resize-section__title";
+  const heading = document.createElement("span");
+  heading.textContent = "Resize";
+  const hint = document.createElement("small");
+  hint.textContent = isSketchBody(body) ? "Target dimensions edit the source sketch where possible" : "Target dimensions edit source parameters when available";
+  title.append(heading, hint);
+
+  const currentSize = currentBodySize(body);
+  const currentGrid = document.createElement("div");
+  currentGrid.className = "parts-field-grid";
+  const currentLabel = document.createElement("span");
+  currentLabel.textContent = "Current size (mm)";
+  currentGrid.append(currentLabel);
+  for (const [index, axis] of ["X", "Y", "Z"].entries()) {
+    currentGrid.append(createOutputField(axis, formatNumber(currentSize[index], 2)));
+  }
+
+  const targetGrid = document.createElement("div");
+  targetGrid.className = "parts-field-grid";
+  const targetLabel = document.createElement("span");
+  targetLabel.textContent = "Target size (mm)";
+  targetGrid.append(targetLabel);
+  for (const [index, axis] of ["X", "Y", "Z"].entries()) {
+    targetGrid.append(
+      createField(
+        axis,
+        createInput({
+          value: formatNumber(currentSize[index], 2),
+          step: "0.5",
+          min: "0.001",
+          dataset: { resizeTargetAxis: String(index) }
+        })
+      )
+    );
+  }
+
+  const options = document.createElement("div");
+  options.className = "parts-resize-options";
+  options.append(createCheckboxRow("Uniform", resizeUniform, { resizeOption: "uniform" }));
+  if (isSketchBody(body)) {
+    options.append(createCheckboxRow("Keep hole sizes", resizeKeepCutSizes, { resizeOption: "keepCutSizes" }));
+  }
+
+  const note = document.createElement("p");
+  note.className = "parts-resize-note";
+  note.textContent = isSketchBody(body) && resizeKeepCutSizes
+    ? "Hole centers move with the body; screw and bearing clearances stay fixed."
+    : isSketchBody(body)
+      ? "Cut profiles scale with the body footprint."
+      : "Boolean bodies fall back to placement scale when their operands cannot be source-resized safely.";
+
+  section.append(title, currentGrid, targetGrid, options, note);
+  return section;
 }
 
 function renderBodyList(project) {
@@ -460,8 +846,9 @@ function renderBodyProperties(body) {
       "Color",
       createInput({ type: "color", value: body.color, step: null, dataset: { bodyProp: "color" } })
     ),
+    createResizeSection(body),
     createVectorFields("Position (mm)", body.transform.position, "position", "1"),
-    createVectorFields("Scale", body.transform.scale, "scale", "0.05")
+    createVectorFields("Placement scale", body.transform.scale, "scale", "0.05")
   );
 
   if (sketchEditable) {
@@ -630,6 +1017,12 @@ function createMapper(bounds) {
     },
     z(value) {
       return svgHeight - (offsetY + (value - bounds.minZ) * scale);
+    },
+    sketchX(value) {
+      return bounds.minX + (value - offsetX) / scale;
+    },
+    sketchZ(value) {
+      return bounds.minZ + (svgHeight - value - offsetY) / scale;
     }
   };
 }
@@ -688,6 +1081,34 @@ function profileToSvg(profile, mapper, className, fill) {
   return `<path ${strokeProps} d="${path}" />`;
 }
 
+function resizeHandleSvg(handle, x, z, mapper) {
+  const size = 14;
+  const cx = mapper.x(x);
+  const cy = mapper.z(z);
+  return `<rect class="sketch-resize-handle sketch-resize-handle--${handle}" data-sketch-resize-handle="${handle}" x="${cx - size / 2}" y="${cy - size / 2}" width="${size}" height="${size}" rx="3" vector-effect="non-scaling-stroke" />`;
+}
+
+function sketchResizeHandlesSvg(body, mapper) {
+  const bounds = profileBounds(body?.sketch?.outerProfile);
+  if (!bounds) return "";
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+  const handles = [
+    ["nw", bounds.minX, bounds.maxZ],
+    ["n", centerX, bounds.maxZ],
+    ["ne", bounds.maxX, bounds.maxZ],
+    ["e", bounds.maxX, centerZ],
+    ["se", bounds.maxX, bounds.minZ],
+    ["s", centerX, bounds.minZ],
+    ["sw", bounds.minX, bounds.minZ],
+    ["w", bounds.minX, centerZ]
+  ];
+
+  return `<g class="sketch-resize-handles" aria-label="Mouse resize handles">${handles
+    .map(([handle, x, z]) => resizeHandleSvg(handle, x, z, mapper))
+    .join("")}</g>`;
+}
+
 function gridStepForBounds(bounds) {
   const span = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ, 1);
   const rawStep = span / 28;
@@ -715,6 +1136,133 @@ function gridSvg(bounds, mapper) {
     lines.push(`<line class="${className}" x1="0" y1="${mapper.z(z)}" x2="${mapper.svgWidth}" y2="${mapper.z(z)}" vector-effect="non-scaling-stroke" />`);
   }
   return lines.join("");
+}
+
+function sketchPointFromPointer(event, drag) {
+  const svgX = ((event.clientX - drag.rect.left) / Math.max(drag.rect.width, 1)) * drag.mapper.svgWidth;
+  const svgY = ((event.clientY - drag.rect.top) / Math.max(drag.rect.height, 1)) * drag.mapper.svgHeight;
+  return {
+    x: drag.mapper.sketchX(svgX),
+    z: drag.mapper.sketchZ(svgY)
+  };
+}
+
+function previewSketchResizeProject(nextProject) {
+  history.current = normalizePartProject(nextProject);
+  render();
+}
+
+function clearSketchResizeListeners() {
+  window.removeEventListener("pointermove", handleSketchResizeMove);
+  window.removeEventListener("pointerup", endSketchResizeDrag);
+  window.removeEventListener("pointercancel", cancelSketchResizeDrag);
+  window.removeEventListener("blur", cancelSketchResizeDrag);
+}
+
+function releaseSketchResizeCapture(drag) {
+  try {
+    drag.captureTarget?.releasePointerCapture?.(drag.pointerId);
+  } catch (_error) {
+    // The sketch SVG can be replaced while live resize previews render.
+  }
+}
+
+function handleSketchResizeMove(event) {
+  if (!sketchResizeDrag || event.pointerId !== sketchResizeDrag.pointerId) return;
+  event.preventDefault();
+
+  try {
+    const point = sketchPointFromPointer(event, sketchResizeDrag);
+    const targetSize = targetSizeFromSketchResize(point, sketchResizeDrag, {
+      uniform: resizeUniform,
+      minSizeMm: SKETCH_MOUSE_RESIZE_MIN_MM
+    });
+    const nextProject = updateBody(sketchResizeDrag.startProject, sketchResizeDrag.bodyId, (draft) =>
+      resizePartBodyToTargetSize(draft, targetSize, {
+        currentSizeMm: sketchResizeDrag.startSize,
+        keepCutSizes: resizeKeepCutSizes
+      })
+    );
+    sketchResizeDrag.latestProject = nextProject;
+    previewSketchResizeProject(nextProject);
+  } catch (error) {
+    showStatus(error.message ?? "Unable to resize body.", 4200);
+  }
+}
+
+function endSketchResizeDrag(event) {
+  if (!sketchResizeDrag || event.pointerId !== sketchResizeDrag.pointerId) return;
+  event.preventDefault();
+  clearSketchResizeListeners();
+
+  const drag = sketchResizeDrag;
+  sketchResizeDrag = null;
+  releaseSketchResizeCapture(drag);
+  const finalProject = normalizePartProject(drag.latestProject ?? history.current);
+  const changed = JSON.stringify(drag.startProject) !== JSON.stringify(finalProject);
+  if (changed) {
+    history.undoStack.push(drag.startProject);
+    if (history.undoStack.length > history.limit) history.undoStack.shift();
+    history.current = finalProject;
+    history.redoStack = [];
+  }
+  render();
+
+  const issues = validateBody(selectedProjectBody());
+  if (!changed) {
+    showStatus("Resize unchanged");
+  } else if (issues.length) {
+    showStatus(issues[0].message, 5200);
+  } else {
+    showStatus("Resized by mouse");
+  }
+}
+
+function cancelSketchResizeDrag(event) {
+  if (!sketchResizeDrag || (Number.isInteger(event?.pointerId) && event.pointerId !== sketchResizeDrag.pointerId)) return;
+  clearSketchResizeListeners();
+  const drag = sketchResizeDrag;
+  sketchResizeDrag = null;
+  releaseSketchResizeCapture(drag);
+  history.current = drag.startProject;
+  render();
+}
+
+function beginSketchResizeDrag(event, body, mapper) {
+  if (event.button !== 0) return;
+  if (sketchResizeDrag) {
+    cancelSketchResizeDrag({ pointerId: sketchResizeDrag.pointerId });
+    return;
+  }
+  const handle = event.target?.dataset?.sketchResizeHandle;
+  if (!handle || !body?.sketch?.outerProfile) return;
+  const bounds = profileBounds(body.sketch.outerProfile);
+  if (!bounds) return;
+
+  event.preventDefault();
+  const rect = event.currentTarget.getBoundingClientRect();
+  const startProject = normalizePartProject(history.current);
+  sketchResizeDrag = {
+    pointerId: event.pointerId,
+    bodyId: body.id,
+    handle,
+    mapper,
+    rect,
+    captureTarget: event.currentTarget,
+    startProject,
+    latestProject: startProject,
+    startSize: currentBodySize(body),
+    centerX: (bounds.minX + bounds.maxX) / 2,
+    centerZ: (bounds.minZ + bounds.maxZ) / 2
+  };
+  try {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  } catch (_error) {
+  }
+  window.addEventListener("pointermove", handleSketchResizeMove);
+  window.addEventListener("pointerup", endSketchResizeDrag);
+  window.addEventListener("pointercancel", cancelSketchResizeDrag);
+  window.addEventListener("blur", cancelSketchResizeDrag);
 }
 
 function renderSketchPreview(body) {
@@ -745,7 +1293,7 @@ function renderSketchPreview(body) {
     maxZ: rawBounds.maxZ + margin
   };
   const mapper = createMapper(bounds);
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${mapper.svgWidth} ${mapper.svgHeight}`);
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${body.name} sketch preview`);
@@ -754,7 +1302,9 @@ function renderSketchPreview(body) {
     ${gridSvg(bounds, mapper)}
     ${profileToSvg(body.sketch.outerProfile, mapper, "sketch-outer", `${body.color}33`)}
     ${body.sketch.cutProfiles.map((profile) => profileToSvg(profile, mapper, "sketch-cut", "#ffffff")).join("")}
+    ${sketchResizeHandlesSvg(body, mapper)}
   `;
+  svg.addEventListener("pointerdown", (event) => beginSketchResizeDrag(event, body, mapper));
   sketchPreview.append(svg);
 }
 
@@ -859,9 +1409,50 @@ function handleTransformInput(input) {
   });
 }
 
+function handleResizeOptionInput(input) {
+  if (input.dataset.resizeOption === "uniform") resizeUniform = input.checked;
+  if (input.dataset.resizeOption === "keepCutSizes") resizeKeepCutSizes = input.checked;
+  window.setTimeout(() => renderBodyProperties(selectedProjectBody()), 0);
+}
+
+function handleResizeTargetInput(input) {
+  const body = selectedProjectBody();
+  if (!body) return;
+
+  try {
+    const axis = Number(input.dataset.resizeTargetAxis);
+    const currentSize = currentBodySize(body);
+    const targetSize = targetSizeFromAxisEdit(currentSize, axis, Number(input.value), resizeUniform);
+    window.setTimeout(() => {
+      try {
+        commitSelectedBody((draft) =>
+          resizePartBodyToTargetSize(draft, targetSize, {
+            currentSizeMm: currentSize,
+            keepCutSizes: resizeKeepCutSizes
+          })
+        );
+        const issues = validateBody(selectedProjectBody());
+        if (issues.length) {
+          showStatus(issues[0].message, 5200);
+        } else {
+          showStatus(`Resized ${body.name}`);
+        }
+      } catch (error) {
+        showStatus(error.message ?? "Unable to resize body.", 5200);
+        renderBodyProperties(selectedProjectBody());
+      }
+    }, 0);
+  } catch (error) {
+    showStatus(error.message ?? "Unable to resize body.", 5200);
+    renderBodyProperties(body);
+  }
+}
+
 function handleInspectorChange(event) {
   const input = event.target;
   if (!(input instanceof HTMLInputElement)) return;
+  if (input.dataset.resizeOption) handleResizeOptionInput(input);
+  if (input.dataset.resizeTargetAxis) handleResizeTargetInput(input);
   if (input.dataset.bodyProp) handleBodyPropertyInput(input);
   if (input.dataset.transformKind) handleTransformInput(input);
   if (input.dataset.profileScope) updateProfileFromInput(input);
@@ -952,10 +1543,12 @@ function addCircularHolePattern() {
   }, "Bolt circle added");
 }
 
-function addRevolvedBody() {
+function addRevolvedBody(presetId = revolvePresetSelect.value) {
+  ensureSelectValue(revolvePresetSelect, presetId, "revolve preset id");
   const existingIds = new Set(history.current.bodies.map((body) => body.id));
   const body = createRevolveBodyFromPreset(revolvePresetSelect.value, {}, existingIds);
   commit(addBody(history.current, body), `${body.name} added`);
+  return body;
 }
 
 function addSpurGear() {
@@ -974,6 +1567,7 @@ function addSpurGear() {
     existingIds
   );
   commit(addBody(history.current, body), "Spur gear added");
+  return body;
 }
 
 function booleanOperandBodies() {
@@ -983,15 +1577,16 @@ function booleanOperandBodies() {
   return history.current.bodies.slice(0, 2);
 }
 
-function addBooleanBody() {
+function addBooleanBody(operation = booleanOperationSelect.value, options = {}) {
+  ensureSelectValue(booleanOperationSelect, operation, "boolean operation");
   const operands = booleanOperandBodies();
   if (operands.length < 2) {
+    if (options.throwOnInvalid) throw new Error("Create at least two bodies before adding a boolean body.");
     showStatus("Create at least two bodies before adding a boolean body.", 4200);
-    return;
+    return null;
   }
 
   const existingIds = new Set(history.current.bodies.map((body) => body.id));
-  const operation = booleanOperationSelect.value;
   const body = createBooleanOperationBody(
     operation,
     operands,
@@ -1002,12 +1597,15 @@ function addBooleanBody() {
     existingIds
   );
   commit(addBody(history.current, body), `${operation} body added`);
+  return body;
 }
 
-function exportSelectedStl() {
+async function exportSelectedStl(options = {}) {
+  if (options.waitForCompile) await waitForCadReady();
   const body = selectedProjectBody();
   if (!body || !compileResults.has(body.id)) {
     showStatus("Build a generated body before exporting STL.", 4200);
+    if (options.throwOnInvalid) throw new Error("Build a generated body before exporting STL.");
     return;
   }
 
@@ -1018,7 +1616,8 @@ function exportSelectedStl() {
   cadWorker.postMessage({ type: "exportStl", requestId, body, bodies: history.current.bodies });
 }
 
-async function sendGeneratedAssembly() {
+async function sendGeneratedAssembly(options = {}) {
+  if (options.waitForCompile) await waitForCadReady();
   const visibleBodyIds = new Set(previewScene.getVisibleBodyIds());
   const bodies = history.current.bodies.filter(
     (body) => visibleBodyIds.has(body.id) && compileResults.has(body.id) && validateBody(body).length === 0
@@ -1026,6 +1625,7 @@ async function sendGeneratedAssembly() {
 
   if (!bodies.length) {
     showStatus("Build at least one valid generated body before handoff.", 5200);
+    if (options.throwOnInvalid) throw new Error("Build at least one valid generated body before handoff.");
     return;
   }
 
@@ -1049,14 +1649,113 @@ async function sendGeneratedAssembly() {
     sendAssemblyButton.disabled = false;
     renderCompileStatus();
     showStatus("Unable to send generated parts to Assembly Studio.", 5200);
+    if (options.throwOnInvalid) throw new Error("Unable to send generated parts to Assembly Studio.");
   }
 }
 
+function mountPartsAssistant() {
+  const assistant = mountPageAssistant({
+    pageId: "parts",
+    title: "Robotic Part Studio",
+    getContext: partsAssistantContext,
+    actions: {
+      parts_new_project: () => {
+        resetProjectHistory(history);
+        render();
+        showStatus("New PartProject");
+        return "New PartProject started.";
+      },
+      parts_save_project_json: () => {
+        downloadBlob(serializePartProject(history.current), "robotic-part-project.json", "application/json");
+        showStatus("PartProject JSON saved");
+        return "PartProject JSON download started.";
+      },
+      parts_open_project_picker: () => {
+        projectFileInput.click();
+        return "PartProject JSON file picker opened.";
+      },
+      parts_export_selected_stl: async () => {
+        await exportSelectedStl({ waitForCompile: true, throwOnInvalid: true });
+        return "Selected body STL export started.";
+      },
+      parts_send_assembly: async () => {
+        await sendGeneratedAssembly({ waitForCompile: true, throwOnInvalid: true });
+        return "Assembly Studio handoff started.";
+      },
+      parts_open_assembly_studio: () => {
+        window.location.href = import.meta.env.BASE_URL;
+        return "Assembly Studio is opening.";
+      },
+      parts_undo: () => {
+        if (!history.undoStack.length) return "Nothing to undo.";
+        undoProject(history);
+        render();
+        return "Undo complete.";
+      },
+      parts_redo: () => {
+        if (!history.redoStack.length) return "Nothing to redo.";
+        redoProject(history);
+        render();
+        return "Redo complete.";
+      },
+      parts_select_body: ({ bodyId }) => {
+        const body = selectBodyForAssistant(bodyId);
+        showStatus(`Selected ${body.name}`);
+        return `${body.name} selected.`;
+      },
+      parts_set_template_selection: ({ templateId }) => {
+        ensureSelectValue(templateSelect, templateId, "template id");
+        return `${templateLabel(templateId)} selected.`;
+      },
+      parts_add_template_body: ({ templateId }) => {
+        const body = addTemplateBody(templateId ?? templateSelect.value);
+        return `${body.name} added.`;
+      },
+      parts_duplicate_body: ({ bodyId } = {}) => duplicateBodyForAssistant(bodyId),
+      parts_delete_body: ({ bodyId } = {}) => deleteBodyForAssistant(bodyId),
+      parts_set_body_properties: (args) => setBodyPropertiesForAssistant(args),
+      parts_resize_body: (args) => resizeBodyForAssistant(args),
+      parts_set_profile: (args) => setProfileForAssistant(args),
+      parts_add_cut_profile: (args) => addCutProfileForAssistant(args),
+      parts_remove_cut_profile: (args) => removeCutProfileForAssistant(args),
+      parts_add_linear_pattern: ({ bodyId } = {}) => {
+        selectedSketchBodyForAssistant(bodyId);
+        addLinearHolePattern();
+        return "Linear hole pattern added.";
+      },
+      parts_add_circular_pattern: ({ bodyId } = {}) => {
+        selectedSketchBodyForAssistant(bodyId);
+        addCircularHolePattern();
+        return "Bolt circle added.";
+      },
+      parts_set_revolve_preset: ({ presetId }) => {
+        ensureSelectValue(revolvePresetSelect, presetId, "revolve preset id");
+        return `${presetId} lathe preset selected.`;
+      },
+      parts_add_revolve_body: ({ presetId } = {}) => {
+        const body = addRevolvedBody(presetId ?? revolvePresetSelect.value);
+        return `${body.name} added.`;
+      },
+      parts_add_spur_gear: () => {
+        const body = addSpurGear();
+        return `${body.name} added.`;
+      },
+      parts_set_boolean_operation: ({ operation }) => {
+        ensureSelectValue(booleanOperationSelect, operation, "boolean operation");
+        return `${operation} selected.`;
+      },
+      parts_add_boolean_body: ({ operation } = {}) => {
+        const body = addBooleanBody(operation ?? booleanOperationSelect.value, { throwOnInvalid: true });
+        return `${body.name} added.`;
+      }
+    }
+  });
+  mountAssistantEvalPanel({ adapter: assistant.adapter });
+  return assistant;
+}
+
 addTemplateButton.addEventListener("click", () => {
-  const existingIds = new Set(history.current.bodies.map((body) => body.id));
-  const templateId = templateSelect.value;
-  const body = createBodyFromTemplate(templateId, { existingIds });
-  commit(addBody(history.current, body), `${templateLabel(templateId)} added`);
+  addTemplateBody();
 });
 
 addLinearPatternButton.addEventListener("click", addLinearHolePattern);
@@ -1110,19 +1809,21 @@ redoButton.addEventListener("click", () => {
   render();
 });
 
-exportStlButton.addEventListener("click", exportSelectedStl);
-sendAssemblyButton.addEventListener("click", sendGeneratedAssembly);
+exportStlButton.addEventListener("click", () => {
+  void exportSelectedStl();
+});
+sendAssemblyButton.addEventListener("click", () => {
+  void sendGeneratedAssembly();
+});
 
 duplicateBodyButton.addEventListener("click", () => {
-  const body = selectedProjectBody();
-  if (!body) return;
-  commit(duplicateBody(history.current, body.id), "Body duplicated");
+  if (!selectedProjectBody()) return;
+  duplicateBodyForAssistant();
 });
 
 deleteBodyButton.addEventListener("click", () => {
-  const body = selectedProjectBody();
-  if (!body) return;
-  commit(deleteBody(history.current, body.id), "Body deleted");
+  if (!selectedProjectBody()) return;
+  deleteBodyForAssistant();
 });
 
 addCircularHoleButton.addEventListener("click", () => {
@@ -1159,3 +1860,4 @@ cutProfileFields.addEventListener("click", (event) => {
 renderTemplateOptions();
 renderAdvancedOptions();
 render();
+mountPartsAssistant();

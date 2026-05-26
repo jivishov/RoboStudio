@@ -5,6 +5,7 @@ export const ACTION_SAFETY = Object.freeze({
 
 export const ASSISTANT_PAGES = Object.freeze({
   STUDIO: "studio",
+  PARTS: "parts",
   WORKBENCH: "workbench"
 });
 
@@ -39,6 +40,14 @@ const vector3Schema = (description) => ({
   items: { type: "number" }
 });
 
+const vector2Schema = (description) => ({
+  type: "array",
+  description,
+  minItems: 2,
+  maxItems: 2,
+  items: { type: "number" }
+});
+
 const objectSchema = (properties, required = []) => ({
   type: "object",
   properties,
@@ -62,7 +71,7 @@ const studioActions = [
     ASSISTANT_PAGES.STUDIO,
     "studio_set_mode",
     "Switch the Assembly Studio interaction mode.",
-    objectSchema({ mode: stringSchema("Mode to activate.", { enum: ["select", "move", "rotate", "hinge"] }) }, ["mode"])
+    objectSchema({ mode: stringSchema("Mode to activate.", { enum: ["select", "move", "rotate", "resize", "hinge"] }) }, ["mode"])
   ),
   defineAction(
     ASSISTANT_PAGES.STUDIO,
@@ -133,6 +142,16 @@ const studioActions = [
       scale: vector3Schema("Optional local XYZ scale; values must be positive.")
     })
   ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_resize_selected_part",
+    "Resize the selected or provided Assembly Studio part to a target bounding-box size in millimeters.",
+    objectSchema({
+      partId: stringSchema("Optional part id to select before resizing.", { maxLength: 120 }),
+      targetSizeMm: vector3Schema("Target bounding-box size in millimeters."),
+      uniform: booleanSchema("Whether to preserve proportions while resizing.")
+    }, ["targetSizeMm"])
+  ),
   defineAction(ASSISTANT_PAGES.STUDIO, "studio_duplicate_selected_part", "Duplicate the selected part.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Duplicate the selected part."
@@ -161,6 +180,172 @@ const studioActions = [
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Open the STL import file picker."
   })
+];
+
+const partTemplateIds = Object.freeze([
+  "base_plate",
+  "link_bar",
+  "servo_mount_plate",
+  "l_bracket",
+  "u_bracket",
+  "spacer_standoff",
+  "axle_shaft",
+  "gripper_finger"
+]);
+
+const revolvePresetIds = Object.freeze(["shaft", "pulley", "bushing", "wheel", "collar", "knob", "spacer"]);
+const booleanOperations = Object.freeze(["union", "subtract", "intersect"]);
+const hexColorSchema = stringSchema("Optional body color as a six-digit hex value.", {
+  maxLength: 7,
+  pattern: "^#[0-9a-fA-F]{6}$"
+});
+
+const partsActions = [
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_new_project", "Reset the Part Studio to a new empty PartProject.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Start a new empty PartProject."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_save_project_json", "Download the current PartProject JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Download the current PartProject JSON."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_open_project_picker", "Open a file picker to import a PartProject JSON file.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Open the PartProject JSON file picker."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_export_selected_stl", "Build if needed and export the selected generated body as STL.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Export the selected generated body as STL."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_send_assembly", "Build if needed, write the generated assembly snapshot, and open Assembly Studio.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Send generated bodies to Assembly Studio."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_open_assembly_studio", "Navigate back to the Assembly Studio.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Open the Assembly Studio."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_undo", "Undo the latest PartProject edit.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_redo", "Redo the latest undone PartProject edit.", emptyObjectSchema),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_select_body",
+    "Select a Part Studio body by id.",
+    objectSchema({ bodyId: stringSchema("Body id to select.", { maxLength: 120 }) }, ["bodyId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_set_template_selection",
+    "Select the starter template used by the Add Body button.",
+    objectSchema({ templateId: stringSchema("Template id.", { enum: partTemplateIds }) }, ["templateId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_add_template_body",
+    "Add a starter template body. If templateId is omitted, the current template selection is used.",
+    objectSchema({ templateId: stringSchema("Optional template id.", { enum: partTemplateIds }) })
+  ),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_duplicate_body", "Duplicate the selected or provided body.", objectSchema({
+    bodyId: stringSchema("Optional body id to duplicate.", { maxLength: 120 })
+  })),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_delete_body", "Delete the selected or provided body.", objectSchema({
+    bodyId: stringSchema("Optional body id to delete.", { maxLength: 120 })
+  }), {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Delete the selected or provided body."
+  }),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_set_body_properties",
+    "Edit the selected or provided body name, color, extrusion depth, position, and scale.",
+    objectSchema({
+      bodyId: stringSchema("Optional body id to edit.", { maxLength: 120 }),
+      name: stringSchema("Optional body name.", { maxLength: 120 }),
+      color: hexColorSchema,
+      extrudeDepthMm: numberSchema("Optional sketch extrusion depth in millimeters.", { minimum: 0.1 }),
+      position: vector3Schema("Optional body position in millimeters."),
+      scale: vector3Schema("Optional body scale; values must be positive.")
+    })
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_resize_body",
+    "Resize the selected or provided Part Studio body by target dimensions in millimeters.",
+    objectSchema({
+      bodyId: stringSchema("Optional body id to resize.", { maxLength: 120 }),
+      targetSizeMm: vector3Schema("Target size in X/Y/Z millimeters."),
+      uniform: booleanSchema("Whether to preserve proportions while resizing."),
+      keepCutSizes: booleanSchema("Whether sketch holes and cutouts should keep their physical size.")
+    }, ["targetSizeMm"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_set_profile",
+    "Edit the selected body's outer profile or one cut profile.",
+    objectSchema({
+      bodyId: stringSchema("Optional body id to edit.", { maxLength: 120 }),
+      target: stringSchema("Profile target.", { enum: ["outer", "cut"] }),
+      profileId: stringSchema("Optional cut profile id.", { maxLength: 120 }),
+      cutIndex: numberSchema("Optional zero-based cut profile index.", { minimum: 0 }),
+      x: numberSchema("Optional profile center X in millimeters."),
+      z: numberSchema("Optional profile center Z in millimeters."),
+      radius: numberSchema("Optional circle radius in millimeters.", { minimum: 0.1 }),
+      length: numberSchema("Optional slot length in millimeters.", { minimum: 0.1 }),
+      width: numberSchema("Optional profile width in millimeters.", { minimum: 0.1 }),
+      height: numberSchema("Optional profile height in millimeters.", { minimum: 0.1 }),
+      cornerRadius: numberSchema("Optional rectangle corner radius in millimeters.", { minimum: 0 }),
+      points: {
+        type: "array",
+        description: "Optional replacement polyline points as [x, z] pairs.",
+        items: vector2Schema("Polyline point.")
+      }
+    }, ["target"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_add_cut_profile",
+    "Add a circular or slotted cut profile to the selected or provided sketch body.",
+    objectSchema({
+      bodyId: stringSchema("Optional body id.", { maxLength: 120 }),
+      type: stringSchema("Cut profile type.", { enum: ["circle", "slot"] })
+    }, ["type"])
+  ),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_remove_cut_profile", "Remove a cut profile from the selected or provided sketch body.", objectSchema({
+    bodyId: stringSchema("Optional body id.", { maxLength: 120 }),
+    profileId: stringSchema("Optional cut profile id.", { maxLength: 120 }),
+    cutIndex: numberSchema("Optional zero-based cut profile index.", { minimum: 0 })
+  })),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_add_linear_pattern", "Add the page's linear hole pattern to the selected or provided sketch body.", objectSchema({
+    bodyId: stringSchema("Optional body id.", { maxLength: 120 })
+  })),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_add_circular_pattern", "Add the page's bolt-circle pattern to the selected or provided sketch body.", objectSchema({
+    bodyId: stringSchema("Optional body id.", { maxLength: 120 })
+  })),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_set_revolve_preset",
+    "Select the lathe preset used by the Add Lathe Body button.",
+    objectSchema({ presetId: stringSchema("Revolve preset id.", { enum: revolvePresetIds }) }, ["presetId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_add_revolve_body",
+    "Add a lathe body. If presetId is omitted, the current lathe preset selection is used.",
+    objectSchema({ presetId: stringSchema("Optional revolve preset id.", { enum: revolvePresetIds }) })
+  ),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_add_spur_gear", "Add the page's default spur gear body.", emptyObjectSchema),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_set_boolean_operation",
+    "Select the boolean operation used by the Create Boolean Body button.",
+    objectSchema({ operation: stringSchema("Boolean operation.", { enum: booleanOperations }) }, ["operation"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_add_boolean_body",
+    "Create a boolean result body using the same selected-body operand behavior as the page.",
+    objectSchema({ operation: stringSchema("Optional boolean operation.", { enum: booleanOperations }) })
+  )
 ];
 
 const workbenchActions = [
@@ -418,7 +603,7 @@ const workbenchActions = [
   })
 ];
 
-export const ASSISTANT_ACTIONS = Object.freeze([...studioActions, ...workbenchActions]);
+export const ASSISTANT_ACTIONS = Object.freeze([...studioActions, ...partsActions, ...workbenchActions]);
 
 const ACTION_BY_PAGE_AND_NAME = new Map(
   ASSISTANT_ACTIONS.map((action) => [`${action.page}:${action.name}`, action])
@@ -482,6 +667,7 @@ function validateValue(schema, value, path, errors) {
       return;
     }
     if (schema.enum && !schema.enum.includes(value)) errors.push(`${path} must be one of ${schema.enum.join(", ")}`);
+    if (schema.pattern && !(new RegExp(schema.pattern).test(value))) errors.push(`${path} must match ${schema.pattern}`);
     if (Number.isFinite(schema.maxLength) && value.length > schema.maxLength) {
       errors.push(`${path} must be ${schema.maxLength} characters or fewer`);
     }

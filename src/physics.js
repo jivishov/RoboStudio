@@ -29,7 +29,7 @@ import {
   sanitizeId
 } from "./physics/model.js";
 import { WorkbenchOverlays } from "./physics/overlays.js";
-import { readCurrentSnapshot, readSavedRobotDesign, saveRobotDesign } from "./physics/persistence.js";
+import { readCurrentSnapshot, readSavedRobotDesign, saveRobotDesign, snapshotNewerThanDesign } from "./physics/persistence.js";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 import { isAssistantEvalEnabled } from "./assistant/evalScenarios.js";
@@ -2374,7 +2374,8 @@ async function loadAssembly() {
     fitCameraToObject(state.assemblyRoot);
 
     const savedDesign = evalMode ? null : await readSavedRobotDesign();
-    state.design = designMatchesParts(savedDesign, state.partRecords)
+    const reuseSavedDesign = designMatchesParts(savedDesign, state.partRecords);
+    state.design = reuseSavedDesign
       ? normalizeRobotDesign(savedDesign, state.partRecords)
       : createRobotDesign(state.partRecords, { sample: isSampleAssembly(state.partRecords) });
     state.selectedLinkId = state.design.links[0]?.id ?? null;
@@ -2384,6 +2385,9 @@ async function loadAssembly() {
     state.selectedActuatorId = state.design.actuators[0]?.id ?? null;
     invalidateSimulation("Simulation has not been initialized.");
     renderAll();
+    if (reuseSavedDesign && snapshotNewerThanDesign(snapshot, savedDesign)) {
+      showStatus("Assembly geometry changed after the saved RobotDesign; refresh mass and proxies from bounds if needed.", 7200);
+    }
   } catch (error) {
     console.error(error);
     showStatus(error?.userMessage ?? "Unable to load robotics workbench");
