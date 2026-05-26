@@ -29,3 +29,9 @@ export async function saveRobotDesign(design, options) {
     options
   );
 }
+
+export function snapshotNewerThanDesign(snapshot, design) {
+  const snapshotTime = Date.parse(snapshot?.savedAt ?? "");
+  const designTime = Date.parse(design?.updatedAt ?? "");
+  return Number.isFinite(snapshotTime) && Number.isFinite(designTime) && snapshotTime > designTime;
+}

@@ -61,21 +61,33 @@ test("assistant model catalog exposes only requested model ids", () => {
 
 test("action registry separates safe and guarded page actions", () => {
   const studioActions = getActionsForPage(ASSISTANT_PAGES.STUDIO);
+  const partsActions = getActionsForPage(ASSISTANT_PAGES.PARTS);
   const workbenchActions = getActionsForPage(ASSISTANT_PAGES.WORKBENCH);
 
   assert.ok(studioActions.some((action) => action.name === "studio_set_mode"));
+  assert.ok(studioActions.some((action) => action.name === "studio_resize_selected_part"));
   assert.ok(studioActions.some((action) => action.name === "studio_export_glb"));
+  assert.ok(partsActions.some((action) => action.name === "parts_add_template_body"));
+  assert.ok(partsActions.some((action) => action.name === "parts_resize_body"));
+  assert.ok(partsActions.some((action) => action.name === "parts_export_selected_stl"));
   assert.ok(workbenchActions.some((action) => action.name === "workbench_step_simulation"));
   assert.ok(workbenchActions.some((action) => action.name === "workbench_delete_proxy"));
 
   assert.equal(getActionDefinition(ASSISTANT_PAGES.STUDIO, "studio_set_mode").safety, ACTION_SAFETY.AUTO);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.STUDIO, "studio_export_glb").safety, ACTION_SAFETY.GUARDED);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_add_template_body").safety, ACTION_SAFETY.AUTO);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_new_project").safety, ACTION_SAFETY.GUARDED);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_delete_body").safety, ACTION_SAFETY.GUARDED);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.WORKBENCH, "workbench_delete_proxy").safety, ACTION_SAFETY.GUARDED);
 });
 
 test("action argument validation rejects unknown, unsafe, and malformed input", () => {
   assert.equal(
     validateActionArguments(ASSISTANT_PAGES.STUDIO, "studio_set_mode", { mode: "hinge" }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.STUDIO, "studio_set_mode", { mode: "resize" }).ok,
     true
   );
   assert.equal(
@@ -95,6 +107,40 @@ test("action argument validation rejects unknown, unsafe, and malformed input", 
     false
   );
   assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_add_template_body", { templateId: "link_bar" }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_add_template_body", { templateId: "unknown" }).ok,
+    false
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_set_body_properties", { color: "#ff0000", scale: [1, 1, 1] }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_resize_body", {
+      targetSizeMm: [120, 6, 80],
+      uniform: false,
+      keepCutSizes: true
+    }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.STUDIO, "studio_resize_selected_part", {
+      targetSizeMm: [120, 6]
+    }).ok,
+    false
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_set_body_properties", { color: "red" }).ok,
+    false
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_set_profile", { target: "cut", points: [[1, 2], [3, 4]] }).ok,
+    true
+  );
+  assert.equal(
     validateActionArguments(ASSISTANT_PAGES.WORKBENCH, "workbench_unknown", {}).ok,
     false
   );
@@ -106,8 +152,24 @@ test("tool schemas are generated from the central action registry", () => {
 
   assert.ok(setMode);
   assert.equal(setMode.type, "function");
-  assert.deepEqual(setMode.parameters.properties.mode.enum, ["select", "move", "rotate", "hinge"]);
+  assert.deepEqual(setMode.parameters.properties.mode.enum, ["select", "move", "rotate", "resize", "hinge"]);
   assert.equal(tools.some((tool) => tool.name === "workbench_set_mode"), false);
+
+  const partsTools = toolsForPage(ASSISTANT_PAGES.PARTS);
+  const addTemplate = partsTools.find((tool) => tool.name === "parts_add_template_body");
+  assert.ok(addTemplate);
+  assert.deepEqual(addTemplate.parameters.properties.templateId.enum, [
+    "base_plate",
+    "link_bar",
+    "servo_mount_plate",
+    "l_bracket",
+    "u_bracket",
+    "spacer_standoff",
+    "axle_shaft",
+    "gripper_finger"
+  ]);
+  assert.equal(partsTools.some((tool) => tool.name === "studio_set_mode"), false);
+  assert.ok(partsTools.some((tool) => tool.name === "parts_resize_body"));
 });
 
 test("Responses request builder uses model catalog, tools, previous response id, and tool outputs", () => {
@@ -140,6 +202,17 @@ test("Responses request builder uses model catalog, tools, previous response id,
   assert.equal(toolTurn.input[0].type, "function_call_output");
   assert.equal(toolTurn.input[0].call_id, "call_1");
   assert.ok(toolTurn.tools.some((tool) => tool.name === "workbench_step_simulation"));
+
+  const partsTurn = buildResponsesRequest({
+    model: "gpt-5.5",
+    pageId: ASSISTANT_PAGES.PARTS,
+    reasoningEffort: "medium",
+    pageContext: { selection: null },
+    message: "Add a link bar"
+  });
+  assert.ok(partsTurn.instructions.includes("Robotic Part Studio"));
+  assert.ok(partsTurn.tools.some((tool) => tool.name === "parts_add_template_body"));
+  assert.equal(partsTurn.tools.some((tool) => tool.name === "workbench_step_simulation"), false);
 });
 
 test("Responses request builder rejects unsupported models, pages, and efforts", () => {
@@ -356,6 +429,38 @@ test("assistant eval scenarios use mini model with high reasoning and validate s
   );
   assert.equal(summary.pass, true);
   assert.equal(summary.usage.total_tokens, 100);
+
+  const partsScenarios = getAssistantEvalScenarios(ASSISTANT_PAGES.PARTS);
+  const templateEdit = partsScenarios.find((scenario) => scenario.id === "parts-template-edit");
+  assert.ok(templateEdit);
+  assert.deepEqual(templateEdit.requiredCalls, [
+    "parts_add_template_body",
+    "parts_select_body",
+    "parts_set_body_properties"
+  ]);
+
+  const partsSummary = evaluateScenarioResult(
+    templateEdit,
+    {
+      toolCalls: templateEdit.requiredCalls.map((name) => ({ name })),
+      guardedCalls: [],
+      stoppedForMaxRounds: false,
+      latencyMs: 450,
+      usage: { total_tokens: 90 },
+      finalText: "Done."
+    },
+    {
+      page: "Robotic Part Studio",
+      selection: {
+        id: "link_bar",
+        name: "Test link",
+        color: "#ff0000",
+        extrudeDepthMm: 7,
+        transform: { position: [5, 0, 0] }
+      }
+    }
+  );
+  assert.equal(partsSummary.pass, true);
 });
 
 test("assistant turn runner stages guarded actions without executing them", async () => {

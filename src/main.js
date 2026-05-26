@@ -26,6 +26,7 @@ import {
   serializePose,
   setPartOffsetTransform
 } from "./studio/poseState.js";
+import { scaleForTargetBounds } from "./studio/resize.js";
 import {
   generatedSnapshotParts,
   isPartsHandoffRequested,
@@ -72,6 +73,10 @@ const selectedMaterials = document.querySelector("#selected-materials");
 const selectedBounds = document.querySelector("#selected-bounds");
 const offsetInputs = document.querySelectorAll(".offset-input");
 const scaleInputs = document.querySelectorAll(".scale-input");
+const resizeSizeInputs = document.querySelectorAll(".resize-size-input");
+const selectedCurrentSize = document.querySelector("#selected-current-size");
+const resizeUniformToggle = document.querySelector("#resize-uniform-toggle");
+const resetScaleButton = document.querySelector("#reset-scale");
 const activeModeLabel = document.querySelector("#active-mode-label");
 const activeModeInstructions = document.querySelector("#active-mode-instructions");
 const stageSelectedName = document.querySelector("#stage-selected-name");
@@ -468,6 +473,13 @@ function formatBounds(part) {
   return `${formatNumber(size.x, 1)} x ${formatNumber(size.y, 1)} x ${formatNumber(size.z, 1)}`;
 }
 
+function partBoundsSize(part) {
+  if (!part) return [0, 0, 0];
+  const box = new THREE.Box3().setFromObject(part);
+  const size = box.getSize(new THREE.Vector3());
+  return [size.x, size.y, size.z];
+}
+
 function partMaterials(part) {
   if (!part?.material) return [];
   return Array.isArray(part.material) ? part.material : [part.material];
@@ -814,6 +826,7 @@ function updateModeButtons() {
       select: ["Click a part to select", "Use inspector values to inspect"],
       move: ["Select a part", "Drag arrows or edit position"],
       rotate: ["Select a part", "Drag rings or edit rotation"],
+      resize: ["Select a part", "Drag handles or enter target size"],
       hinge: ["Click a rigged part or choose a joint", "Use slider or angle input to rotate"]
     };
     activeModeInstructions.replaceChildren(
@@ -830,9 +843,9 @@ function updateTransformAttachment() {
   transformControls.detach();
   transformControls.enabled = false;
 
-  if (selectedPart && selectedPart.visible && (studioMode === "move" || studioMode === "rotate")) {
+  if (selectedPart && selectedPart.visible && (studioMode === "move" || studioMode === "rotate" || studioMode === "resize")) {
     transformControls.enabled = true;
-    transformControls.setMode(studioMode === "move" ? "translate" : "rotate");
+    transformControls.setMode(studioMode === "move" ? "translate" : studioMode === "resize" ? "scale" : "rotate");
     transformControls.attach(selectedPart);
   }
 }
@@ -939,6 +952,12 @@ function updateSelectedInspector() {
   selectedTriangles.textContent = hasSelection ? triangleCount(selectedPart).toLocaleString() : "-";
   selectedMaterials.textContent = hasSelection ? Math.max(1, partMaterials(selectedPart).length) : "-";
   selectedBounds.textContent = hasSelection ? formatBounds(selectedPart) : "-";
+  const boundsSize = hasSelection ? partBoundsSize(selectedPart) : [0, 0, 0];
+  if (selectedCurrentSize) {
+    selectedCurrentSize.textContent = hasSelection
+      ? boundsSize.map((value) => formatNumber(value, 1)).join(" x ")
+      : "-";
+  }
 
   for (const input of offsetInputs) {
     input.disabled = !hasSelection;
@@ -956,6 +975,13 @@ function updateSelectedInspector() {
     input.disabled = !hasSelection;
     input.value = hasSelection ? transform.scale[index].toFixed(3) : "1.000";
   }
+
+  for (const [index, input] of [...resizeSizeInputs].entries()) {
+    input.disabled = !hasSelection;
+    input.value = hasSelection ? boundsSize[index].toFixed(2) : "0";
+  }
+  if (resizeUniformToggle) resizeUniformToggle.disabled = !hasSelection;
+  if (resetScaleButton) resetScaleButton.disabled = !hasSelection;
 
   updateStageStatus();
 }
@@ -1070,6 +1096,49 @@ function handleScaleInput(input) {
   markDirty();
 }
 
+function setSelectedScaleVector(scale, message = "Resize updated") {
+  const partId = selectedPartId();
+  if (!partId) throw new Error("Select a part before resizing.");
+  const transform = getPartOffsetTransform(poseState, partId);
+  transform.scale = scale.map((value) => Math.max(0.001, Number(value)));
+  setPartOffsetTransform(poseState, partId, transform);
+  applyCurrentPose();
+  updateSelectedInspector();
+  updateTransformAttachment();
+  markDirty(message);
+}
+
+function resizeSelectedPartToTargetSize(targetSizeMm, options = {}) {
+  const partId = selectedPartId();
+  if (!partId || !selectedPart) throw new Error("Select a part before resizing.");
+  const transform = getPartOffsetTransform(poseState, partId);
+  const currentBounds = partBoundsSize(selectedPart);
+  const nextScale = scaleForTargetBounds(currentBounds, transform.scale, targetSizeMm, options);
+  setSelectedScaleVector(nextScale, "Part resized");
+}
+
+function handleResizeSizeInput(input) {
+  try {
+    const axis = Number(input.dataset.axis);
+    const currentBounds = partBoundsSize(selectedPart);
+    const target = [...currentBounds];
+    target[axis] = Number(input.value);
+    resizeSelectedPartToTargetSize(target, {
+      axis,
+      uniform: resizeUniformToggle?.checked !== false
+    });
+  } catch (error) {
+    showStatus(error.message ?? "Unable to resize selected part.", 4200);
+    updateSelectedInspector();
+  }
+}
+
+function resetSelectedScale() {
+  const partId = selectedPartId();
+  if (!partId) return;
+  setSelectedScaleVector([1, 1, 1], "Scale reset");
+}
+
 function worldMatrixToLocalTransform(worldMatrix, parent) {
   const parentInverse = new THREE.Matrix4();
   parent.updateMatrixWorld(true);
@@ -1178,13 +1247,17 @@ function animate() {
 }
 
 function assistantPartSummary(part) {
+  const partId = part.userData.id;
+  const transform = poseState ? getPartOffsetTransform(poseState, partId) : null;
   return {
-    id: part.userData.id,
+    id: partId,
     name: part.userData.label ?? part.name ?? part.userData.id,
     type: part.userData.type ?? "part",
     visible: part.visible,
     opacityPercent: Math.round(partOpacity(part) * 100),
-    triangles: triangleCount(part)
+    triangles: triangleCount(part),
+    boundsSizeMm: partBoundsSize(part),
+    scale: transform?.scale ?? [1, 1, 1]
   };
 }
 
@@ -1272,6 +1345,18 @@ function studioSetSelectedTransform(args) {
   markDirty("Transform updated");
 }
 
+function studioResizeSelectedPart(args = {}) {
+  requireAssemblyReady();
+  if (args.partId) selectPartForAssistant(args.partId);
+  if (!selectedPart) throw new Error("Select a part before resizing.");
+  const currentBounds = partBoundsSize(selectedPart);
+  const longestAxis = currentBounds.reduce((bestAxis, size, axis) => (size > currentBounds[bestAxis] ? axis : bestAxis), 0);
+  resizeSelectedPartToTargetSize(args.targetSizeMm, {
+    axis: longestAxis,
+    uniform: args.uniform !== false
+  });
+}
+
 function mountStudioAssistant() {
   const assistant = mountPageAssistant({
     pageId: "studio",
@@ -1357,6 +1442,10 @@ function mountStudioAssistant() {
       studio_set_selected_transform: (args) => {
         studioSetSelectedTransform(args);
         return "Selected part transform updated.";
+      },
+      studio_resize_selected_part: (args) => {
+        studioResizeSelectedPart(args);
+        return "Selected part resized.";
       },
       studio_duplicate_selected_part: () => {
         duplicateSelectedPart();
@@ -1508,6 +1597,7 @@ jointAngleNumber.addEventListener("input", () => setJointAngle(jointSelect.value
 resetJointButton.addEventListener("click", resetCurrentJoint);
 resetPoseButton.addEventListener("click", resetPose);
 resetSelectedButton.addEventListener("click", resetSelectedPart);
+resetScaleButton.addEventListener("click", resetSelectedScale);
 duplicateSelectedButton.addEventListener("click", duplicateSelectedPart);
 removeSelectedButton.addEventListener("click", removeSelectedPart);
 
@@ -1517,6 +1607,10 @@ for (const input of offsetInputs) {
 
 for (const input of scaleInputs) {
   input.addEventListener("change", () => handleScaleInput(input));
+}
+
+for (const input of resizeSizeInputs) {
+  input.addEventListener("change", () => handleResizeSizeInput(input));
 }
 
 window.addEventListener("resize", onResize);

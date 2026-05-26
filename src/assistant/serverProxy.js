@@ -8,6 +8,7 @@ import { ASSISTANT_PAGES, toolsForPage } from "./actionCatalog.js";
 
 const PAGE_LABELS = Object.freeze({
   [ASSISTANT_PAGES.STUDIO]: "STL Assembly Studio",
+  [ASSISTANT_PAGES.PARTS]: "Robotic Part Studio",
   [ASSISTANT_PAGES.WORKBENCH]: "Robotics Design Workbench"
 });
 

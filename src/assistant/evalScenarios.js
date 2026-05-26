@@ -28,6 +28,12 @@ function findProxy(context, linkId, proxyId) {
   return findLink(context, linkId)?.proxies?.find((proxy) => proxy.id === proxyId) ?? null;
 }
 
+function findBody(context, bodyId) {
+  return context?.bodies?.find((body) => body.id === bodyId)
+    ?? context?.project?.bodies?.find((body) => body.id === bodyId)
+    ?? null;
+}
+
 function requireState(condition, message) {
   return condition ? [] : [message];
 }
@@ -111,6 +117,72 @@ export const ASSISTANT_EVAL_SCENARIOS = Object.freeze([
         ...requireState(context?.controls?.gridVisible === false, "Expected grid visibility to be false.")
       ];
     }
+  },
+  {
+    id: "parts-template-edit",
+    pageId: ASSISTANT_PAGES.PARTS,
+    title: "Part Studio Template Edit",
+    prompt: "Add a link bar template body, select it, rename it Test link, set color to #ff0000, set extrusion depth to 7 mm, and move it to [5, 0, 0].",
+    requiredCalls: ["parts_add_template_body", "parts_select_body", "parts_set_body_properties"],
+    requiredGuardedCalls: [],
+    setupActions: [
+      { name: "parts_new_project", args: {} }
+    ],
+    assert: (context) => {
+      const body = context?.selection;
+      return [
+        ...requireState(context?.page === "Robotic Part Studio", "Expected Part Studio context."),
+        ...requireState(body?.id === "link_bar", "Expected link_bar to be selected."),
+        ...requireState(body?.name === "Test link", "Expected selected body to be renamed Test link."),
+        ...requireState(body?.color === "#ff0000", "Expected selected body color to be #ff0000."),
+        ...requireState(near(body?.extrudeDepthMm, 7), "Expected selected body extrusion depth near 7 mm."),
+        ...requireState(vectorNear(body?.transform?.position, [5, 0, 0]), "Expected selected body position to be [5, 0, 0].")
+      ];
+    }
+  },
+  {
+    id: "parts-cuts-and-advanced",
+    pageId: ASSISTANT_PAGES.PARTS,
+    title: "Part Studio Cuts And Advanced Bodies",
+    prompt: "Add a base plate, add a circular hole, add a bolt circle, set the lathe preset to wheel, add the lathe body, and add a spur gear.",
+    requiredCalls: [
+      "parts_add_template_body",
+      "parts_add_cut_profile",
+      "parts_add_circular_pattern",
+      "parts_set_revolve_preset",
+      "parts_add_revolve_body",
+      "parts_add_spur_gear"
+    ],
+    requiredGuardedCalls: [],
+    setupActions: [
+      { name: "parts_new_project", args: {} }
+    ],
+    assert: (context) => {
+      const base = findBody(context, "base_plate");
+      return [
+        ...requireState((context?.counts?.bodies ?? 0) >= 3, "Expected at least three bodies."),
+        ...requireState((base?.cutProfiles?.length ?? 0) >= 11, "Expected base plate to contain the original cuts, added hole, and bolt circle."),
+        ...requireState(context?.bodies?.some((body) => body.sourceKind === "revolve"), "Expected a revolve body."),
+        ...requireState(context?.bodies?.some((body) => body.sourceKind === "spurGear"), "Expected a spur gear body.")
+      ];
+    }
+  },
+  {
+    id: "parts-boolean-guarded-staging",
+    pageId: ASSISTANT_PAGES.PARTS,
+    title: "Part Studio Boolean And Guarded Staging",
+    prompt: "Create a subtract boolean body, export the selected STL, and delete the selected body.",
+    requiredCalls: ["parts_set_boolean_operation", "parts_add_boolean_body"],
+    requiredGuardedCalls: ["parts_export_selected_stl", "parts_delete_body"],
+    setupActions: [
+      { name: "parts_new_project", args: {} },
+      { name: "parts_add_template_body", args: { templateId: "base_plate" } },
+      { name: "parts_add_template_body", args: { templateId: "spacer_standoff" } }
+    ],
+    assert: (context) => [
+      ...requireState(context?.bodies?.some((body) => body.sourceKind === "booleanOperation"), "Expected a boolean operation body."),
+      ...requireState((context?.counts?.bodies ?? 0) === 3, "Expected guarded delete to leave the body count unchanged.")
+    ]
   },
   {
     id: "workbench-ik-solve",

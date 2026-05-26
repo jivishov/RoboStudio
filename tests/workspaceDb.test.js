@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readSavedRobotDesign } from "../src/physics/persistence.js";
+import { readSavedRobotDesign, snapshotNewerThanDesign } from "../src/physics/persistence.js";
 import {
   CURRENT_DESIGN_KEY,
   CURRENT_SNAPSHOT_KEY,
@@ -240,6 +240,24 @@ test("missing saved robot design returns null", async () => {
   const indexedDb = new FakeIndexedDB();
 
   assert.equal(await readSavedRobotDesign({ indexedDb }), null);
+});
+
+test("detects assembly snapshots newer than saved robot designs", () => {
+  assert.equal(
+    snapshotNewerThanDesign(
+      { savedAt: "2026-05-25T12:30:00.000Z" },
+      { updatedAt: "2026-05-25T12:00:00.000Z" }
+    ),
+    true
+  );
+  assert.equal(
+    snapshotNewerThanDesign(
+      { savedAt: "2026-05-25T11:30:00.000Z" },
+      { updatedAt: "2026-05-25T12:00:00.000Z" }
+    ),
+    false
+  );
+  assert.equal(snapshotNewerThanDesign({ savedAt: "bad" }, { updatedAt: "2026-05-25T12:00:00.000Z" }), false);
 });
 
 test("blocked workspace repair gives a close-other-tabs error", async () => {

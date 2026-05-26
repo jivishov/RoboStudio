@@ -35,6 +35,10 @@
             <span class="mode-icon mode-icon--rotate"></span>
             Rotate
           </button>
+          <button class="mode-button" type="button" data-mode="resize">
+            <span class="mode-icon mode-icon--resize"></span>
+            Resize
+          </button>
           <button class="mode-button is-active" type="button" data-mode="hinge">
             <span class="mode-icon mode-icon--hinge"></span>
             Hinge
@@ -222,11 +226,24 @@
             <label>X <input class="offset-input" data-offset-kind="rotation" data-axis="0" type="number" step="1" value="0" disabled /></label>
             <label>Y <input class="offset-input" data-offset-kind="rotation" data-axis="1" type="number" step="1" value="0" disabled /></label>
             <label>Z <input class="offset-input" data-offset-kind="rotation" data-axis="2" type="number" step="1" value="0" disabled /></label>
-            <span>Scale</span>
+            <span>Scale ratio</span>
             <label>X <input class="scale-input" data-axis="0" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
             <label>Y <input class="scale-input" data-axis="1" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
             <label>Z <input class="scale-input" data-axis="2" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+            <span>Current size (mm)</span>
+            <output id="selected-current-size" class="transform-output">-</output>
+            <span>Target size (mm)</span>
+            <label>X <input class="resize-size-input" data-axis="0" type="number" min="0.001" step="0.5" value="0" disabled /></label>
+            <label>Y <input class="resize-size-input" data-axis="1" type="number" min="0.001" step="0.5" value="0" disabled /></label>
+            <label>Z <input class="resize-size-input" data-axis="2" type="number" min="0.001" step="0.5" value="0" disabled /></label>
           </div>
+          <label class="resize-toggle-row">
+            <input id="resize-uniform-toggle" type="checkbox" checked disabled />
+            <span>Uniform resize</span>
+          </label>
+          <button id="reset-scale" class="secondary-button secondary-button--wide" type="button" disabled>
+            Reset Scale
+          </button>
           <button id="reset-selected" class="secondary-button secondary-button--wide" type="button" disabled>
             Reset Transform
           </button>
