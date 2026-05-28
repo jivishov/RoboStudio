@@ -27,6 +27,11 @@ import {
 import { formatResponseMetrics } from "../../src/assistant/metrics.js";
 import { clampAssistantPosition } from "../../src/assistant/drag.js";
 import {
+  assistantConversationFileName,
+  buildAssistantConversationTranscript,
+  formatAssistantMessageTimestamp
+} from "../../src/assistant/conversationTranscript.js";
+import {
   ASSISTANT_EVAL_MODEL,
   ASSISTANT_EVAL_REASONING_EFFORT,
   evaluateScenarioResult,
@@ -67,16 +72,27 @@ test("action registry separates safe and guarded page actions", () => {
   assert.ok(studioActions.some((action) => action.name === "studio_set_mode"));
   assert.ok(studioActions.some((action) => action.name === "studio_resize_selected_part"));
   assert.ok(studioActions.some((action) => action.name === "studio_export_glb"));
+  assert.ok(studioActions.some((action) => action.name === "studio_clear_scene"));
   assert.ok(partsActions.some((action) => action.name === "parts_add_template_body"));
+  assert.ok(partsActions.some((action) => action.name === "parts_create_custom_sketch_body"));
+  assert.ok(partsActions.some((action) => action.name === "parts_replace_sketch_body"));
   assert.ok(partsActions.some((action) => action.name === "parts_resize_body"));
+  assert.ok(partsActions.some((action) => action.name === "parts_save_selected_to_library"));
+  assert.ok(partsActions.some((action) => action.name === "parts_add_library_item"));
   assert.ok(partsActions.some((action) => action.name === "parts_export_selected_stl"));
   assert.ok(workbenchActions.some((action) => action.name === "workbench_step_simulation"));
   assert.ok(workbenchActions.some((action) => action.name === "workbench_delete_proxy"));
 
   assert.equal(getActionDefinition(ASSISTANT_PAGES.STUDIO, "studio_set_mode").safety, ACTION_SAFETY.AUTO);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.STUDIO, "studio_export_glb").safety, ACTION_SAFETY.GUARDED);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.STUDIO, "studio_clear_scene").safety, ACTION_SAFETY.GUARDED);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_add_template_body").safety, ACTION_SAFETY.AUTO);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_create_custom_sketch_body").safety, ACTION_SAFETY.AUTO);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_replace_sketch_body").safety, ACTION_SAFETY.AUTO);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_add_library_item").safety, ACTION_SAFETY.AUTO);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_new_project").safety, ACTION_SAFETY.GUARDED);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_save_selected_to_library").safety, ACTION_SAFETY.GUARDED);
+  assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_delete_library_item").safety, ACTION_SAFETY.GUARDED);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.PARTS, "parts_delete_body").safety, ACTION_SAFETY.GUARDED);
   assert.equal(getActionDefinition(ASSISTANT_PAGES.WORKBENCH, "workbench_delete_proxy").safety, ACTION_SAFETY.GUARDED);
 });
@@ -115,6 +131,14 @@ test("action argument validation rejects unknown, unsafe, and malformed input", 
     false
   );
   assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_add_library_item", { itemId: "saved_link" }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_add_library_item", {}).ok,
+    false
+  );
+  assert.equal(
     validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_set_body_properties", { color: "#ff0000", scale: [1, 1, 1] }).ok,
     true
   );
@@ -138,6 +162,31 @@ test("action argument validation rejects unknown, unsafe, and malformed input", 
   );
   assert.equal(
     validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_set_profile", { target: "cut", points: [[1, 2], [3, 4]] }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_create_custom_sketch_body", {
+      name: "Custom bracket",
+      extrudeDepthMm: 4,
+      outerProfile: { type: "polyline", points: [[-20, -10], [20, -10], [0, 25]], closed: true },
+      cutProfiles: [{ type: "circle", x: 0, z: 0, radius: 3 }]
+    }).ok,
+    true
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_create_custom_sketch_body", {
+      name: "Bad custom",
+      extrudeDepthMm: 4,
+      outerProfile: { type: "spline", points: [[0, 0], [1, 1], [2, 0]] }
+    }).ok,
+    false
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.PARTS, "parts_replace_sketch_body", {
+      bodyId: "custom_bracket",
+      extrudeDepthMm: 5,
+      outerProfile: { type: "rectangle", width: 40, height: 24 }
+    }).ok,
     true
   );
   assert.equal(
@@ -170,6 +219,10 @@ test("tool schemas are generated from the central action registry", () => {
   ]);
   assert.equal(partsTools.some((tool) => tool.name === "studio_set_mode"), false);
   assert.ok(partsTools.some((tool) => tool.name === "parts_resize_body"));
+  assert.ok(partsTools.some((tool) => tool.name === "parts_create_custom_sketch_body"));
+  assert.ok(partsTools.some((tool) => tool.name === "parts_replace_sketch_body"));
+  assert.ok(partsTools.some((tool) => tool.name === "parts_save_selected_to_library"));
+  assert.ok(partsTools.some((tool) => tool.name === "parts_add_library_item"));
 });
 
 test("Responses request builder uses model catalog, tools, previous response id, and tool outputs", () => {
@@ -185,6 +238,7 @@ test("Responses request builder uses model catalog, tools, previous response id,
   assert.equal(firstTurn.model, "gpt-5.5");
   assert.equal(firstTurn.previous_response_id, "resp_previous");
   assert.equal(firstTurn.parallel_tool_calls, false);
+  assert.equal(Object.hasOwn(firstTurn, "max_output_tokens"), false);
   assert.equal(firstTurn.reasoning.effort, "high");
   assert.ok(firstTurn.tools.some((tool) => tool.name === "studio_set_joint_angle"));
   assert.match(firstTurn.input[0].content[0].text, /Current page context/);
@@ -210,8 +264,11 @@ test("Responses request builder uses model catalog, tools, previous response id,
     pageContext: { selection: null },
     message: "Add a link bar"
   });
-  assert.ok(partsTurn.instructions.includes("Robotic Part Studio"));
+  assert.ok(partsTurn.instructions.includes("Robotic Component Builder"));
+  assert.ok(partsTurn.instructions.includes("design a custom sketch-extrude body"));
   assert.ok(partsTurn.tools.some((tool) => tool.name === "parts_add_template_body"));
+  assert.ok(partsTurn.tools.some((tool) => tool.name === "parts_create_custom_sketch_body"));
+  assert.ok(partsTurn.tools.some((tool) => tool.name === "parts_add_library_item"));
   assert.equal(partsTurn.tools.some((tool) => tool.name === "workbench_step_simulation"), false);
 });
 
@@ -376,6 +433,33 @@ test("assistant usage helpers normalize response and conversation token totals",
   );
 });
 
+test("assistant conversation helpers format timestamps and export transcripts", () => {
+  const now = new Date(2026, 4, 26, 15, 10, 0);
+  assert.equal(formatAssistantMessageTimestamp(new Date(2026, 4, 26, 14, 5, 0), now), "Today, 2:05 PM");
+  assert.equal(formatAssistantMessageTimestamp(new Date(2026, 4, 25, 9, 0, 0), now), "Yesterday, 9:00 AM");
+  assert.equal(formatAssistantMessageTimestamp(new Date(2026, 0, 3, 18, 30, 0), now), "Jan 3, 6:30 PM");
+  assert.equal(formatAssistantMessageTimestamp(new Date(2025, 11, 31, 23, 59, 0), now), "Dec 31, 2025, 11:59 PM");
+
+  const transcript = buildAssistantConversationTranscript({
+    title: "STL Assembly Studio assistant conversation",
+    savedAt: new Date(2026, 4, 26, 15, 10, 0),
+    messages: [
+      { role: "user", text: "Move the base.", createdAt: new Date(2026, 4, 26, 14, 5, 0) },
+      { role: "assistant", text: "Done.", createdAt: new Date(2026, 4, 26, 14, 6, 0) }
+    ]
+  });
+
+  assert.match(transcript, /STL Assembly Studio assistant conversation/);
+  assert.match(transcript, /Messages: 2/);
+  assert.match(transcript, /\[May 26, 2026, 2:05 PM\] You/);
+  assert.match(transcript, /Move the base\./);
+  assert.match(transcript, /\[May 26, 2026, 2:06 PM\] Assistant/);
+  assert.equal(
+    assistantConversationFileName("STL Assembly Studio", new Date(2026, 4, 26, 15, 10, 9)),
+    "stl-assembly-studio-conversation-2026-05-26-15-10-09.txt"
+  );
+});
+
 test("assistant drag clamp keeps card inside viewport", () => {
   assert.deepEqual(
     clampAssistantPosition({ x: -200, y: -50 }, { width: 900, height: 600 }, { width: 300, height: 220 }),
@@ -394,7 +478,7 @@ test("assistant drag clamp keeps card inside viewport", () => {
 test("assistant eval scenarios use mini model with high reasoning and validate state", () => {
   assert.equal(ASSISTANT_EVAL_MODEL, "gpt-5.4-mini");
   assert.equal(ASSISTANT_EVAL_REASONING_EFFORT, "high");
-  assert.equal(MAX_ASSISTANT_TOOL_ROUNDS, 6);
+  assert.equal(MAX_ASSISTANT_TOOL_ROUNDS, 12);
 
   const studioScenarios = getAssistantEvalScenarios(ASSISTANT_PAGES.STUDIO);
   const partSetup = studioScenarios.find((scenario) => scenario.id === "studio-part-setup");
@@ -450,7 +534,7 @@ test("assistant eval scenarios use mini model with high reasoning and validate s
       finalText: "Done."
     },
     {
-      page: "Robotic Part Studio",
+      page: "Robotic Component Builder",
       selection: {
         id: "link_bar",
         name: "Test link",
@@ -461,6 +545,10 @@ test("assistant eval scenarios use mini model with high reasoning and validate s
     }
   );
   assert.equal(partsSummary.pass, true);
+
+  const customSketch = partsScenarios.find((scenario) => scenario.id === "parts-custom-propeller-like");
+  assert.ok(customSketch);
+  assert.deepEqual(customSketch.requiredCalls, ["parts_create_custom_sketch_body"]);
 });
 
 test("assistant turn runner stages guarded actions without executing them", async () => {
@@ -500,6 +588,7 @@ test("assistant turn runner stages guarded actions without executing them", asyn
   assert.equal(payloads[1].toolOutputs[0].output.status, "pending_confirmation");
   assert.deepEqual(result.guardedCalls.map((call) => call.name), ["studio_export_glb"]);
   assert.equal(result.finalText, "Queued.");
+  assert.equal(result.stopReason, "guarded_confirmation");
 });
 
 test("assistant turn runner enforces shared tool-round limit", async () => {
@@ -530,6 +619,37 @@ test("assistant turn runner enforces shared tool-round limit", async () => {
   });
 
   assert.equal(result.stoppedForMaxRounds, true);
+  assert.equal(result.stopReason, "safety_budget");
   assert.equal(result.toolCalls.length, 2);
   assert.equal(requestCount, 3);
+});
+
+test("assistant turn runner stops repeated no-progress tool loops", async () => {
+  let requestCount = 0;
+  const adapter = createPageAssistantAdapter({
+    pageId: ASSISTANT_PAGES.STUDIO,
+    title: "Test Studio",
+    getContext: () => ({ ready: true }),
+    actions: {}
+  });
+
+  const result = await runAssistantTurn({
+    adapter,
+    model: "gpt-5.4-mini",
+    reasoningEffort: "high",
+    message: "Use a missing action repeatedly.",
+    requestAssistant: async () => {
+      requestCount += 1;
+      return {
+        responseId: `resp_${requestCount}`,
+        text: "",
+        toolCalls: [{ callId: `call_${requestCount}`, name: "studio_missing_action", arguments: { value: 1 } }]
+      };
+    }
+  });
+
+  assert.equal(result.stoppedForNoProgress, true);
+  assert.equal(result.stopReason, "no_progress");
+  assert.equal(result.toolCalls.length, 2);
+  assert.equal(requestCount, 2);
 });

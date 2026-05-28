@@ -1,46 +1,39 @@
-import { PartCadCompileError, compilePartBodyToSolid } from "./cadCompile.js";
-import { serializeBodyToStl, stlFileNameForBody } from "./exporters.js";
-import { solidToMeshData } from "./meshConversion.js";
-
-function serializeError(error, bodyId = null) {
-  return {
-    bodyId: error.bodyId ?? bodyId,
-    code: error instanceof PartCadCompileError ? "cad-compile-error" : "worker-error",
-    message: error.message,
-    issues: error.issues ?? []
-  };
-}
-
-function compileBody(body, bodies) {
-  const solid = compilePartBodyToSolid(body, { bodies });
-  const meshData = solidToMeshData(solid);
-  return {
-    bodyId: body.id,
-    ...meshData,
-    warnings: []
-  };
-}
+import { compileBodiesToMeshResults, serializeWorkerError } from "./cadWorkerCore.js";
 
 function compileBodies(requestId, bodies) {
-  const results = [];
-  const errors = [];
-  const transfers = [];
-
-  for (const body of bodies ?? []) {
-    try {
-      const result = compileBody(body, bodies);
-      transfers.push(result.vertices.buffer, result.normals.buffer);
-      results.push(result);
-    } catch (error) {
-      errors.push(serializeError(error, body?.id ?? null));
-    }
-  }
-
-  self.postMessage({ type: "compileBodiesResult", requestId, results, errors }, transfers);
+  const { results, errors, transfers } = compileBodiesToMeshResults(bodies);
+  postWorkerMessage(
+    { type: "compileBodiesResult", requestId, results, errors },
+    transfers,
+    (error) => ({
+      type: "compileBodiesResult",
+      requestId,
+      results: [],
+      errors: [serializeWorkerError(error)]
+    })
+  );
 }
 
-function exportStl(requestId, body, bodies, options = {}) {
+function postWorkerMessage(message, transfers = [], fallbackMessage) {
   try {
+    self.postMessage(message, transfers);
+    return;
+  } catch (transferError) {
+    if (!transfers.length) throw transferError;
+  }
+
+  try {
+    self.postMessage(message);
+    return;
+  } catch (cloneError) {
+    if (!fallbackMessage) throw cloneError;
+    self.postMessage(fallbackMessage(cloneError));
+  }
+}
+
+async function exportStl(requestId, body, bodies, options = {}) {
+  try {
+    const { serializeBodyToStl, stlFileNameForBody } = await import("./exporters.js");
     const stl = serializeBodyToStl(body, { binary: false, bodies });
     self.postMessage({
       type: "exportStlResult",
@@ -50,7 +43,7 @@ function exportStl(requestId, body, bodies, options = {}) {
       stl
     });
   } catch (error) {
-    self.postMessage({ type: "exportStlError", requestId, error: serializeError(error, body?.id ?? null) });
+    self.postMessage({ type: "exportStlError", requestId, error: serializeWorkerError(error, body?.id ?? null) });
   }
 }
 
@@ -63,6 +56,6 @@ self.addEventListener("message", (event) => {
   }
 
   if (type === "exportStl") {
-    exportStl(requestId, body, bodies, options);
+    void exportStl(requestId, body, bodies, options);
   }
 });

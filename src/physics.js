@@ -1,4 +1,5 @@
 import "./physics.css";
+import "./shellHeader.css";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -9,7 +10,7 @@ import { CATEGORY_ORDER, runDesignAudit } from "./physics/audit.js";
 import { checkCollisionProxies, collisionPairKey } from "./physics/collision.js";
 import { DEFAULT_ACTUATORS } from "./physics/constants.js";
 import { DynamicsRunner } from "./physics/dynamics.js";
-import { serializeRobotDesign, serializeUrdfLike } from "./physics/exporters.js";
+import { createUrdfExport, serializeRobotDesign } from "./physics/exporters.js";
 import {
   analyzeTopology,
   computeForwardKinematics,
@@ -30,6 +31,7 @@ import {
 } from "./physics/model.js";
 import { WorkbenchOverlays } from "./physics/overlays.js";
 import { readCurrentSnapshot, readSavedRobotDesign, saveRobotDesign, snapshotNewerThanDesign } from "./physics/persistence.js";
+import { mountShellCardToggles } from "./shellCards.js";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 import { isAssistantEvalEnabled } from "./assistant/evalScenarios.js";
@@ -467,7 +469,15 @@ function updateDesignTimestamp() {
 
 function syncSimulationButtons() {
   const running = state.simulation.status === "running";
-  simRunButton.textContent = running ? "Pause" : "Run";
+  const label = running ? "Pause" : "Run";
+  const accessibleLabel = `${label} simulation`;
+  const icon = simRunButton.querySelector("[data-sim-run-icon]");
+  const text = simRunButton.querySelector("[data-sim-run-label]");
+  if (icon) icon.textContent = running ? "pause_circle" : "play_circle";
+  if (text) text.textContent = label;
+  simRunButton.setAttribute("aria-label", accessibleLabel);
+  simRunButton.title = accessibleLabel;
+  simRunButton.dataset.tooltip = label;
   simRunButton.classList.toggle("is-active", running);
 }
 
@@ -568,9 +578,11 @@ function analyzeDesign() {
     actuatorResults,
     stability,
     topology,
-    ikResult: state.ikResult
+    ikResult: state.ikResult,
+    partRecords: state.partRecords
   });
-  state.analysis = { collisions, mass, loads, actuatorResults, stability, topology, audit };
+  const urdf = createUrdfExport(state.design, state.partRecords);
+  state.analysis = { collisions, mass, loads, actuatorResults, stability, topology, audit, urdf };
   overlays.update(state.design, state.transforms, { collisions });
   overlays.setTarget(state.ikTarget);
 }
@@ -581,9 +593,9 @@ function metric(label, value) {
 
 function renderSummary() {
   designSummary.innerHTML = [
-    `<div><span>Links</span><strong>${state.design.links.length}</strong></div>`,
-    `<div><span>Joints</span><strong>${state.design.joints.length}</strong></div>`,
-    `<div><span>Source</span><strong>${state.design.source === "sample-prerigged" ? "Pre-rigged" : "Manual"}</strong></div>`
+    `<div class="summary-strip__item"><span>Links</span><strong>${state.design.links.length}</strong></div>`,
+    `<div class="summary-strip__item"><span>Joints</span><strong>${state.design.joints.length}</strong></div>`,
+    `<div class="summary-strip__item summary-strip__item--source"><span>Source</span><strong>${state.design.source === "sample-prerigged" ? "Pre-rigged" : "Manual"}</strong></div>`
   ].join("");
 }
 
@@ -1151,12 +1163,49 @@ function renderCollisionWorkflow(collisions) {
   );
 }
 
+function renderUrdfExportFlow(urdf) {
+  const issues = urdf?.issues ?? [];
+  const blockers = issues.filter((item) => item.level === "risk");
+  const warnings = issues.filter((item) => item.level === "warn");
+  const stateName = blockers.length ? "risk" : warnings.length ? "warn" : "ok";
+  const issueItems = [...blockers, ...warnings].slice(0, 6);
+  const issueList = issueItems.length
+    ? `<ul class="urdf-issue-list">${issueItems
+        .map((item) => `<li><b>${escapeHtml(item.code)}</b> ${escapeHtml(item.message)}</li>`)
+        .join("")}</ul>`
+    : `<p>Links, joints, inertials, visuals, collision proxies, limits, dynamics, and tool frames are ready for export.</p>`;
+  const overflow = issues.length > issueItems.length
+    ? `<p class="form-note">${issues.length - issueItems.length} more finding${issues.length - issueItems.length === 1 ? "" : "s"} are listed in Audit.</p>`
+    : "";
+  const limitations = (urdf?.model?.limitations ?? [])
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+  const downloadButton = blockers.length
+    ? `<button class="compact-button" type="button" disabled>Resolve blockers</button>`
+    : `<button class="compact-button is-active" type="button" data-download-urdf>Download URDF</button>`;
+
+  return `
+    <article class="result-card urdf-export-card" data-state="${stateName}">
+      <span>URDF export</span>
+      <strong>${blockers.length ? `${blockers.length} blockers` : warnings.length ? `${warnings.length} warnings` : "Ready"}</strong>
+      ${issueList}
+      ${overflow}
+      <details>
+        <summary>Limitations</summary>
+        <ul class="urdf-issue-list">${limitations}</ul>
+      </details>
+      <div class="urdf-export-actions">${downloadButton}</div>
+    </article>
+  `;
+}
+
 function renderAnalysis() {
   const mass = state.analysis?.mass;
   const stability = state.analysis?.stability;
   const ik = state.ikResult;
   const collisions = state.analysis?.collisions ?? [];
   const actuatorResults = state.analysis?.actuatorResults ?? [];
+  const urdf = state.analysis?.urdf;
   const cards = [
     `<article class="result-card" data-state="${stability?.ok ? "ok" : "warn"}"><span>Mass & stability</span><strong>${formatNumber(mass?.totalMassKg, 2)} kg total</strong><p>${escapeHtml(stability?.message ?? "No stability estimate.")}</p></article>`,
     `<article class="result-card" data-state="${collisions.length ? "risk" : "ok"}"><span>Collision proxies</span><strong>${collisions.length} active conflicts</strong><p>${collisions[0] ? `${collisions[0].linkA} vs ${collisions[0].linkB}` : "No proxy collisions outside allowed pairs."}</p></article>`,
@@ -1168,7 +1217,7 @@ function renderAnalysis() {
         `<article class="result-card" data-state="${item.state}"><span>${escapeHtml(item.jointName)}</span><strong>${escapeHtml(item.actuatorName ?? "No actuator")}</strong><p>${escapeHtml(item.message)} Recommended ${formatNumber(item.recommendedTorqueNm, 2)} N.m.</p></article>`
     )
   );
-  analysisResults.innerHTML = `${cards.join("")}${renderMassWorkflow(mass, stability)}${renderCollisionWorkflow(collisions)}${renderTorqueLoadTable(actuatorResults)}`;
+  analysisResults.innerHTML = `${cards.join("")}${renderUrdfExportFlow(urdf)}${renderMassWorkflow(mass, stability)}${renderCollisionWorkflow(collisions)}${renderTorqueLoadTable(actuatorResults)}`;
 }
 
 function renderAudit() {
@@ -1748,8 +1797,9 @@ function mountWorkbenchAssistant() {
         return "RobotDesign JSON download started.";
       },
       workbench_export_urdf: () => {
-        downloadText(serializeUrdfLike(state.design, state.partRecords), "robot-design.urdf", "application/xml");
-        return "URDF download started.";
+        return downloadUrdfIfReady()
+          ? "URDF download started."
+          : "URDF export is blocked; review the Export findings.";
       },
       workbench_toggle_simulation_run: async () => {
         requireWorkbenchReady();
@@ -2167,6 +2217,37 @@ function importDesignFile(file) {
   reader.readAsText(file);
 }
 
+function downloadUrdfIfReady() {
+  requireWorkbenchReady();
+  const urdf = createUrdfExport(state.design, state.partRecords);
+  state.analysis = { ...(state.analysis ?? {}), urdf };
+  if (!urdf.ready) {
+    renderAll();
+    const blockers = urdf.issues.filter((item) => item.level === "risk").length;
+    showStatus(`URDF export blocked by ${blockers} issue${blockers === 1 ? "" : "s"}`, 5200);
+    return false;
+  }
+  downloadText(urdf.xml, "robot-design.urdf", "application/xml");
+  const warnings = urdf.issues.filter((item) => item.level === "warn").length;
+  showStatus(warnings ? `URDF download started with ${warnings} warning${warnings === 1 ? "" : "s"}` : "URDF download started", 5200);
+  return true;
+}
+
+function showUrdfExportFlow() {
+  requireWorkbenchReady();
+  renderAll();
+  const urdf = state.analysis?.urdf ?? createUrdfExport(state.design, state.partRecords);
+  const blockers = urdf.issues.filter((item) => item.level === "risk").length;
+  const warnings = urdf.issues.filter((item) => item.level === "warn").length;
+  if (blockers) {
+    showStatus(`URDF export has ${blockers} blocker${blockers === 1 ? "" : "s"}; review Analysis or Audit.`, 5600);
+  } else if (warnings) {
+    showStatus(`URDF export ready with ${warnings} warning${warnings === 1 ? "" : "s"}. Use Download URDF in Analysis.`, 5600);
+  } else {
+    showStatus("URDF export ready. Use Download URDF in Analysis.", 4800);
+  }
+}
+
 function setMode(mode) {
   state.mode = mode;
   for (const button of modeButtons) button.classList.toggle("is-active", button.dataset.mode === mode);
@@ -2283,7 +2364,12 @@ designFileInput.addEventListener("change", () => {
   designFileInput.value = "";
 });
 exportDesignButton.addEventListener("click", () => downloadText(serializeRobotDesign(state.design), "robot-design.json", "application/json"));
-exportUrdfButton.addEventListener("click", () => downloadText(serializeUrdfLike(state.design, state.partRecords), "robot-design.urdf", "application/xml"));
+exportUrdfButton.addEventListener("click", showUrdfExportFlow);
+analysisResults.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (target.closest("[data-download-urdf]")) downloadUrdfIfReady();
+});
 runAuditButton.addEventListener("click", renderAll);
 simResetButton.addEventListener("click", resetSimulation);
 simStepButton.addEventListener("click", stepSimulation);
@@ -2395,6 +2481,7 @@ async function loadAssembly() {
 }
 
 renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+mountShellCardToggles(document);
 mountWorkbenchAssistant();
 animate();
 loadAssembly();

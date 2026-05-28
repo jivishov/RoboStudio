@@ -1,11 +1,12 @@
 export const WORKSPACE_DB_NAME = "stl-assembly-studio";
-export const WORKSPACE_DB_VERSION = 2;
+export const WORKSPACE_DB_VERSION = 3;
 export const SNAPSHOT_STORE_NAME = "snapshots";
 export const DESIGN_STORE_NAME = "robot-designs";
+export const PART_LIBRARY_STORE_NAME = "part-library";
 export const CURRENT_SNAPSHOT_KEY = "current-assembly";
 export const CURRENT_DESIGN_KEY = "current-robot-design";
 
-const REQUIRED_STORE_NAMES = Object.freeze([SNAPSHOT_STORE_NAME, DESIGN_STORE_NAME]);
+const REQUIRED_STORE_NAMES = Object.freeze([SNAPSHOT_STORE_NAME, DESIGN_STORE_NAME, PART_LIBRARY_STORE_NAME]);
 
 export class WorkspaceDbRepairBlockedError extends Error {
   constructor() {
@@ -73,6 +74,24 @@ function readStoreValueFromOpenDb(db, storeName, key) {
   });
 }
 
+function readStoreEntriesFromOpenDb(db, storeName) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    const transaction = db.transaction(storeName, "readonly");
+    const request = transaction.objectStore(storeName).openCursor();
+    request.addEventListener("success", () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      entries.push([cursor.key, cursor.value]);
+      cursor.continue();
+    });
+    request.addEventListener("error", () => reject(request.error));
+    transaction.addEventListener("complete", () => resolve(entries));
+    transaction.addEventListener("error", () => reject(transaction.error));
+    transaction.addEventListener("abort", () => reject(transaction.error));
+  });
+}
+
 function writeStoreValueToOpenDb(db, storeName, key, value) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, "readwrite");
@@ -83,17 +102,31 @@ function writeStoreValueToOpenDb(db, storeName, key, value) {
   });
 }
 
-async function preserveCurrentSnapshot(db) {
-  if (!storeExists(db, SNAPSHOT_STORE_NAME)) return null;
-  try {
-    return await readStoreValueFromOpenDb(db, SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY);
-  } catch {
-    return null;
+function deleteStoreValueFromOpenDb(db, storeName, key) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, "readwrite");
+    transaction.objectStore(storeName).delete(key);
+    transaction.addEventListener("complete", () => resolve());
+    transaction.addEventListener("error", () => reject(transaction.error));
+    transaction.addEventListener("abort", () => reject(transaction.error));
+  });
+}
+
+async function preserveReadableStoreEntries(db) {
+  const preserved = new Map();
+  for (const storeName of REQUIRED_STORE_NAMES) {
+    if (!storeExists(db, storeName)) continue;
+    try {
+      preserved.set(storeName, await readStoreEntriesFromOpenDb(db, storeName));
+    } catch {
+      preserved.set(storeName, []);
+    }
   }
+  return preserved;
 }
 
 async function repairWorkspaceDb(malformedDb, indexedDb) {
-  const preservedSnapshot = await preserveCurrentSnapshot(malformedDb);
+  const preservedEntries = await preserveReadableStoreEntries(malformedDb);
   malformedDb.close();
 
   await deleteWorkspaceDb(indexedDb);
@@ -103,8 +136,11 @@ async function repairWorkspaceDb(malformedDb, indexedDb) {
     throw new Error("Workspace storage repair did not create the required stores.");
   }
 
-  if (preservedSnapshot !== null) {
-    await writeStoreValueToOpenDb(repairedDb, SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, preservedSnapshot);
+  for (const [storeName, entries] of preservedEntries.entries()) {
+    if (!storeExists(repairedDb, storeName)) continue;
+    for (const [key, value] of entries) {
+      await writeStoreValueToOpenDb(repairedDb, storeName, key, value);
+    }
   }
 
   return repairedDb;
@@ -126,10 +162,28 @@ export async function readWorkspaceValue(storeName, key, options = {}) {
   }
 }
 
+export async function readAllWorkspaceValues(storeName, options = {}) {
+  const db = await openWorkspaceDb(options);
+  try {
+    return (await readStoreEntriesFromOpenDb(db, storeName)).map((entry) => entry[1]);
+  } finally {
+    db.close();
+  }
+}
+
 export async function writeWorkspaceValue(storeName, key, value, options = {}) {
   const db = await openWorkspaceDb(options);
   try {
     await writeStoreValueToOpenDb(db, storeName, key, value);
+  } finally {
+    db.close();
+  }
+}
+
+export async function deleteWorkspaceValue(storeName, key, options = {}) {
+  const db = await openWorkspaceDb(options);
+  try {
+    await deleteStoreValueFromOpenDb(db, storeName, key);
   } finally {
     db.close();
   }

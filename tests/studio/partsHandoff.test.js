@@ -13,7 +13,7 @@ test("gates generated snapshot loading behind fromParts query", () => {
   assert.equal(isPartsHandoffRequested(""), false);
 });
 
-test("accepts only generated Part Studio snapshots for handoff loading", () => {
+test("accepts only generated Component Builder snapshots for handoff loading", () => {
   const snapshot = {
     glb: new ArrayBuffer(8),
     parts: [

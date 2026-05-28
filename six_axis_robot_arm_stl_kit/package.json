@@ -1,0 +1,17 @@
+{
+  "name": "six-axis-robot-arm-stl-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node src/generate-six-axis-arm.mjs",
+    "check": "node src/geometry-quality.mjs",
+    "draw": "node src/draw-kit.mjs",
+    "draw:png": "node src/render-png-previews.mjs",
+    "build": "npm run generate && npm run check && npm run draw"
+  },
+  "dependencies": {
+    "@jscad/modeling": "latest",
+    "@jscad/stl-serializer": "latest"
+  }
+}

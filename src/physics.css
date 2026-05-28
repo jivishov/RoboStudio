@@ -199,7 +199,19 @@ h3 {
 }
 
 .summary-strip {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.summary-strip__item {
+  min-width: 0;
+}
+
+.summary-strip__item--source {
+  grid-column: 1 / -1;
+}
+
+.summary-strip__item--source strong {
+  white-space: nowrap;
 }
 
 .summary-strip div,
@@ -400,6 +412,43 @@ h3 {
   border-color: #6da0f8;
   background: #eaf2ff;
   color: var(--blue-dark);
+}
+
+.compact-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.urdf-export-card {
+  align-content: start;
+}
+
+.urdf-export-card details {
+  display: grid;
+  gap: 6px;
+}
+
+.urdf-export-card summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.urdf-issue-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+  color: #263241;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.urdf-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .form-actions {
@@ -1005,5 +1054,583 @@ a:focus-visible,
     left: 18px;
     right: auto;
     top: 116px;
+  }
+}
+
+/* CSS-only technical UI refinement: Robotics Design Workbench */
+:root {
+  --bg: #edf1f6;
+  --panel: #f4f6f9;
+  --panel-strong: #ffffff;
+  --line: #cbd3df;
+  --muted: #4f5b6b;
+  --blue: #1268e8;
+  --green: #0c7c59;
+  --amber: #b7791f;
+  --red: #b42318;
+  --shadow: 0 10px 28px rgb(15 23 42 / 10%);
+  --value-font: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
+}
+
+body,
+input,
+select,
+button,
+dd,
+strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.physics-topbar {
+  min-height: 54px;
+  gap: 8px;
+  padding: 6px 14px;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 5%) inset;
+}
+
+.back-link,
+.physics-actions button,
+.mode-tabs button,
+.simulation-bar button {
+  min-height: 34px;
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.physics-brand span {
+  font-size: 0.96rem;
+}
+
+.physics-brand strong {
+  color: #c3ccd8;
+}
+
+.mode-tabs,
+.physics-actions {
+  gap: 6px;
+}
+
+.mode-tabs button.is-active,
+.physics-actions button:last-of-type,
+.simulation-bar button.is-active {
+  border-color: #6aa2ff;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%);
+}
+
+.physics-shell {
+  grid-template-columns: 320px minmax(520px, 1fr) 360px;
+}
+
+.physics-panel {
+  background: var(--panel);
+}
+
+.physics-section {
+  gap: 9px;
+  padding: 11px 14px;
+}
+
+.physics-section:empty,
+#mode-controls:empty,
+#robot-tree:empty,
+#metrics-grid:empty,
+#inspector-panel:empty,
+#analysis-results:empty,
+#audit-list:empty {
+  min-height: 50px;
+  background:
+    linear-gradient(90deg, transparent, rgb(203 213 225 / 35%), transparent)
+      0 50% / 220px 1px no-repeat;
+}
+
+.summary-strip div,
+.metric-grid div,
+.tree-card,
+.result-card,
+.audit-item,
+.form-card,
+.analysis-table-card {
+  border-color: var(--line);
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.summary-strip div,
+.metric-grid div {
+  padding: 9px;
+}
+
+.metric-grid dt,
+.summary-strip span,
+.viewport-readout span,
+.collapsible-card__meta,
+.analysis-table th,
+.audit-group h3 {
+  color: var(--muted);
+}
+
+.metric-grid dd,
+.summary-strip strong,
+.viewport-readout strong,
+.analysis-table td,
+.audit-item strong {
+  font-family: var(--value-font);
+}
+
+.collapsible-card {
+  border-color: var(--line);
+  border-radius: 4px;
+}
+
+.collapsible-card__toggle {
+  min-height: 32px;
+  padding: 0 9px;
+  background: #f8fafc;
+}
+
+.collapsible-card__title {
+  font-size: 0.74rem;
+}
+
+.collapsible-card__meta {
+  max-width: 118px;
+  border: 1px solid #d7dee9;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: #ffffff;
+  font-size: 0.66rem;
+}
+
+.collapsible-card__inner {
+  padding: 10px;
+}
+
+.physics-stage {
+  background:
+    radial-gradient(circle at 50% 42%, rgb(255 255 255 / 76%), transparent 33%),
+    linear-gradient(180deg, #f8fafc, #edf2f7);
+}
+
+.floating-panel,
+.simulation-bar {
+  border-color: #cbd4e0;
+  border-radius: 4px;
+  background: rgb(255 255 255 / 90%);
+  box-shadow: var(--shadow);
+}
+
+.floating-panel__bar {
+  min-height: 32px;
+  background: #f8fafc;
+}
+
+.floating-panel__toggle {
+  padding-inline: 9px;
+}
+
+.floating-panel__content {
+  padding: 9px 10px 10px;
+}
+
+.physics-overlay {
+  max-width: 188px;
+}
+
+.viewport-readout {
+  max-width: 230px;
+}
+
+.simulation-bar {
+  bottom: 16px;
+  z-index: 4;
+  gap: 6px;
+  padding: 7px;
+}
+
+.simulation-bar button {
+  position: relative;
+  width: 38px;
+  min-width: 38px;
+  min-height: 34px;
+  padding: 0;
+  gap: 0;
+  line-height: 1;
+}
+
+.simulation-bar__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.simulation-bar__separator {
+  flex: 0 0 1px;
+  align-self: center;
+  width: 1px;
+  height: 26px;
+  margin-inline: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgb(100 116 139 / 24%) 16%,
+    rgb(100 116 139 / 64%) 50%,
+    rgb(100 116 139 / 24%) 84%,
+    transparent
+  );
+}
+
+.simulation-bar [data-tooltip]::before,
+.simulation-bar [data-tooltip]::after {
+  position: absolute;
+  left: 50%;
+  z-index: 30;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.simulation-bar [data-tooltip]::before {
+  content: "";
+  bottom: calc(100% + 2px);
+  border-top: 5px solid rgb(10 15 22 / 96%);
+  border-right: 5px solid transparent;
+  border-left: 5px solid transparent;
+}
+
+.simulation-bar [data-tooltip]::after {
+  content: attr(data-tooltip);
+  bottom: calc(100% + 7px);
+  min-width: max-content;
+  max-width: 180px;
+  padding: 7px 9px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+  background: rgb(10 15 22 / 96%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 24%);
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+}
+
+.simulation-bar [data-tooltip]:hover::before,
+.simulation-bar [data-tooltip]:hover::after,
+.simulation-bar [data-tooltip]:focus-visible::before,
+.simulation-bar [data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.result-card[data-state="ok"],
+.audit-item[data-state="ok"] {
+  border-left: 3px solid var(--green);
+}
+
+.result-card[data-state="warn"],
+.audit-item[data-state="warn"] {
+  border-left: 3px solid var(--amber);
+}
+
+.result-card[data-state="risk"],
+.audit-item[data-state="risk"],
+.audit-item[data-state="error"] {
+  border-left: 3px solid var(--red);
+}
+
+.table-scroll {
+  border-color: var(--line);
+}
+
+.compact-button {
+  border-radius: 4px;
+}
+
+@media (max-width: 1320px) {
+  .physics-shell {
+    grid-template-columns: 300px minmax(460px, 1fr) 330px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .physics-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .physics-stage {
+    min-height: 620px;
+  }
+
+  .physics-panel {
+    border-inline: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .physics-topbar {
+    padding: 8px 10px;
+  }
+
+  .mode-tabs,
+  .physics-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .back-link,
+  .physics-actions button,
+  .mode-tabs button {
+    width: 100%;
+  }
+
+  .physics-stage {
+    min-height: 560px;
+  }
+
+  .physics-overlay {
+    left: 14px;
+    max-width: 180px;
+  }
+
+  .viewport-readout {
+    top: 96px;
+    max-width: 210px;
+  }
+
+  .simulation-bar {
+    left: 12px;
+    right: 12px;
+    justify-content: center;
+  }
+}
+
+/* Robotics Workbench typography weight refinement */
+.physics-panel,
+.physics-stage,
+.form-field,
+.form-note,
+.tree-card,
+.result-card,
+.audit-item,
+.analysis-table,
+.analysis-kv,
+.simulation-bar,
+.viewport-readout,
+.physics-overlay {
+  font-weight: 400;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea,
+.analysis-table td,
+.analysis-kv strong,
+.tree-card strong,
+.result-card strong,
+.audit-item strong {
+  font-weight: 500;
+}
+
+.tree-card button,
+.compact-button,
+.back-link,
+.physics-actions button,
+.mode-tabs button,
+.simulation-bar button {
+  font-weight: 600;
+}
+
+.analysis-kv span,
+.analysis-table th,
+.collapsible-card__title,
+.physics-panel h2,
+.physics-overlay strong {
+  font-weight: 800;
+}
+
+/* Unified workbench navigation, icons, and static shell cards */
+#physics-app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.physics-topbar {
+  grid-template-columns: minmax(430px, 1fr) auto auto;
+}
+
+.physics-shell {
+  height: auto;
+}
+
+.physics-brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 9px;
+}
+
+.physics-brand > strong {
+  flex-basis: 100%;
+}
+
+.page-links {
+  display: inline-flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid #3a4350;
+  border-radius: 4px;
+  background: #0e141c;
+  color: #f5f7fb;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
+}
+
+.page-link:hover {
+  border-color: #687280;
+  background: #17202b;
+}
+
+.page-icon {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  color: currentColor;
+}
+
+.physics-brand .page-icon {
+  overflow: visible;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.page-icon::before,
+.page-icon::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+
+.page-icon--assembly::before {
+  left: 2px;
+  bottom: 3px;
+  width: 13px;
+  height: 12px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+}
+
+.page-icon--assembly::after {
+  right: 2px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+
+.page-icon--component::before {
+  left: 2px;
+  top: 6px;
+  width: 12px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+
+.page-icon--component::after {
+  left: 5px;
+  top: 2px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: skewY(-22deg);
+}
+
+.page-icon--workbench::before {
+  left: 2px;
+  bottom: 3px;
+  width: 14px;
+  height: 11px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: skewX(-12deg);
+}
+
+.page-icon--workbench::after {
+  left: 5px;
+  top: 5px;
+  width: 10px;
+  height: 7px;
+  border-top: 2px solid currentColor;
+  transform: rotate(-8deg);
+}
+
+.physics-section.shell-card {
+  gap: 0;
+  margin: 10px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel-strong);
+  box-shadow: none;
+}
+
+.physics-section.shell-card + .physics-section.shell-card {
+  margin-top: 0;
+}
+
+.shell-card__toggle {
+  border-bottom: 1px solid rgb(211 217 227 / 76%);
+}
+
+.physics-section.shell-card .collapsible-card__inner {
+  padding: 10px;
+}
+
+.physics-section.shell-card.is-collapsed .collapsible-card__inner {
+  padding-bottom: 0;
+}
+
+@media (max-width: 1080px) {
+  .physics-topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .physics-actions button,
+  .mode-tabs button {
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .physics-actions {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,0 +1,392 @@
+{
+  "generatedAt": "2026-05-26T16:24:08.166Z",
+  "passed": true,
+  "partCount": 16,
+  "failures": [],
+  "parts": [
+    {
+      "id": "j1_base_yaw_turntable",
+      "fileName": "01_j1_base_yaw_turntable.stl",
+      "facetCount": 7732,
+      "vertexCount": 23196,
+      "boundsMm": {
+        "min": [
+          -79.782,
+          -79.782,
+          -7
+        ],
+        "max": [
+          79.782,
+          79.782,
+          15
+        ],
+        "size": [
+          159.563,
+          159.563,
+          22
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j1_rotating_column",
+      "fileName": "02_j1_rotating_column.stl",
+      "facetCount": 3918,
+      "vertexCount": 11754,
+      "boundsMm": {
+        "min": [
+          -53.999,
+          -53.999,
+          -6.499
+        ],
+        "max": [
+          53.999,
+          53.999,
+          87
+        ],
+        "size": [
+          107.999,
+          107.999,
+          93.5
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j2_shoulder_yoke_left",
+      "fileName": "03_j2_shoulder_yoke_left.stl",
+      "facetCount": 3729,
+      "vertexCount": 11187,
+      "boundsMm": {
+        "min": [
+          -7.8,
+          -29,
+          -50
+        ],
+        "max": [
+          7,
+          29,
+          49
+        ],
+        "size": [
+          14.8,
+          58,
+          99
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j2_shoulder_yoke_right",
+      "fileName": "04_j2_shoulder_yoke_right.stl",
+      "facetCount": 3729,
+      "vertexCount": 11187,
+      "boundsMm": {
+        "min": [
+          -7,
+          -29,
+          -50
+        ],
+        "max": [
+          7.8,
+          29,
+          49
+        ],
+        "size": [
+          14.8,
+          58,
+          99
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j3_upper_arm_shell_left",
+      "fileName": "05_j3_upper_arm_shell_left.stl",
+      "facetCount": 4458,
+      "vertexCount": 13374,
+      "boundsMm": {
+        "min": [
+          -8.512,
+          -94,
+          -25
+        ],
+        "max": [
+          7.5,
+          94,
+          25.5
+        ],
+        "size": [
+          16.011,
+          188.001,
+          50.5
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j3_upper_arm_shell_right",
+      "fileName": "06_j3_upper_arm_shell_right.stl",
+      "facetCount": 5246,
+      "vertexCount": 15738,
+      "boundsMm": {
+        "min": [
+          -7.5,
+          -94,
+          -25
+        ],
+        "max": [
+          15.426,
+          94,
+          25.5
+        ],
+        "size": [
+          22.926,
+          188,
+          50.5
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "elbow_hub",
+      "fileName": "07_elbow_hub.stl",
+      "facetCount": 3596,
+      "vertexCount": 10788,
+      "boundsMm": {
+        "min": [
+          -27.5,
+          -34,
+          -34
+        ],
+        "max": [
+          27.5,
+          34,
+          34
+        ],
+        "size": [
+          55,
+          68,
+          68
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "forearm_shell_left",
+      "fileName": "08_forearm_shell_left.stl",
+      "facetCount": 4160,
+      "vertexCount": 12480,
+      "boundsMm": {
+        "min": [
+          -8.344,
+          -84,
+          -25
+        ],
+        "max": [
+          7.5,
+          84,
+          25
+        ],
+        "size": [
+          15.845,
+          168,
+          50.001
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "forearm_shell_right",
+      "fileName": "09_forearm_shell_right.stl",
+      "facetCount": 5132,
+      "vertexCount": 15396,
+      "boundsMm": {
+        "min": [
+          -7.5,
+          -84,
+          -25
+        ],
+        "max": [
+          14.257,
+          84,
+          25
+        ],
+        "size": [
+          21.757,
+          168.001,
+          50
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j4_wrist_roll_carrier",
+      "fileName": "10_j4_wrist_roll_carrier.stl",
+      "facetCount": 2396,
+      "vertexCount": 7188,
+      "boundsMm": {
+        "min": [
+          -27,
+          -38.5,
+          -27
+        ],
+        "max": [
+          27,
+          29,
+          27
+        ],
+        "size": [
+          54,
+          67.5,
+          54
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j5_wrist_pitch_fork",
+      "fileName": "11_j5_wrist_pitch_fork.stl",
+      "facetCount": 3502,
+      "vertexCount": 10506,
+      "boundsMm": {
+        "min": [
+          -24.5,
+          -24,
+          -21
+        ],
+        "max": [
+          24.5,
+          32,
+          22.5
+        ],
+        "size": [
+          49,
+          56,
+          43.5
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "j6_tool_roll_flange",
+      "fileName": "12_j6_tool_roll_flange.stl",
+      "facetCount": 4634,
+      "vertexCount": 13902,
+      "boundsMm": {
+        "min": [
+          -31,
+          -31,
+          -7
+        ],
+        "max": [
+          31,
+          31.5,
+          16
+        ],
+        "size": [
+          62,
+          62.5,
+          23
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "gripper_adapter_plate",
+      "fileName": "13_gripper_adapter_plate.stl",
+      "facetCount": 2356,
+      "vertexCount": 7068,
+      "boundsMm": {
+        "min": [
+          -31,
+          -22,
+          -3.5
+        ],
+        "max": [
+          31,
+          22,
+          8
+        ],
+        "size": [
+          62,
+          44,
+          11.5
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "cable_channel_cover",
+      "fileName": "14_cable_channel_cover.stl",
+      "facetCount": 1260,
+      "vertexCount": 3780,
+      "boundsMm": {
+        "min": [
+          -10,
+          -52,
+          -2.5
+        ],
+        "max": [
+          10,
+          52,
+          6
+        ],
+        "size": [
+          20,
+          104,
+          8.5
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "spacer_set",
+      "fileName": "15_spacer_set.stl",
+      "facetCount": 2528,
+      "vertexCount": 7584,
+      "boundsMm": {
+        "min": [
+          -45,
+          -9,
+          -4
+        ],
+        "max": [
+          45,
+          9,
+          4
+        ],
+        "size": [
+          90,
+          18,
+          8
+        ]
+      },
+      "degenerateTriangles": 0
+    },
+    {
+      "id": "axis_alignment_gauge",
+      "fileName": "16_axis_alignment_gauge.stl",
+      "facetCount": 1412,
+      "vertexCount": 4236,
+      "boundsMm": {
+        "min": [
+          -44,
+          -14,
+          -2.5
+        ],
+        "max": [
+          45,
+          14,
+          18
+        ],
+        "size": [
+          89,
+          28,
+          20.5
+        ]
+      },
+      "degenerateTriangles": 0
+    }
+  ]
+}

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1180" viewBox="0 0 1800 1180" role="img" aria-label="Full Arm Assembly Sketch">
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#111827"/>
+    </marker>
+    <style>
+      .sheet-bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; }
+      .title { font: 800 36px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #475569; }
+      .label { font: 800 22px Arial, sans-serif; fill: #0f172a; }
+      .body { font: 400 16px Arial, sans-serif; fill: #475569; }
+      .small { font: 400 14px Arial, sans-serif; fill: #64748b; }
+      .tiny { font: 400 12px Arial, sans-serif; fill: #64748b; }
+      .part-num { font: 800 24px Arial, sans-serif; fill: #ffffff; }
+      .axis { stroke: #2563eb; stroke-width: 6; fill: none; marker-end: url(#arrow); }
+      .arrow { stroke: #111827; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .ghost { fill: #e2e8f0; stroke: #475569; stroke-width: 2.4; }
+      .ghost2 { fill: #dbeafe; stroke: #1d4ed8; stroke-width: 2.4; }
+      .teal { fill: #0f766e; stroke: #064e3b; stroke-width: 2.4; }
+      .blue { fill: #2563eb; stroke: #1e3a8a; stroke-width: 2.4; }
+      .gold { fill: #ca8a04; stroke: #713f12; stroke-width: 2.4; }
+      .line { stroke: #334155; stroke-width: 4; fill: none; }
+      .dash { stroke: #94a3b8; stroke-width: 2.2; fill: none; stroke-dasharray: 9 7; }
+      .callout { fill: #111827; }
+    </style>
+  </defs>
+  <rect class="sheet-bg" x="0" y="0" width="1800" height="1180"/>
+
+  <text class="title" x="60" y="60">Full Arm Assembly Sketch</text>
+  <text class="subtitle" x="60" y="92">Large exploded layout on top, assembled axis layout below. Numbers match the STL object drawings.</text>
+
+  <rect class="panel" x="60" y="126" width="1680" height="480" rx="16"/>
+  <text class="label" x="96" y="168">Exploded build order</text>
+
+  <ellipse class="ghost" cx="190" cy="496" rx="118" ry="32"/>
+  <rect class="ghost" x="152" y="342" width="76" height="154" rx="13"/>
+  <rect class="ghost" x="118" y="305" width="144" height="44" rx="12"/>
+  <path class="axis" d="M 190 518 L 190 274"/>
+
+  <circle class="callout" cx="105" cy="495" r="20"/>
+  <text class="part-num" x="98" y="503">1</text>
+  <text class="body" x="137" y="501">base yaw turntable</text>
+
+  <circle class="callout" cx="262" cy="325" r="20"/>
+  <text class="part-num" x="255" y="333">2</text>
+  <text class="body" x="294" y="331">rotating column</text>
+
+  <path class="arrow" d="M 326 420 L 408 386"/>
+  <rect class="ghost" x="446" y="266" width="42" height="220" rx="12"/>
+  <rect class="ghost" x="590" y="266" width="42" height="220" rx="12"/>
+  <circle class="blue" cx="467" cy="366" r="22"/>
+  <circle class="blue" cx="611" cy="366" r="22"/>
+  <path class="axis" d="M 410 366 L 662 366"/>
+
+  <circle class="callout" cx="452" cy="225" r="20"/>
+  <text class="part-num" x="445" y="233">3</text>
+  <text class="body" x="484" y="231">shoulder yoke pair</text>
+
+  <path class="arrow" d="M 672 366 L 760 332"/>
+  <path class="ghost" d="M 790 352 L 1014 268 L 1052 346 L 828 430 z"/>
+  <path class="ghost" d="M 810 408 L 1034 324 L 1072 402 L 848 486 z" opacity="0.72"/>
+  <circle class="teal" cx="818" cy="390" r="38"/>
+  <circle class="teal" cx="1048" cy="356" r="40"/>
+  <path class="axis" d="M 762 390 L 876 390"/>
+  <path class="axis" d="M 996 356 L 1110 356"/>
+
+  <circle class="callout" cx="795" cy="225" r="20"/>
+  <text class="part-num" x="788" y="233">4</text>
+  <text class="body" x="827" y="231">upper arm shells</text>
+
+  <circle class="callout" cx="1038" cy="267" r="20"/>
+  <text class="part-num" x="1031" y="275">5</text>
+  <text class="body" x="1070" y="273">elbow hub</text>
+
+  <path class="arrow" d="M 1112 356 L 1198 346"/>
+  <path class="ghost" d="M 1232 360 L 1420 300 L 1453 372 L 1264 432 z"/>
+  <path class="ghost" d="M 1248 414 L 1436 354 L 1468 426 L 1280 486 z" opacity="0.72"/>
+  <circle class="teal" cx="1262" cy="396" r="34"/>
+  <circle class="teal" cx="1445" cy="388" r="34"/>
+
+  <circle class="callout" cx="1245" cy="265" r="20"/>
+  <text class="part-num" x="1238" y="273">6</text>
+  <text class="body" x="1277" y="271">forearm shells</text>
+
+  <path class="arrow" d="M 1498 388 L 1564 388"/>
+  <circle class="ghost2" cx="1618" cy="388" r="54"/>
+  <path class="axis" d="M 1550 388 L 1686 388"/>
+
+  <circle class="callout" cx="1554" cy="256" r="20"/>
+  <text class="part-num" x="1547" y="264">7</text>
+  <text class="body" x="1586" y="262">wrist roll</text>
+  <path class="ghost" d="M 1668 330 L 1732 330 L 1732 446 L 1668 446 z" opacity="0.3"/>
+
+  <rect class="panel" x="60" y="646" width="1680" height="474" rx="16"/>
+  <text class="label" x="96" y="688">Assembled side profile and six axes</text>
+  <ellipse class="ghost" cx="220" cy="1030" rx="126" ry="34"/>
+  <rect class="ghost" x="176" y="824" width="88" height="206" rx="14"/>
+  <rect class="ghost" x="132" y="782" width="176" height="54" rx="14"/>
+  <circle class="blue" cx="220" cy="812" r="28"/>
+  <path class="line" d="M 220 812 L 500 670 L 786 754 L 1018 754"/>
+  <path class="line" d="M 220 864 L 512 724 L 792 810 L 1024 810"/>
+  <circle class="teal" cx="220" cy="838" r="40"/>
+  <circle class="teal" cx="506" cy="697" r="42"/>
+  <circle class="teal" cx="790" cy="782" r="38"/>
+  <circle class="blue" cx="1048" cy="782" r="52"/>
+  <path class="ghost" d="M 1090 730 L 1220 730 L 1262 782 L 1220 834 L 1090 834 z"/>
+  <circle class="ghost2" cx="1328" cy="782" r="48"/>
+  <rect class="ghost" x="1392" y="744" width="154" height="76" rx="14"/>
+
+  <path class="axis" d="M 220 1060 L 220 788"/>
+  <path class="axis" d="M 154 838 L 292 838"/>
+  <path class="axis" d="M 442 697 L 568 697"/>
+  <path class="axis" d="M 980 782 L 1116 782"/>
+  <path class="axis" d="M 1188 782 L 1308 782"/>
+  <path class="axis" d="M 1328 852 L 1328 714"/>
+  <text class="body" x="252" y="994">J1 yaw</text>
+  <text class="body" x="308" y="832">J2 shoulder pitch</text>
+  <text class="body" x="590" y="692">J3 elbow pitch</text>
+  <text class="body" x="958" y="720">J4 wrist roll</text>
+  <text class="body" x="1168" y="706">J5 wrist pitch</text>
+  <text class="body" x="1365" y="706">J6 tool roll</text>
+  <path class="dash" d="M 230 910 L 506 764"/>
+  <text class="small" x="338" y="920">upper arm link, 138 mm pivot span</text>
+  <path class="dash" d="M 518 806 L 790 888"/>
+  <text class="small" x="600" y="902">forearm link, 118 mm pivot span</text>
+
+  <circle class="callout" cx="1620" cy="747" r="20"/>
+  <text class="part-num" x="1613" y="755">8</text>
+  <text class="body" x="1652" y="753">tool flange + adapter</text>
+
+</svg>

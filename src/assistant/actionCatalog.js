@@ -172,13 +172,17 @@ const studioActions = [
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Export and download the assembly GLB."
   }),
-  defineAction(ASSISTANT_PAGES.STUDIO, "studio_open_physics_workbench", "Save the current assembly snapshot and navigate to the Physics Workbench.", emptyObjectSchema, {
+  defineAction(ASSISTANT_PAGES.STUDIO, "studio_open_physics_workbench", "Save the current assembly snapshot and navigate to the Robotics Design Workbench.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
-    confirmation: "Prepare the assembly and open the Physics Workbench."
+    confirmation: "Prepare the assembly and open the Robotics Design Workbench."
   }),
   defineAction(ASSISTANT_PAGES.STUDIO, "studio_import_stl_picker", "Open a file picker to import STL files.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Open the STL import file picker."
+  }),
+  defineAction(ASSISTANT_PAGES.STUDIO, "studio_clear_scene", "Remove every currently loaded part from the Assembly Studio scene.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Clear every part from the scene."
   })
 ];
 
@@ -195,19 +199,83 @@ const partTemplateIds = Object.freeze([
 
 const revolvePresetIds = Object.freeze(["shaft", "pulley", "bushing", "wheel", "collar", "knob", "spacer"]);
 const booleanOperations = Object.freeze(["union", "subtract", "intersect"]);
+const sketchProfileTypes = Object.freeze(["rectangle", "circle", "roundedSlot", "polyline"]);
 const hexColorSchema = stringSchema("Optional body color as a six-digit hex value.", {
   maxLength: 7,
   pattern: "^#[0-9a-fA-F]{6}$"
 });
+const customSketchProfileSchema = objectSchema({
+  id: stringSchema("Optional stable profile id.", { maxLength: 80 }),
+  type: stringSchema("Supported V1 profile type.", { enum: sketchProfileTypes }),
+  x: numberSchema("Optional profile center X in millimeters."),
+  z: numberSchema("Optional profile center Z in millimeters."),
+  radius: numberSchema("Optional circle radius in millimeters.", { minimum: 0.1 }),
+  length: numberSchema("Optional rounded slot length in millimeters.", { minimum: 0.1 }),
+  width: numberSchema("Optional rectangle or rounded slot width in millimeters.", { minimum: 0.1 }),
+  height: numberSchema("Optional rectangle height in millimeters.", { minimum: 0.1 }),
+  cornerRadius: numberSchema("Optional rectangle corner radius in millimeters.", { minimum: 0 }),
+  closed: booleanSchema("For polyline profiles, whether the polyline is closed."),
+  points: {
+    type: "array",
+    description: "Polyline points as [x, z] pairs.",
+    minItems: 3,
+    items: vector2Schema("Polyline point.")
+  }
+}, ["type"]);
+const customSketchTransformSchema = objectSchema({
+  position: vector3Schema("Optional body position in millimeters."),
+  scale: vector3Schema("Optional body scale; values must be positive.")
+});
+const customSketchBodyProperties = {
+  name: stringSchema("Body name for the generated custom sketch.", { maxLength: 120 }),
+  color: hexColorSchema,
+  extrudeDepthMm: numberSchema("Sketch extrusion depth in millimeters.", { minimum: 0.1 }),
+  outerProfile: customSketchProfileSchema,
+  cutProfiles: {
+    type: "array",
+    description: "Optional closed cut profiles inside the outer profile.",
+    items: customSketchProfileSchema
+  },
+  transform: customSketchTransformSchema,
+  designIntent: stringSchema("Short non-persistent explanation of the intended shape.", { maxLength: 800 })
+};
 
 const partsActions = [
-  defineAction(ASSISTANT_PAGES.PARTS, "parts_new_project", "Reset the Part Studio to a new empty PartProject.", emptyObjectSchema, {
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_new_project", "Reset the Component Builder to a new empty PartProject.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Start a new empty PartProject."
   }),
   defineAction(ASSISTANT_PAGES.PARTS, "parts_save_project_json", "Download the current PartProject JSON.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Download the current PartProject JSON."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_save_selected_to_library", "Save the selected Component Builder body to the local part library.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Save the selected body to the local part library."
+  }),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_add_library_item",
+    "Add a saved local library part to the current PartProject.",
+    objectSchema({ itemId: stringSchema("Library item id to add.", { maxLength: 120 }) }, ["itemId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_delete_library_item",
+    "Delete a saved item from the local part library.",
+    objectSchema({ itemId: stringSchema("Library item id to delete.", { maxLength: 120 }) }, ["itemId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Delete the selected local library item."
+    }
+  ),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_export_library_json", "Download the local part library as JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Download the local part library JSON."
+  }),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_open_library_import_picker", "Open a file picker to import part library JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Open the part library JSON file picker."
   }),
   defineAction(ASSISTANT_PAGES.PARTS, "parts_open_project_picker", "Open a file picker to import a PartProject JSON file.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
@@ -230,7 +298,7 @@ const partsActions = [
   defineAction(
     ASSISTANT_PAGES.PARTS,
     "parts_select_body",
-    "Select a Part Studio body by id.",
+    "Select a Component Builder body by id.",
     objectSchema({ bodyId: stringSchema("Body id to select.", { maxLength: 120 }) }, ["bodyId"])
   ),
   defineAction(
@@ -244,6 +312,21 @@ const partsActions = [
     "parts_add_template_body",
     "Add a starter template body. If templateId is omitted, the current template selection is used.",
     objectSchema({ templateId: stringSchema("Optional template id.", { enum: partTemplateIds }) })
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_create_custom_sketch_body",
+    "Create a new custom sketch-extrude body from LLM-designed V1 profile geometry when no starter template matches the requested object.",
+    objectSchema(customSketchBodyProperties, ["name", "outerProfile", "extrudeDepthMm"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_replace_sketch_body",
+    "Replace the selected or provided sketch body with a full custom V1 sketch in one safe refinement step.",
+    objectSchema({
+      bodyId: stringSchema("Optional body id to replace. If omitted, the selected body is replaced.", { maxLength: 120 }),
+      ...customSketchBodyProperties
+    }, ["outerProfile", "extrudeDepthMm"])
   ),
   defineAction(ASSISTANT_PAGES.PARTS, "parts_duplicate_body", "Duplicate the selected or provided body.", objectSchema({
     bodyId: stringSchema("Optional body id to duplicate.", { maxLength: 120 })
@@ -270,7 +353,7 @@ const partsActions = [
   defineAction(
     ASSISTANT_PAGES.PARTS,
     "parts_resize_body",
-    "Resize the selected or provided Part Studio body by target dimensions in millimeters.",
+    "Resize the selected or provided Component Builder body by target dimensions in millimeters.",
     objectSchema({
       bodyId: stringSchema("Optional body id to resize.", { maxLength: 120 }),
       targetSizeMm: vector3Schema("Target size in X/Y/Z millimeters."),
@@ -593,9 +676,9 @@ const workbenchActions = [
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Download the current RobotDesign JSON."
   }),
-  defineAction(ASSISTANT_PAGES.WORKBENCH, "workbench_export_urdf", "Download a URDF-like robot description.", emptyObjectSchema, {
+  defineAction(ASSISTANT_PAGES.WORKBENCH, "workbench_export_urdf", "Download the URDF robot description when preflight has no blocking issues.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
-    confirmation: "Download the URDF robot description."
+    confirmation: "Run URDF preflight and download the robot description if ready."
   }),
   defineAction(ASSISTANT_PAGES.WORKBENCH, "workbench_toggle_simulation_run", "Start or pause continuous simulation.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,

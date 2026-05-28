@@ -121,7 +121,7 @@ export const ASSISTANT_EVAL_SCENARIOS = Object.freeze([
   {
     id: "parts-template-edit",
     pageId: ASSISTANT_PAGES.PARTS,
-    title: "Part Studio Template Edit",
+    title: "Component Builder Template Edit",
     prompt: "Add a link bar template body, select it, rename it Test link, set color to #ff0000, set extrusion depth to 7 mm, and move it to [5, 0, 0].",
     requiredCalls: ["parts_add_template_body", "parts_select_body", "parts_set_body_properties"],
     requiredGuardedCalls: [],
@@ -131,7 +131,7 @@ export const ASSISTANT_EVAL_SCENARIOS = Object.freeze([
     assert: (context) => {
       const body = context?.selection;
       return [
-        ...requireState(context?.page === "Robotic Part Studio", "Expected Part Studio context."),
+        ...requireState(context?.page === "Robotic Component Builder", "Expected Component Builder context."),
         ...requireState(body?.id === "link_bar", "Expected link_bar to be selected."),
         ...requireState(body?.name === "Test link", "Expected selected body to be renamed Test link."),
         ...requireState(body?.color === "#ff0000", "Expected selected body color to be #ff0000."),
@@ -143,7 +143,7 @@ export const ASSISTANT_EVAL_SCENARIOS = Object.freeze([
   {
     id: "parts-cuts-and-advanced",
     pageId: ASSISTANT_PAGES.PARTS,
-    title: "Part Studio Cuts And Advanced Bodies",
+    title: "Component Builder Cuts And Advanced Bodies",
     prompt: "Add a base plate, add a circular hole, add a bolt circle, set the lathe preset to wheel, add the lathe body, and add a spur gear.",
     requiredCalls: [
       "parts_add_template_body",
@@ -168,9 +168,70 @@ export const ASSISTANT_EVAL_SCENARIOS = Object.freeze([
     }
   },
   {
+    id: "parts-custom-propeller-like",
+    pageId: ASSISTANT_PAGES.PARTS,
+    title: "Component Builder Custom Propeller-Like Plate",
+    prompt: "Design a two-blade propeller-like plate that is not from the starter template library. Use a valid custom X/Z sketch with a central circular bore and a 4 mm extrusion.",
+    requiredCalls: ["parts_create_custom_sketch_body"],
+    requiredGuardedCalls: [],
+    setupActions: [
+      { name: "parts_new_project", args: {} }
+    ],
+    assert: (context) => {
+      const body = context?.selection;
+      return [
+        ...requireState(body?.sourceKind === "sketchExtrude", "Expected a custom sketch-extrude body."),
+        ...requireState(body?.outerProfile?.type === "polyline", "Expected a polyline outer profile for the propeller-like outline."),
+        ...requireState((body?.cutProfiles?.length ?? 0) >= 1, "Expected at least one central bore or cut profile."),
+        ...requireState((context?.counts?.validationIssues ?? 1) === 0, "Expected the custom propeller-like body to validate."),
+        ...requireState((context?.counts?.compileErrors ?? 1) === 0, "Expected no custom propeller-like build errors.")
+      ];
+    }
+  },
+  {
+    id: "parts-custom-triangular-adapter",
+    pageId: ASSISTANT_PAGES.PARTS,
+    title: "Component Builder Custom Triangular Adapter",
+    prompt: "Design a custom triangular adapter plate with three rounded mounting holes and a 5 mm extrusion. Do not use a starter template.",
+    requiredCalls: ["parts_create_custom_sketch_body"],
+    requiredGuardedCalls: [],
+    setupActions: [
+      { name: "parts_new_project", args: {} }
+    ],
+    assert: (context) => {
+      const body = context?.selection;
+      return [
+        ...requireState(body?.sourceKind === "sketchExtrude", "Expected a custom sketch-extrude body."),
+        ...requireState(body?.outerProfile?.type === "polyline", "Expected a triangular polyline outer profile."),
+        ...requireState((body?.cutProfiles?.length ?? 0) >= 3, "Expected three mounting holes."),
+        ...requireState((context?.counts?.validationIssues ?? 1) === 0, "Expected the triangular adapter to validate.")
+      ];
+    }
+  },
+  {
+    id: "parts-custom-sensor-bracket",
+    pageId: ASSISTANT_PAGES.PARTS,
+    title: "Component Builder Custom Sensor Bracket",
+    prompt: "Design a compact custom sensor bracket with a window cutout, two screw holes, and a 3 mm extrusion. Do not use a starter template.",
+    requiredCalls: ["parts_create_custom_sketch_body"],
+    requiredGuardedCalls: [],
+    setupActions: [
+      { name: "parts_new_project", args: {} }
+    ],
+    assert: (context) => {
+      const body = context?.selection;
+      return [
+        ...requireState(body?.sourceKind === "sketchExtrude", "Expected a custom sketch-extrude body."),
+        ...requireState(["rectangle", "polyline"].includes(body?.outerProfile?.type), "Expected a bracket-like outer profile."),
+        ...requireState((body?.cutProfiles?.length ?? 0) >= 3, "Expected a window cutout and two screw holes."),
+        ...requireState((context?.counts?.validationIssues ?? 1) === 0, "Expected the sensor bracket to validate.")
+      ];
+    }
+  },
+  {
     id: "parts-boolean-guarded-staging",
     pageId: ASSISTANT_PAGES.PARTS,
-    title: "Part Studio Boolean And Guarded Staging",
+    title: "Component Builder Boolean And Guarded Staging",
     prompt: "Create a subtract boolean body, export the selected STL, and delete the selected body.",
     requiredCalls: ["parts_set_boolean_operation", "parts_add_boolean_body"],
     requiredGuardedCalls: ["parts_export_selected_stl", "parts_delete_body"],

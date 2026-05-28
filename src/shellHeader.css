@@ -1,0 +1,535 @@
+.shell-header {
+  --shell-header-bg: #0b1016;
+  --shell-header-bg-raised: #101821;
+  --shell-header-bg-hover: #172231;
+  --shell-header-border: #364253;
+  --shell-header-border-strong: #607083;
+  --shell-header-text: #f8fafc;
+  --shell-header-muted: #aeb8c7;
+  --shell-header-primary: #1268e8;
+  --shell-header-primary-dark: #075bd8;
+  --shell-header-danger: #ffb4ac;
+  --shell-header-danger-border: #80423f;
+  --shell-header-danger-bg: #241315;
+  --shell-header-focus: rgb(96 165 250 / 78%);
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: 6px 10px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 8px 12px;
+  overflow: visible;
+  border-bottom: 1px solid #252c36;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 5%), transparent 54%),
+    var(--shell-header-bg);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  color: var(--shell-header-text);
+}
+
+.material-symbols-rounded.app-icon {
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  font-family: "Material Symbols Rounded";
+  font-size: 18px;
+  font-style: normal;
+  font-weight: normal;
+  font-feature-settings: "liga";
+  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 20;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.shell-header__brand {
+  display: flex;
+  flex: 1 1 520px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: min(100%, 300px);
+}
+
+.shell-header--assembly .shell-header__brand {
+  flex-basis: 540px;
+}
+
+.shell-header--component .shell-header__brand {
+  flex-basis: 560px;
+}
+
+.shell-header--workbench .shell-header__brand {
+  flex-basis: 560px;
+}
+
+.shell-header .shell-header__title {
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 0.95rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-header .shell-header__status {
+  flex-basis: 100%;
+  overflow: hidden;
+  color: var(--shell-header-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-header__pages,
+.shell-header__modes,
+.shell-header__actions,
+.shell-header__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.shell-header__pages {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+}
+
+.shell-header__modes,
+.shell-header__actions,
+.shell-header__group {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+
+.shell-header__group + .shell-header__group {
+  margin-left: 0;
+  padding-left: 10px;
+  border-left: 1px solid #2d3745;
+}
+
+.shell-header__page-link,
+.shell-header__button,
+.shell-header__toggle,
+.shell-header .mode-button,
+.shell-header .toolbar-button,
+.shell-header .parts-button,
+.shell-header .mode-tabs button,
+.shell-header .physics-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--shell-header-border);
+  border-radius: 4px;
+  background: var(--shell-header-bg-raised);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
+  color: var(--shell-header-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    color 150ms ease;
+}
+
+.shell-header [data-tooltip] {
+  position: relative;
+}
+
+.shell-header [data-tooltip]::before,
+.shell-header [data-tooltip]::after {
+  position: absolute;
+  left: 50%;
+  z-index: 20;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.shell-header [data-tooltip]::before {
+  content: "";
+  top: calc(100% + 2px);
+  border-right: 5px solid transparent;
+  border-bottom: 5px solid rgb(10 15 22 / 96%);
+  border-left: 5px solid transparent;
+}
+
+.shell-header [data-tooltip]::after {
+  content: attr(data-tooltip);
+  top: calc(100% + 7px);
+  min-width: max-content;
+  max-width: 190px;
+  padding: 7px 9px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+  background: rgb(10 15 22 / 96%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 28%);
+  color: #f8fafc;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+}
+
+.shell-header [data-tooltip]:hover::before,
+.shell-header [data-tooltip]:hover::after,
+.shell-header [data-tooltip]:focus-visible::before,
+.shell-header [data-tooltip]:focus-visible::after,
+.shell-header [data-tooltip]:focus-within::before,
+.shell-header [data-tooltip]:focus-within::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.shell-header__button--icon-only {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+  gap: 0;
+}
+
+.shell-header__toggle--icon-only {
+  width: 62px;
+  min-width: 62px;
+  padding: 0 8px;
+}
+
+.shell-header__label--hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.shell-header button.shell-header__page-link {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.shell-header__page-link:hover,
+.shell-header__button:hover:not(:disabled),
+.shell-header__toggle:hover,
+.shell-header .mode-button:hover:not(:disabled),
+.shell-header .toolbar-button:hover:not(:disabled),
+.shell-header .parts-button:hover:not(:disabled),
+.shell-header .mode-tabs button:hover:not(:disabled),
+.shell-header .physics-actions button:hover:not(:disabled) {
+  border-color: var(--shell-header-border-strong);
+  background: var(--shell-header-bg-hover);
+  color: #ffffff;
+}
+
+.shell-header__page-link:focus-visible,
+.shell-header__button:focus-visible,
+.shell-header__toggle:focus-within,
+.shell-header .topbar-icon:focus-visible {
+  outline: 2px solid var(--shell-header-focus);
+  outline-offset: 2px;
+}
+
+.shell-header .mode-button.is-active,
+.shell-header .mode-tabs button.is-active,
+.shell-header .toolbar-button--primary,
+.shell-header #export-urdf.shell-header__button {
+  border-color: #6aa2ff;
+  background: linear-gradient(180deg, var(--shell-header-primary), var(--shell-header-primary-dark));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 18%),
+    0 0 0 1px rgb(18 104 232 / 20%);
+  color: #ffffff;
+}
+
+.shell-header .toolbar-button--danger {
+  border-color: var(--shell-header-danger-border);
+  background: var(--shell-header-danger-bg);
+  color: var(--shell-header-danger);
+}
+
+.shell-header .toolbar-button--danger:hover:not(:disabled) {
+  border-color: #b35f58;
+  background: #32181a;
+  color: #ffd4cf;
+}
+
+.shell-header__button:disabled,
+.shell-header .toolbar-button:disabled,
+.shell-header .parts-button:disabled,
+.shell-header .mode-tabs button:disabled,
+.shell-header .physics-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.shell-header .topbar-icon {
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+}
+
+.shell-header .topbar-icon:hover {
+  border-color: var(--shell-header-border);
+  background: var(--shell-header-bg-raised);
+}
+
+.shell-header .topbar-icon span:not(.app-icon) {
+  width: 18px;
+  height: 2px;
+  background: #f2f6fb;
+}
+
+.shell-header .page-icon {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  color: currentColor;
+}
+
+.shell-header .page-icon::before,
+.shell-header .page-icon::after {
+  content: "";
+  position: absolute;
+  background: transparent;
+}
+
+.shell-header .page-icon--assembly::before {
+  left: 2px;
+  bottom: 3px;
+  width: 13px;
+  height: 12px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+}
+
+.shell-header .page-icon--assembly::after {
+  right: 2px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+
+.shell-header .page-icon--component::before {
+  left: 3px;
+  top: 5px;
+  width: 11px;
+  height: 10px;
+  border: 2px solid currentColor;
+}
+
+.shell-header .page-icon--component::after {
+  left: 7px;
+  top: 2px;
+  width: 9px;
+  height: 9px;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+}
+
+.shell-header .page-icon--workbench::before {
+  left: 2px;
+  bottom: 4px;
+  width: 14px;
+  height: 2px;
+  background: currentColor;
+  transform: skewX(-12deg);
+  transform-origin: left center;
+}
+
+.shell-header .page-icon--workbench::after {
+  left: 3px;
+  top: 2px;
+  width: 2px;
+  height: 14px;
+  background: currentColor;
+  transform: rotate(8deg);
+  transform-origin: bottom center;
+}
+
+.shell-header .mode-icon,
+.shell-header .button-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.shell-header__toggle {
+  cursor: pointer;
+}
+
+.shell-header__toggle input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--shell-header-primary);
+}
+
+.shell-header__divider {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 24px;
+  margin: 0 4px;
+  background: #2d3745;
+}
+
+.shell-header--assembly .toolbar-group--view {
+  flex-wrap: nowrap;
+}
+
+.shell-header--assembly .toolbar-group--file .toolbar-button:not(.shell-header__button--icon-only) {
+  min-width: 116px;
+}
+
+.shell-header .help-button.shell-header__button--icon {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  font-weight: 750;
+}
+
+.shell-header .help-button.shell-header__button--icon-only {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+}
+
+@media (min-width: 1061px) and (max-width: 1500px) {
+  .shell-header--assembly .shell-header__brand,
+  .shell-header--assembly .toolbar-group--project,
+  .shell-header--assembly .toolbar-separator,
+  .shell-header--assembly .toolbar-group--modes {
+    order: 1;
+  }
+
+  .shell-header--assembly .toolbar-group--file,
+  .shell-header--assembly .toolbar-group--view {
+    order: 2;
+  }
+
+  .shell-header--assembly .toolbar-group--file {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell-header {
+    align-items: stretch;
+    gap: 7px;
+    padding: 8px 10px;
+  }
+
+  .shell-header__brand,
+  .shell-header--assembly .shell-header__brand,
+  .shell-header--component .shell-header__brand,
+  .shell-header--workbench .shell-header__brand {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .shell-header__title {
+    min-width: 0;
+    max-width: calc(100% - 28px);
+  }
+
+  .shell-header__pages {
+    display: grid;
+    flex: 1 1 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .shell-header__modes,
+  .shell-header__actions,
+  .shell-header__group {
+    display: grid;
+    flex: 1 1 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .shell-header__group + .shell-header__group {
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .shell-header__page-link,
+  .shell-header__button,
+  .shell-header__toggle,
+  .shell-header .mode-button,
+  .shell-header .toolbar-button,
+  .shell-header .parts-button,
+  .shell-header .mode-tabs button,
+  .shell-header .physics-actions button {
+    width: 100%;
+  }
+
+  .shell-header__divider {
+    display: none;
+  }
+
+  .shell-header .toolbar-separator {
+    display: none;
+  }
+
+  .shell-header--assembly .toolbar-group--file {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 42px;
+  }
+
+  .shell-header--assembly .toolbar-group--view {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .shell-header--assembly #reset-view {
+    grid-column: 1 / -1;
+  }
+}

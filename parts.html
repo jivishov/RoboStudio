@@ -3,70 +3,156 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Robotic Part Studio</title>
+    <title>Robotic Component Builder</title>
     <meta
       name="description"
       content="Create simple robotic mechanical parts as millimeter sketches for the STL Assembly Studio."
     />
     <link rel="icon" href="data:," />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=arrow_selector_tool,center_focus_strong,content_copy,delete,device_hub,drive_folder_upload,folder_open,layers,layers_clear,menu,note_add,open_in_full,open_with,orbit,package_2,person,precision_manufacturing,redo,restart_alt,rotate_right,save,smart_toy,undo,upload_file,view_in_ar,zoom_in"
+    />
   </head>
   <body>
     <div id="parts-app">
-      <header class="parts-topbar" aria-label="Part Studio command bar">
-        <div class="parts-brand">
-          <span class="parts-brand__mark" aria-hidden="true"></span>
-          <span class="parts-brand__name">Robotic Part Studio</span>
+      <header class="parts-topbar shell-header shell-header--component" aria-label="Component Builder command bar">
+        <div class="parts-brand shell-header__brand">
+          <span class="parts-brand__mark material-symbols-rounded app-icon app-icon--page" aria-hidden="true">package_2</span>
+          <span class="parts-brand__name shell-header__title">Robotic Component Builder</span>
+          <nav class="page-links shell-header__pages" aria-label="Workspace pages">
+            <a class="page-link shell-header__page-link" href="./" aria-label="Open Assembly Studio" title="Open Assembly Studio">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">view_in_ar</span>
+              Assembly Studio
+            </a>
+            <a class="page-link shell-header__page-link" href="./physics.html" aria-label="Open Robotics Design Workbench" title="Open Robotics Design Workbench">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">precision_manufacturing</span>
+              Workbench
+            </a>
+          </nav>
         </div>
-        <nav class="parts-toolbar" aria-label="Part Studio tools">
-          <button id="new-project" class="parts-button" type="button">New</button>
-          <button id="save-project" class="parts-button" type="button">Save JSON</button>
-          <button id="open-project" class="parts-button" type="button">Open JSON</button>
+        <nav class="parts-toolbar shell-header__actions shell-header__group" aria-label="Component Builder tools">
+          <button id="new-project" class="parts-button shell-header__button shell-header__button--icon-only" type="button" aria-label="New" title="New" data-tooltip="New">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">note_add</span>
+            <span class="shell-header__label shell-header__label--hint">New</span>
+          </button>
+          <button id="save-project" class="parts-button shell-header__button shell-header__button--icon-only" type="button" aria-label="Save JSON" title="Save JSON" data-tooltip="Save JSON">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">save</span>
+            <span class="shell-header__label shell-header__label--hint">Save JSON</span>
+          </button>
+          <button id="open-project" class="parts-button shell-header__button shell-header__button--icon-only" type="button" aria-label="Open JSON" title="Open JSON" data-tooltip="Open JSON">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">folder_open</span>
+            <span class="shell-header__label shell-header__label--hint">Open JSON</span>
+          </button>
           <input id="project-file-input" type="file" accept="application/json,.json" hidden />
-          <span class="parts-toolbar__divider" aria-hidden="true"></span>
-          <button id="undo-project" class="parts-button" type="button" disabled>Undo</button>
-          <button id="redo-project" class="parts-button" type="button" disabled>Redo</button>
-          <span class="parts-toolbar__divider" aria-hidden="true"></span>
-          <button id="export-stl" class="parts-button" type="button" disabled>Export STL</button>
-          <button id="send-assembly" class="parts-button" type="button" disabled>Send Assembly</button>
+          <span class="parts-toolbar__divider shell-header__divider" aria-hidden="true"></span>
+          <button id="undo-project" class="parts-button shell-header__button shell-header__button--icon-only" type="button" aria-label="Undo" title="Undo" data-tooltip="Undo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">undo</span>
+            <span class="shell-header__label shell-header__label--hint">Undo</span>
+          </button>
+          <button id="redo-project" class="parts-button shell-header__button shell-header__button--icon-only" type="button" aria-label="Redo" title="Redo" data-tooltip="Redo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">redo</span>
+            <span class="shell-header__label shell-header__label--hint">Redo</span>
+          </button>
+          <span class="parts-toolbar__divider shell-header__divider" aria-hidden="true"></span>
+          <button id="export-stl" class="parts-button shell-header__button" type="button" disabled>Export STL</button>
+          <button id="send-assembly" class="parts-button shell-header__button" type="button" disabled>Send Assembly</button>
         </nav>
-        <a class="parts-link-button" href="./">Assembly</a>
       </header>
 
       <aside class="parts-sidebar" aria-label="Templates and bodies">
-        <section class="parts-panel-section" aria-labelledby="templates-heading">
-          <h1 id="templates-heading">Templates</h1>
-          <div class="parts-field">
-            <label for="template-select">Starter</label>
-            <select id="template-select"></select>
+        <section class="parts-panel-section collapsible-card shell-card" aria-labelledby="templates-heading" data-card-id="parts-templates-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-templates-card" aria-expanded="true" aria-controls="parts-templates-card-content">
+            <span class="collapsible-card__label">
+              <span id="templates-heading" class="collapsible-card__title">Templates</span>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-templates-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div class="parts-field">
+                <label for="template-select">Starter</label>
+                <select id="template-select"></select>
+              </div>
+              <button id="add-template" class="parts-primary-button" type="button">Add Body</button>
+            </div>
           </div>
-          <button id="add-template" class="parts-primary-button" type="button">Add Body</button>
         </section>
 
-        <section class="parts-panel-section parts-panel-section--advanced" aria-labelledby="advanced-heading">
-          <h2 id="advanced-heading">Advanced</h2>
-          <div class="advanced-button-grid">
-            <button id="add-linear-pattern" class="parts-button parts-button--light" type="button" disabled>Linear Holes</button>
-            <button id="add-circular-pattern" class="parts-button parts-button--light" type="button" disabled>Bolt Circle</button>
+        <section class="parts-panel-section parts-panel-section--advanced collapsible-card shell-card" aria-labelledby="advanced-heading" data-card-id="parts-advanced-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-advanced-card" aria-expanded="true" aria-controls="parts-advanced-card-content">
+            <span class="collapsible-card__label">
+              <span id="advanced-heading" class="collapsible-card__title">Advanced</span>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-advanced-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div class="advanced-button-grid">
+                <button id="add-linear-pattern" class="parts-button parts-button--light" type="button" disabled>Linear Holes</button>
+                <button id="add-circular-pattern" class="parts-button parts-button--light" type="button" disabled>Bolt Circle</button>
+              </div>
+              <div class="parts-field">
+                <label for="revolve-preset-select">Lathe body</label>
+                <select id="revolve-preset-select"></select>
+              </div>
+              <button id="add-revolve-body" class="parts-button parts-button--light" type="button">Add Lathe Body</button>
+              <button id="add-spur-gear" class="parts-button parts-button--light" type="button">Add Spur Gear</button>
+              <div class="parts-field">
+                <label for="boolean-operation-select">Boolean</label>
+                <select id="boolean-operation-select"></select>
+              </div>
+              <button id="add-boolean-body" class="parts-button parts-button--light" type="button" disabled>Create Boolean Body</button>
+            </div>
           </div>
-          <div class="parts-field">
-            <label for="revolve-preset-select">Lathe body</label>
-            <select id="revolve-preset-select"></select>
-          </div>
-          <button id="add-revolve-body" class="parts-button parts-button--light" type="button">Add Lathe Body</button>
-          <button id="add-spur-gear" class="parts-button parts-button--light" type="button">Add Spur Gear</button>
-          <div class="parts-field">
-            <label for="boolean-operation-select">Boolean</label>
-            <select id="boolean-operation-select"></select>
-          </div>
-          <button id="add-boolean-body" class="parts-button parts-button--light" type="button" disabled>Create Boolean Body</button>
         </section>
 
-        <section class="parts-panel-section parts-panel-section--fill" aria-labelledby="bodies-heading">
-          <div class="parts-section-row">
-            <h2 id="bodies-heading">Bodies</h2>
-            <output id="body-count">0</output>
+        <section class="parts-panel-section collapsible-card shell-card" aria-labelledby="library-heading" data-card-id="parts-library-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-library-card" aria-expanded="true" aria-controls="parts-library-card-content">
+            <span class="collapsible-card__label">
+              <span id="library-heading" class="collapsible-card__title">Library</span>
+              <output id="library-count" class="collapsible-card__meta">0</output>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-library-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div class="library-cloud">
+                <output id="library-auth-status" class="library-cloud__status">Cloud sync unavailable</output>
+                <div class="library-cloud__actions">
+                  <button id="library-sign-in" class="parts-button parts-button--light" type="button">Sign in</button>
+                  <button id="library-sync" class="parts-button parts-button--light" type="button" disabled>Sync</button>
+                  <button id="library-sign-out" class="parts-button parts-button--light" type="button" disabled>Sign out</button>
+                </div>
+              </div>
+              <div class="library-actions">
+                <button id="save-library-part" class="parts-primary-button" type="button" disabled>Save Selected</button>
+                <button id="export-library" class="parts-button parts-button--light" type="button" disabled>Export JSON</button>
+                <button id="import-library" class="parts-button parts-button--light" type="button">Import JSON</button>
+              </div>
+              <input id="library-file-input" type="file" accept="application/json,.json" hidden />
+              <div id="library-list" class="library-list" aria-live="polite"></div>
+            </div>
           </div>
-          <div id="body-list" class="body-list" aria-live="polite"></div>
+        </section>
+
+        <section class="parts-panel-section parts-panel-section--fill collapsible-card shell-card" aria-labelledby="bodies-heading" data-card-id="parts-bodies-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-bodies-card" aria-expanded="true" aria-controls="parts-bodies-card-content">
+            <span class="collapsible-card__label">
+              <span id="bodies-heading" class="collapsible-card__title">Bodies</span>
+              <output id="body-count" class="collapsible-card__meta">0</output>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-bodies-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div id="body-list" class="body-list" aria-live="polite"></div>
+            </div>
+          </div>
         </section>
       </aside>
 
@@ -108,9 +194,14 @@
       </main>
 
       <aside class="parts-inspector" aria-label="Selected body inspector">
-        <section class="parts-panel-section" aria-labelledby="body-properties-heading">
-          <div class="parts-section-row">
-            <h2 id="body-properties-heading">Body</h2>
+        <section class="parts-panel-section collapsible-card shell-card" aria-labelledby="body-properties-heading" data-card-id="parts-body-card">
+          <div class="shell-card__header">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-body-card" aria-expanded="true" aria-controls="parts-body-card-content">
+              <span class="collapsible-card__label">
+                <span id="body-properties-heading" class="collapsible-card__title">Body</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
             <div class="inspector-actions">
               <button id="duplicate-body" class="parts-icon-button" type="button" aria-label="Duplicate selected body" disabled>
                 <span class="parts-icon parts-icon--duplicate" aria-hidden="true"></span>
@@ -120,17 +211,36 @@
               </button>
             </div>
           </div>
-          <div id="body-properties" class="inspector-stack"></div>
+          <div id="parts-body-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div id="body-properties" class="inspector-stack"></div>
+            </div>
+          </div>
         </section>
 
-        <section class="parts-panel-section" aria-labelledby="profile-heading">
-          <h2 id="profile-heading">Outer Profile</h2>
-          <div id="outer-profile-fields" class="inspector-stack"></div>
+        <section class="parts-panel-section collapsible-card shell-card" aria-labelledby="profile-heading" data-card-id="parts-profile-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-profile-card" aria-expanded="true" aria-controls="parts-profile-card-content">
+            <span class="collapsible-card__label">
+              <span id="profile-heading" class="collapsible-card__title">Outer Profile</span>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-profile-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div id="outer-profile-fields" class="inspector-stack"></div>
+            </div>
+          </div>
         </section>
 
-        <section class="parts-panel-section parts-panel-section--fill" aria-labelledby="cuts-heading">
-          <div class="parts-section-row">
-            <h2 id="cuts-heading">Holes / Cuts</h2>
+        <section class="parts-panel-section parts-panel-section--fill collapsible-card shell-card" aria-labelledby="cuts-heading" data-card-id="parts-cuts-card">
+          <div class="shell-card__header">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-cuts-card" aria-expanded="true" aria-controls="parts-cuts-card-content">
+              <span class="collapsible-card__label">
+                <span id="cuts-heading" class="collapsible-card__title">Holes / Cuts</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
             <div class="inspector-actions">
               <button id="add-circular-hole" class="parts-icon-button" type="button" aria-label="Add circular hole" disabled>
                 <span class="parts-icon parts-icon--circle" aria-hidden="true"></span>
@@ -140,7 +250,11 @@
               </button>
             </div>
           </div>
-          <div id="cut-profile-fields" class="cut-list"></div>
+          <div id="parts-cuts-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div id="cut-profile-fields" class="cut-list"></div>
+            </div>
+          </div>
         </section>
       </aside>
 

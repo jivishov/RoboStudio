@@ -9,43 +9,106 @@
       content="Convert STL assemblies into robot models with links, joints, IK, collision proxies, mass properties, actuators, and browser dynamics."
     />
     <link rel="icon" href="data:," />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=account_tree,analytics,arrow_selector_tool,bolt,center_focus_strong,content_copy,data_object,delete,device_hub,drive_folder_upload,fact_check,folder_open,help,layers,layers_clear,menu,note_add,open_in_full,open_with,orbit,package_2,pause_circle,person,play_circle,precision_manufacturing,redo,restart_alt,rotate_right,rule,save,smart_toy,undo,upload_file,view_in_ar,zoom_in"
+    />
   </head>
   <body>
     <div id="physics-app">
-      <header class="physics-topbar">
-        <a class="back-link" href="./">Assembly Studio</a>
-        <div class="physics-brand">
-          <span>Robotics Design Workbench</span>
-          <strong id="snapshot-status">Loading current assembly</strong>
+      <header class="physics-topbar shell-header shell-header--workbench" aria-label="Robotics Workbench command bar">
+        <div class="physics-brand shell-header__brand">
+          <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">precision_manufacturing</span>
+          <span class="shell-header__title">Robotics Design Workbench</span>
+          <nav class="page-links shell-header__pages" aria-label="Workspace pages">
+            <a class="page-link shell-header__page-link" href="./" aria-label="Open Assembly Studio" title="Open Assembly Studio">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">view_in_ar</span>
+              Assembly Studio
+            </a>
+            <a class="page-link shell-header__page-link" href="./parts.html" aria-label="Open Component Builder" title="Open Component Builder">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">package_2</span>
+              Component Builder
+            </a>
+          </nav>
+          <strong id="snapshot-status" class="shell-header__status">Loading current assembly</strong>
         </div>
-        <nav class="mode-tabs" aria-label="Workbench modes">
-          <button class="is-active" type="button" data-mode="model">Model</button>
-          <button type="button" data-mode="analyze">Analyze</button>
-          <button type="button" data-mode="actuators">Actuators</button>
-          <button type="button" data-mode="simulate">Simulate</button>
-          <button type="button" data-mode="audit">Audit</button>
+        <nav class="mode-tabs shell-header__modes shell-header__group" aria-label="Workbench modes">
+          <button class="shell-header__button is-active" type="button" data-mode="model">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">account_tree</span>
+            <span class="shell-header__label">Model</span>
+          </button>
+          <button class="shell-header__button" type="button" data-mode="analyze">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">analytics</span>
+            <span class="shell-header__label">Analyze</span>
+          </button>
+          <button class="shell-header__button" type="button" data-mode="actuators">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">bolt</span>
+            <span class="shell-header__label">Actuators</span>
+          </button>
+          <button class="shell-header__button" type="button" data-mode="simulate">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">play_circle</span>
+            <span class="shell-header__label">Simulate</span>
+          </button>
+          <button class="shell-header__button" type="button" data-mode="audit">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">rule</span>
+            <span class="shell-header__label">Audit</span>
+          </button>
         </nav>
-        <div class="physics-actions">
-          <button id="physics-help" class="help-button" type="button" aria-haspopup="dialog" aria-label="Open physics help" title="Open physics help">?</button>
-          <button id="frame-assembly" type="button">Frame</button>
-          <button id="save-design" type="button">Save</button>
-          <button id="load-design" type="button">Import</button>
-          <button id="export-design" type="button">JSON</button>
-          <button id="export-urdf" type="button">URDF</button>
+        <div class="physics-actions shell-header__actions shell-header__group">
+          <button id="physics-help" class="help-button shell-header__button shell-header__button--icon-only" type="button" aria-haspopup="dialog" aria-label="Open physics help" title="Help" data-tooltip="Help">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">help</span>
+            <span class="shell-header__label shell-header__label--hint">Help</span>
+          </button>
+          <button id="save-design" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Save robot design" title="Save" data-tooltip="Save">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">save</span>
+            <span class="shell-header__label shell-header__label--hint">Save</span>
+          </button>
+          <button id="load-design" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Import robot design JSON" title="Import" data-tooltip="Import">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">folder_open</span>
+            <span class="shell-header__label shell-header__label--hint">Import</span>
+          </button>
+          <button id="export-design" class="shell-header__button" type="button" aria-label="Export robot design JSON" title="Export robot design JSON">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">data_object</span>
+            <span class="shell-header__label">JSON</span>
+          </button>
+          <button id="export-urdf" class="shell-header__button" type="button" aria-label="Check and export URDF" title="Check and export URDF">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">fact_check</span>
+            <span class="shell-header__label">URDF Check</span>
+          </button>
           <input id="design-file-input" type="file" accept="application/json,.json" hidden />
         </div>
       </header>
 
       <main class="physics-shell">
         <aside class="physics-panel physics-panel--left">
-          <section class="physics-section">
-            <h1>Robot Model</h1>
-            <div id="design-summary" class="summary-strip"></div>
+          <section class="physics-section collapsible-card shell-card" aria-labelledby="robot-model-heading" data-card-id="physics-model-summary-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="physics-model-summary-card" aria-expanded="true" aria-controls="physics-model-summary-card-content">
+              <span class="collapsible-card__label">
+                <span id="robot-model-heading" class="collapsible-card__title">Robot Model</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="physics-model-summary-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="design-summary" class="summary-strip"></div>
+              </div>
+            </div>
           </section>
           <section id="mode-controls" class="physics-section"></section>
-          <section class="physics-section physics-section--tree">
-            <h2>Links & Joints</h2>
-            <div id="robot-tree" class="robot-tree"></div>
+          <section class="physics-section physics-section--tree collapsible-card shell-card" aria-labelledby="links-joints-heading" data-card-id="physics-links-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="physics-links-card" aria-expanded="true" aria-controls="physics-links-card-content">
+              <span class="collapsible-card__label">
+                <span id="links-joints-heading" class="collapsible-card__title">Links & Joints</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="physics-links-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="robot-tree" class="robot-tree"></div>
+              </div>
+            </div>
           </section>
         </aside>
 
@@ -65,30 +128,87 @@
             </div>
           </div>
           <div id="viewport-readout" class="viewport-readout floating-panel" data-floating-panel="readout"></div>
-          <div class="simulation-bar">
-            <button id="sim-reset" type="button">Reset</button>
-            <button id="sim-step" type="button">Step</button>
-            <button id="sim-run" type="button">Run</button>
-            <button id="run-audit" type="button">Run Audit</button>
+          <div class="simulation-bar" role="toolbar" aria-label="Viewport and simulation shortcuts">
+            <button id="frame-assembly" class="simulation-bar__button" type="button" aria-label="Frame assembly" title="Frame assembly" data-tooltip="Frame assembly">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
+              <span class="simulation-bar__label">Frame assembly</span>
+            </button>
+            <span class="simulation-bar__separator" aria-hidden="true"></span>
+            <button id="sim-reset" class="simulation-bar__button" type="button" aria-label="Reset simulation" title="Reset simulation" data-tooltip="Reset">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">restart_alt</span>
+              <span class="simulation-bar__label">Reset</span>
+            </button>
+            <button id="sim-step" class="simulation-bar__button" type="button" aria-label="Step simulation" title="Step simulation" data-tooltip="Step">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">redo</span>
+              <span class="simulation-bar__label">Step</span>
+            </button>
+            <button id="sim-run" class="simulation-bar__button" type="button" aria-label="Run simulation" title="Run simulation" data-tooltip="Run">
+              <span class="material-symbols-rounded app-icon" data-sim-run-icon aria-hidden="true">play_circle</span>
+              <span class="simulation-bar__label" data-sim-run-label>Run</span>
+            </button>
+            <button id="run-audit" class="simulation-bar__button" type="button" aria-label="Run audit" title="Run audit" data-tooltip="Run audit">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">rule</span>
+              <span class="simulation-bar__label">Run audit</span>
+            </button>
           </div>
         </section>
 
         <aside class="physics-panel physics-panel--right">
-          <section class="physics-section physics-section--metrics">
-            <h2>Metrics</h2>
-            <dl id="metrics-grid" class="metric-grid"></dl>
+          <section class="physics-section physics-section--metrics collapsible-card shell-card" aria-labelledby="metrics-heading" data-card-id="physics-metrics-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="physics-metrics-card" aria-expanded="true" aria-controls="physics-metrics-card-content">
+              <span class="collapsible-card__label">
+                <span id="metrics-heading" class="collapsible-card__title">Metrics</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="physics-metrics-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <dl id="metrics-grid" class="metric-grid"></dl>
+              </div>
+            </div>
           </section>
-          <section class="physics-section">
-            <h2>Inspector</h2>
-            <div id="inspector-panel" class="inspector-panel"></div>
+          <section class="physics-section collapsible-card shell-card" aria-labelledby="physics-inspector-heading" data-card-id="physics-inspector-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="physics-inspector-card" aria-expanded="true" aria-controls="physics-inspector-card-content">
+              <span class="collapsible-card__label">
+                <span id="physics-inspector-heading" class="collapsible-card__title">Inspector</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="physics-inspector-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="inspector-panel" class="inspector-panel"></div>
+              </div>
+            </div>
           </section>
-          <section class="physics-section">
-            <h2>Analysis</h2>
-            <div id="analysis-results" class="analysis-results"></div>
+          <section class="physics-section collapsible-card shell-card" aria-labelledby="physics-analysis-heading" data-card-id="physics-analysis-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="physics-analysis-card" aria-expanded="true" aria-controls="physics-analysis-card-content">
+              <span class="collapsible-card__label">
+                <span id="physics-analysis-heading" class="collapsible-card__title">Analysis</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="physics-analysis-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="analysis-results" class="analysis-results"></div>
+              </div>
+            </div>
           </section>
-          <section class="physics-section">
-            <h2>Audit</h2>
-            <div id="audit-list" class="audit-list"></div>
+          <section class="physics-section collapsible-card shell-card" aria-labelledby="physics-audit-heading" data-card-id="physics-audit-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="physics-audit-card" aria-expanded="true" aria-controls="physics-audit-card-content">
+              <span class="collapsible-card__label">
+                <span id="physics-audit-heading" class="collapsible-card__title">Audit</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="physics-audit-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="audit-list" class="audit-list"></div>
+              </div>
+            </div>
           </section>
         </aside>
       </main>
@@ -139,7 +259,7 @@
             </section>
             <section>
               <h3>Save and export</h3>
-              <p><b>Save</b> stores the current RobotDesign in this browser. <b>Import</b> loads a RobotDesign JSON file. <b>JSON</b> exports the editable design. <b>URDF</b> exports a URDF-style robot description.</p>
+              <p><b>Save</b> stores the current RobotDesign in this browser. <b>Import</b> loads a RobotDesign JSON file. <b>JSON</b> exports the editable design. <b>URDF Check</b> shows readiness, warnings, limitations, and the generic URDF download action.</p>
             </section>
             <section>
               <h3>Limits</h3>
