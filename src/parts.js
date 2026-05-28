@@ -128,7 +128,6 @@ const buildCount = document.querySelector("#build-count");
 const compileList = document.querySelector("#compile-list");
 
 const CAD_COMPILE_TIMEOUT_MS = 15000;
-const CAD_WORKER_URL = new URL("./parts/cadWorker.js", import.meta.url);
 const history = createProjectHistory();
 let cadWorker = null;
 const previewScene = createPartPreviewScene(modelPreview);
@@ -279,7 +278,8 @@ function handleCadWorkerFailure(error) {
 }
 
 function createCadWorker() {
-  const worker = new Worker(CAD_WORKER_URL, { type: "module" });
+  // Keep the Worker URL inline so Vite bundles the module worker and its imports for GitHub Pages.
+  const worker = new Worker(new URL("./parts/cadWorker.js", import.meta.url), { type: "module" });
   worker.addEventListener("message", (event) => {
     if (worker !== cadWorker) return;
     handleCadWorkerMessage(event);
