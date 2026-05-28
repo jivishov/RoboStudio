@@ -4,7 +4,7 @@
   bottom: 18px;
   z-index: 40;
   display: grid;
-  width: min(410px, calc(100vw - 28px));
+  width: min(451px, calc(100vw - 28px));
   max-height: min(650px, calc(100vh - 84px));
   overflow: hidden;
   border: 1px solid rgb(16 24 36 / 18%);
@@ -21,7 +21,7 @@
 
 .assistant-card__header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(210px, 268px);
+  grid-template-columns: minmax(0, 1fr) minmax(310px, 374px);
   align-items: center;
   gap: 8px;
   min-height: 42px;
@@ -30,6 +30,75 @@
   background: linear-gradient(180deg, #ffffff, #f5f7fb);
   cursor: grab;
   touch-action: none;
+}
+
+.assistant-card__tools {
+  display: grid;
+  grid-template-columns: 30px 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: default;
+}
+
+.assistant-card__icon-button,
+.assistant-message__copy {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #c9d1dd;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #394557;
+}
+
+.assistant-card__icon-button {
+  width: 30px;
+  min-height: 30px;
+}
+
+.assistant-message__copy {
+  width: 22px;
+  min-height: 22px;
+  border-color: transparent;
+  background: transparent;
+  color: #657183;
+}
+
+.assistant-card__icon-button:hover,
+.assistant-message__copy:hover {
+  border-color: #aebbd0;
+  background: #edf3fb;
+  color: #111821;
+}
+
+.assistant-card__icon-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.assistant-card .app-icon {
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  overflow: hidden;
+  font-family: "Material Symbols Rounded";
+  font-size: 18px;
+  font-style: normal;
+  font-weight: normal;
+  font-feature-settings: "liga";
+  font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 20;
+  line-height: 1;
+  direction: ltr;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .assistant-card.is-dragging .assistant-card__header {
@@ -63,6 +132,17 @@
   font-weight: 900;
 }
 
+.assistant-card__title-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.assistant-card__ai-icon {
+  color: #255fba;
+}
+
 .assistant-card__chevron {
   width: 8px;
   height: 8px;
@@ -77,7 +157,7 @@
 
 .assistant-card__controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(108px, 1fr) minmax(138px, 1fr);
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -137,6 +217,14 @@
   background: #ffffff;
 }
 
+.assistant-message__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .assistant-message--user {
   justify-self: end;
   border-color: #b9d2fb;
@@ -149,9 +237,31 @@
 }
 
 .assistant-message__role {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   color: #5c6674;
   font-size: 0.64rem;
   font-weight: 900;
+}
+
+.assistant-card .assistant-message__role-icon {
+  flex-basis: 14px;
+  width: 14px;
+  height: 14px;
+  color: #657183;
+  font-size: 14px;
+}
+
+.assistant-message__time {
+  min-width: 0;
+  overflow: hidden;
+  color: #6b7685;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.62rem;
+  font-weight: 800;
 }
 
 .assistant-message__text {
@@ -477,6 +587,10 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 
+  .assistant-card__tools {
+    grid-template-columns: 27px 27px minmax(0, 1fr);
+  }
+
   .assistant-card__body {
     max-height: calc(min(560px, calc(100vh - 20px)) - 76px);
   }
@@ -488,4 +602,212 @@
     width: auto;
     max-height: min(62vh, 560px);
   }
+}
+
+/* CSS-only technical UI refinement: compact assistant utility */
+.assistant-card {
+  right: 14px;
+  bottom: 14px;
+  width: min(462px, calc(100vw - 28px));
+  max-height: min(482px, calc(100vh - 70px));
+  border-color: rgb(15 23 42 / 16%);
+  border-radius: 6px;
+  box-shadow: 0 14px 36px rgb(15 23 42 / 16%);
+  font-variant-numeric: tabular-nums;
+}
+
+.assistant-card.is-dragging {
+  box-shadow: 0 18px 44px rgb(15 23 42 / 22%);
+}
+
+.assistant-card.is-collapsed {
+  width: min(270px, calc(100vw - 28px));
+}
+
+.assistant-card__header {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 315px);
+  min-height: 38px;
+  gap: 6px;
+  padding: 5px;
+  background: #f8fafc;
+}
+
+.assistant-card__tools {
+  grid-template-columns: 27px 27px minmax(0, 1fr);
+  gap: 5px;
+}
+
+.assistant-card__icon-button {
+  width: 27px;
+  min-height: 27px;
+  border-radius: 4px;
+}
+
+.assistant-card.is-collapsed .assistant-card__header {
+  border-bottom: 0;
+}
+
+.assistant-card.is-collapsed .assistant-card__controls {
+  display: none;
+}
+
+.assistant-card.is-collapsed .assistant-card__tools {
+  grid-template-columns: 27px 27px;
+  justify-self: end;
+}
+
+.assistant-card__collapse {
+  min-height: 28px;
+  padding-inline: 7px;
+  border-radius: 4px;
+}
+
+.assistant-card__title {
+  font-size: 0.76rem;
+}
+
+.assistant-card__controls {
+  grid-template-columns: minmax(108px, 1fr) minmax(138px, 1fr);
+  gap: 5px;
+}
+
+.assistant-card__field {
+  gap: 4px;
+  font-size: 0.64rem;
+}
+
+.assistant-card__field select {
+  min-height: 27px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+}
+
+.assistant-card__body {
+  grid-template-rows: minmax(96px, 1fr) auto auto auto;
+  max-height: calc(min(482px, calc(100vh - 70px)) - 39px);
+}
+
+.assistant-card__messages {
+  gap: 7px;
+  padding: 8px;
+}
+
+.assistant-message {
+  max-width: 96%;
+  padding: 7px 8px;
+  border-radius: 5px;
+}
+
+.assistant-message__role {
+  font-size: 0.62rem;
+}
+
+.assistant-message__time {
+  font-size: 0.6rem;
+  font-weight: 650;
+}
+
+.assistant-message__copy {
+  width: 21px;
+  min-height: 21px;
+  border-radius: 4px;
+}
+
+.assistant-message__text {
+  font-size: 0.72rem;
+}
+
+.assistant-card__confirmations {
+  padding: 0 8px 7px;
+}
+
+.assistant-confirmation {
+  border-radius: 5px;
+}
+
+.assistant-card__form {
+  grid-template-columns: minmax(0, 1fr) 58px;
+  gap: 7px;
+  padding: 8px;
+}
+
+.assistant-card__form textarea {
+  min-height: 50px;
+  max-height: 96px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+}
+
+.assistant-confirmation button,
+.assistant-card__form button {
+  min-height: 30px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+
+.assistant-card__status {
+  min-height: 18px;
+  padding: 0 8px 7px;
+  font-size: 0.64rem;
+}
+
+@media (max-width: 700px) {
+  .assistant-card {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: min(36vh, 310px);
+  }
+
+  .assistant-card.is-collapsed {
+    width: auto;
+  }
+
+  .assistant-card__header {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 36px;
+  }
+
+  .assistant-card__controls {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .assistant-card__body {
+    grid-template-rows: minmax(72px, 1fr) auto auto auto;
+    max-height: calc(min(36vh, 310px) - 72px);
+  }
+
+  .assistant-card__messages {
+    min-height: 72px;
+  }
+
+  .assistant-card__form textarea {
+    min-height: 44px;
+    max-height: 72px;
+  }
+}
+
+/* Assistant typography weight refinement */
+.assistant-card,
+.assistant-message__text,
+.assistant-card__status,
+.assistant-card__form textarea,
+.assistant-confirmation {
+  font-weight: 400;
+}
+
+.assistant-message__role,
+.assistant-card__controls label,
+.assistant-card__controls select,
+.assistant-message__time,
+.assistant-confirmation button,
+.assistant-card__form button {
+  font-weight: 600;
+}
+
+.assistant-card__title,
+.assistant-card__header strong,
+.assistant-confirmation strong {
+  font-weight: 800;
 }

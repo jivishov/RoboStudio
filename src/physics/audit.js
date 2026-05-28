@@ -1,4 +1,5 @@
 import { validateRobotDesign } from "./model.js";
+import { preflightUrdfExport } from "./exporters.js";
 
 const CATEGORY_ORDER = ["Model", "Kinematics", "Collision", "Mass/COM", "Actuators", "Simulation", "Export"];
 
@@ -19,7 +20,7 @@ const CATEGORY_BY_CODE = {
   actuator: "Actuators",
   stability: "Mass/COM",
   "simulation-proxies": "Simulation",
-  "export-structure": "Export",
+  "urdf-ready": "Export",
   ready: "Model"
 };
 
@@ -40,7 +41,7 @@ const ACTION_BY_CODE = {
   actuator: "Assign a stronger actuator or reduce payload/speed assumptions.",
   stability: "Move mass inward, reduce payload, or enlarge the root box proxy.",
   "simulation-proxies": "Enable at least one collision proxy before initializing simulation.",
-  "export-structure": "Keep at least one link with a stable id before exporting.",
+  "urdf-ready": "Download the URDF when the export warnings are acceptable.",
   ready: "No action needed."
 };
 
@@ -107,12 +108,19 @@ export function runDesignAudit(design, analysis = {}) {
       ? `${enabledProxyCount} enabled collision proxies are available for proxy simulation.`
       : "Simulation cannot initialize without enabled collision proxies."
   }));
+
+  const urdfIssues = preflightUrdfExport(design, analysis.partRecords ?? []);
+  items.push(...urdfIssues.map(enrichAuditItem));
+  const urdfRisks = urdfIssues.filter((item) => item.level === "risk");
+  const urdfWarnings = urdfIssues.filter((item) => item.level === "warn");
   items.push(enrichAuditItem({
-    level: design.links.length > 0 ? "ok" : "risk",
-    code: "export-structure",
-    message: design.links.length > 0
-      ? "RobotDesign has link structure for JSON and URDF-style export."
-      : "Export needs at least one link."
+    level: urdfRisks.length ? "risk" : urdfWarnings.length ? "warn" : "ok",
+    code: "urdf-ready",
+    message: urdfRisks.length
+      ? `URDF export has ${urdfRisks.length} blocking issue${urdfRisks.length === 1 ? "" : "s"}.`
+      : urdfWarnings.length
+        ? `URDF export is available with ${urdfWarnings.length} warning${urdfWarnings.length === 1 ? "" : "s"}.`
+        : "URDF export is ready with links, joints, inertials, visuals, collisions, limits, dynamics, and tool frames."
   }));
 
   return items;

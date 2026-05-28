@@ -8,8 +8,18 @@ import { ASSISTANT_PAGES, toolsForPage } from "./actionCatalog.js";
 
 const PAGE_LABELS = Object.freeze({
   [ASSISTANT_PAGES.STUDIO]: "STL Assembly Studio",
-  [ASSISTANT_PAGES.PARTS]: "Robotic Part Studio",
+  [ASSISTANT_PAGES.PARTS]: "Robotic Component Builder",
   [ASSISTANT_PAGES.WORKBENCH]: "Robotics Design Workbench"
+});
+
+const PAGE_INSTRUCTIONS = Object.freeze({
+  [ASSISTANT_PAGES.PARTS]: [
+    "For Component Builder requests, use starter templates when they clearly match the requested object.",
+    "If no template matches, design a custom sketch-extrude body with the supported V1 profile types: rectangle, circle, roundedSlot, and closed polyline.",
+    "Prefer one coherent custom body. Use multiple bodies only when the user clearly asks for separate physical parts.",
+    "After custom creation or replacement, inspect validation and build status from tool output or page context. Refine with parts_replace_sketch_body when validation or build feedback shows a fixable geometry problem.",
+    "If the requested shape needs unsupported freeform surfaces, helical sweeps, or true 3D blades, create the closest valid sketch-extrude approximation and state the limitation briefly."
+  ]
 });
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -94,6 +104,7 @@ export function buildAssistantInstructions(pageId) {
     "When the user asks to change settings, perform workflow steps, or inspect page state, call the best matching tool instead of giving manual click instructions.",
     "Use only registered tools. Do not invent action names, DOM selectors, local file paths, file hashes, vendor file IDs, or hidden runtime values.",
     "Destructive, save/export/import, navigation, file picker, and continuous-run actions may return a pending-confirmation result. If that happens, tell the user the action is waiting for confirmation in the assistant card.",
+    ...(PAGE_INSTRUCTIONS[pageId] ?? []),
     "Keep final text concise and mention the concrete actions taken or queued."
   ].join("\n");
 }
@@ -141,8 +152,7 @@ export function buildResponsesRequest(payload) {
     instructions: buildAssistantInstructions(payload.pageId),
     input,
     tools: toolsForPage(payload.pageId),
-    parallel_tool_calls: false,
-    max_output_tokens: 1800
+    parallel_tool_calls: false
   };
   request.reasoning = { ...(model.reasoning ?? {}), effort: reasoningEffort };
   if (payload.previousResponseId) request.previous_response_id = payload.previousResponseId;

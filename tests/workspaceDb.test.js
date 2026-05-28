@@ -5,10 +5,14 @@ import { readSavedRobotDesign, snapshotNewerThanDesign } from "../src/physics/pe
 import {
   CURRENT_DESIGN_KEY,
   CURRENT_SNAPSHOT_KEY,
+  deleteWorkspaceValue,
   DESIGN_STORE_NAME,
   openWorkspaceDb,
+  PART_LIBRARY_STORE_NAME,
+  readAllWorkspaceValues,
   readWorkspaceValue,
   SNAPSHOT_STORE_NAME,
+  writeWorkspaceValue,
   WORKSPACE_DB_NAME,
   WORKSPACE_DB_VERSION
 } from "../src/workspaceDb.js";
@@ -108,6 +112,41 @@ class FakeObjectStore {
     });
     return request;
   }
+
+  delete(key) {
+    const request = new FakeRequest();
+    queueMicrotask(() => {
+      this.store.delete(key);
+      request.result = undefined;
+      request.emit("success");
+      this.transaction.complete();
+    });
+    return request;
+  }
+
+  openCursor() {
+    const request = new FakeRequest();
+    const entries = [...this.store.entries()];
+    let index = 0;
+    const advance = () => {
+      if (index >= entries.length) {
+        request.result = null;
+        request.emit("success");
+        this.transaction.complete();
+        return;
+      }
+      const [key, value] = entries[index];
+      index += 1;
+      request.result = {
+        key,
+        value,
+        continue: () => queueMicrotask(advance)
+      };
+      request.emit("success");
+    };
+    queueMicrotask(advance);
+    return request;
+  }
 }
 
 class FakeDatabase {
@@ -191,21 +230,22 @@ class FakeIndexedDB {
   }
 }
 
-test("workspace opener creates both required stores for a fresh DB", async () => {
+test("workspace opener creates all required stores for a fresh DB", async () => {
   const indexedDb = new FakeIndexedDB();
 
   const db = await openWorkspaceDb({ indexedDb });
 
   assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
   assert.equal(indexedDb.deleteCount, 0);
   db.close();
 });
 
-test("workspace opener repairs a version-2 DB missing robot designs and preserves the current snapshot", async () => {
+test("workspace opener upgrades a version-2 DB and preserves the current snapshot", async () => {
   const indexedDb = new FakeIndexedDB();
   const snapshot = { savedAt: "2026-05-22T14:00:00.000Z", glb: "binary", parts: [{ id: "base" }] };
-  indexedDb.seed(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION, {
+  indexedDb.seed(WORKSPACE_DB_NAME, 2, {
     [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, snapshot]]
   });
 
@@ -213,7 +253,8 @@ test("workspace opener repairs a version-2 DB missing robot designs and preserve
 
   assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
-  assert.equal(indexedDb.deleteCount, 1);
+  assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
+  assert.equal(indexedDb.deleteCount, 0);
   db.close();
   assert.deepEqual(
     await readWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, { indexedDb }),
@@ -221,12 +262,37 @@ test("workspace opener repairs a version-2 DB missing robot designs and preserve
   );
 });
 
-test("workspace opener leaves a valid version-2 DB intact", async () => {
+test("workspace opener repairs a malformed version-3 DB and preserves readable stores", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const snapshot = { savedAt: "2026-05-22T14:00:00.000Z", glb: "binary", parts: [{ id: "base" }] };
+  const libraryItem = { version: 1, id: "saved_base", name: "Saved base" };
+  indexedDb.seed(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION, {
+    [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, snapshot]],
+    [PART_LIBRARY_STORE_NAME]: [[libraryItem.id, libraryItem]]
+  });
+
+  const db = await openWorkspaceDb({ indexedDb });
+
+  assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
+  assert.equal(indexedDb.deleteCount, 1);
+  db.close();
+  assert.deepEqual(
+    await readWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, { indexedDb }),
+    snapshot
+  );
+  assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [libraryItem]);
+});
+
+test("workspace opener leaves a valid version-3 DB intact", async () => {
   const indexedDb = new FakeIndexedDB();
   const design = { version: 1, name: "Saved design" };
+  const libraryItem = { version: 1, id: "saved_base", name: "Saved base" };
   indexedDb.seed(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION, {
     [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, { savedAt: "now" }]],
-    [DESIGN_STORE_NAME]: [[CURRENT_DESIGN_KEY, design]]
+    [DESIGN_STORE_NAME]: [[CURRENT_DESIGN_KEY, design]],
+    [PART_LIBRARY_STORE_NAME]: [[libraryItem.id, libraryItem]]
   });
 
   const db = await openWorkspaceDb({ indexedDb });
@@ -234,6 +300,20 @@ test("workspace opener leaves a valid version-2 DB intact", async () => {
   assert.equal(indexedDb.deleteCount, 0);
   db.close();
   assert.deepEqual(await readSavedRobotDesign({ indexedDb }), design);
+  assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [libraryItem]);
+});
+
+test("workspace read-all and delete helpers manage library entries", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const first = { id: "first", name: "First" };
+  const second = { id: "second", name: "Second" };
+
+  await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, first.id, first, { indexedDb });
+  await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, second.id, second, { indexedDb });
+  assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [first, second]);
+
+  await deleteWorkspaceValue(PART_LIBRARY_STORE_NAME, first.id, { indexedDb });
+  assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [second]);
 });
 
 test("missing saved robot design returns null", async () => {

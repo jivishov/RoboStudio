@@ -1,4 +1,5 @@
 import "./styles.css";
+import "./shellHeader.css";
 import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
@@ -33,17 +34,17 @@ import {
   isValidGeneratedAssemblySnapshot
 } from "./studio/partsHandoff.js";
 import { CURRENT_SNAPSHOT_KEY, SNAPSHOT_STORE_NAME, readWorkspaceValue, writeWorkspaceValue } from "./workspaceDb.js";
+import { isShellCardOpen, mountShellCardToggles } from "./shellCards.js";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 
 const viewport = document.querySelector("#viewport");
 const stage = document.querySelector(".stage");
 const loading = document.querySelector("#loading");
-const resetButton = document.querySelector("#reset-view");
 const exportButton = document.querySelector("#export-glb");
 const openPhysicsButton = document.querySelector("#open-physics");
 const importStlButton = document.querySelector("#import-stl");
-const importStlSecondaryButton = document.querySelector("#import-stl-secondary");
+const clearSceneButton = document.querySelector("#clear-scene");
 const stlFileInput = document.querySelector("#stl-file-input");
 const savePoseButton = document.querySelector("#save-pose");
 const loadPoseButton = document.querySelector("#load-pose");
@@ -84,7 +85,7 @@ const stagePartCount = document.querySelector("#stage-part-count");
 const stageWorkspaceMode = document.querySelector("#stage-workspace-mode");
 const stagePoseStatus = document.querySelector("#stage-pose-status");
 const workspaceSummary = document.querySelector("#workspace-summary");
-const viewportDockButtons = document.querySelectorAll(".viewport-dock button");
+const viewportDockButtons = document.querySelectorAll("[data-viewport-action]");
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#f7f9fc");
@@ -242,17 +243,24 @@ function refreshPartIndex() {
   partsById = new Map(parts.map((part) => [part.userData.id, part]));
 }
 
+function partTypeCounts() {
+  return {
+    imported: parts.filter((part) => part.userData.type === "imported").length,
+    sample: parts.filter((part) => part.userData.type === "source").length,
+    generated: parts.filter((part) => ["generated", "inferred"].includes(part.userData.type)).length
+  };
+}
+
 function markDirty(message = null) {
   layoutDirty = true;
   updateWorkspaceSummary();
   updateStageStatus();
+  updateSceneControls();
   if (message) showStatus(message);
 }
 
 function updateWorkspaceSummary() {
-  const importedCount = parts.filter((part) => part.userData.type === "imported").length;
-  const sampleCount = parts.filter((part) => part.userData.type === "source").length;
-  const generatedCount = parts.filter((part) => ["generated", "inferred"].includes(part.userData.type)).length;
+  const { imported: importedCount, sample: sampleCount, generated: generatedCount } = partTypeCounts();
   const segments = [];
 
   if (importedCount) segments.push(`${importedCount} imported`);
@@ -314,14 +322,14 @@ function normalizeGeneratedSnapshotMesh(mesh, metadata) {
     file: null,
     type: "generated",
     source: "part-studio",
-    inferredReason: "Generated in Robotic Part Studio.",
+    inferredReason: "Generated in Robotic Component Builder.",
     jointNotes: null
   };
 }
 
 async function createGeneratedAssemblyFromSnapshot(snapshot) {
   if (!isValidGeneratedAssemblySnapshot(snapshot)) {
-    throw new Error("Part Studio snapshot is missing generated GLB data.");
+    throw new Error("Component Builder snapshot is missing generated GLB data.");
   }
 
   const gltf = await parseGlbSnapshot(snapshot.glb);
@@ -333,7 +341,7 @@ async function createGeneratedAssemblyFromSnapshot(snapshot) {
     if (object.isMesh) meshes.push(object);
   });
   if (!meshes.length) {
-    throw new Error("Part Studio snapshot GLB did not contain generated meshes.");
+    throw new Error("Component Builder snapshot GLB did not contain generated meshes.");
   }
 
   for (const [index, mesh] of meshes.entries()) {
@@ -378,7 +386,6 @@ async function importStlFiles(fileList) {
   if (!files.length || !assemblyGroup || !poseState || !restState) return;
 
   importStlButton.disabled = true;
-  importStlSecondaryButton.disabled = true;
   showStatus(`Importing ${files.length} STL file${files.length === 1 ? "" : "s"}...`, 10000);
 
   const importedParts = [];
@@ -407,7 +414,6 @@ async function importStlFiles(fileList) {
   }
 
   importStlButton.disabled = false;
-  importStlSecondaryButton.disabled = false;
   stlFileInput.value = "";
 }
 
@@ -446,6 +452,12 @@ function selectedPartId() {
 }
 
 function setButtonText(button, text) {
+  const label = button.querySelector(".shell-header__label:not(.shell-header__label--hint)");
+  if (label) {
+    label.textContent = text;
+    return;
+  }
+
   const textNode = [...button.childNodes]
     .reverse()
     .find((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
@@ -505,6 +517,16 @@ function triangleCount(part) {
   return Math.round(count / 3);
 }
 
+function workspaceModeLabel() {
+  const counts = partTypeCounts();
+  if (!parts.length) return "Empty workspace";
+  if (counts.imported && parts.length > counts.imported) return "Mixed STL assembly";
+  if (counts.imported) return "Imported STL assembly";
+  if (counts.sample) return "Sample assembly";
+  if (counts.generated) return "Generated part assembly";
+  return "Sample assembly";
+}
+
 function currentJoint() {
   return JOINTS_BY_ID.get(jointSelect.value);
 }
@@ -512,21 +534,21 @@ function currentJoint() {
 function updateStageStatus() {
   if (stageSelectedName) stageSelectedName.textContent = selectedPart?.userData?.id ?? "None";
   if (stagePartCount) stagePartCount.textContent = `${parts.filter((part) => part.visible).length}/${parts.length} visible`;
-  if (stageWorkspaceMode) {
-    const importedCount = parts.filter((part) => part.userData.type === "imported").length;
-    const sourceCount = parts.filter((part) => part.userData.type === "source").length;
-    const generatedCount = parts.filter((part) => part.userData.type === "generated").length;
-    stageWorkspaceMode.textContent = parts.length
-      ? importedCount && sourceCount
-        ? "Mixed STL assembly"
-        : importedCount
-          ? "Imported STL assembly"
-          : generatedCount
-            ? "Generated part assembly"
-            : "Sample assembly"
-      : "Empty workspace";
-  }
+  if (stageWorkspaceMode) stageWorkspaceMode.textContent = workspaceModeLabel();
   if (stagePoseStatus) stagePoseStatus.textContent = layoutDirty ? "unsaved changes" : "saved";
+}
+
+function updateSceneControls() {
+  const visibleCount = parts.filter((part) => part.visible).length;
+
+  for (const button of viewportDockButtons) {
+    if (button.dataset.viewportAction === "show-all") {
+      button.disabled = !parts.length || visibleCount === parts.length;
+    } else if (button.dataset.viewportAction === "hide-all") {
+      button.disabled = !parts.length || visibleCount === 0;
+    }
+  }
+  if (clearSceneButton) clearSceneButton.disabled = !parts.length;
 }
 
 function buildJointSelect() {
@@ -576,17 +598,44 @@ function buildPartsList() {
 
     if (!matchingParts.length) continue;
 
+    const cardId = `assembly-parts-${group.key}`;
+    const open = isShellCardOpen(cardId);
+    const contentId = `${cardId}-content`;
     const section = document.createElement("section");
-    section.className = "parts-group";
+    section.className = `parts-group collapsible-card shell-card${open ? "" : " is-collapsed"}`;
+    section.dataset.cardId = cardId;
 
-    const heading = document.createElement("div");
-    heading.className = "parts-group__heading";
+    const heading = document.createElement("button");
+    heading.className = "parts-group__heading collapsible-card__toggle shell-card__toggle";
+    heading.type = "button";
+    heading.dataset.toggleShellCard = cardId;
+    heading.setAttribute("aria-expanded", String(open));
+    heading.setAttribute("aria-controls", contentId);
+
+    const labelWrap = document.createElement("span");
+    labelWrap.className = "collapsible-card__label";
     const label = document.createElement("span");
+    label.className = "collapsible-card__title";
     label.textContent = group.label;
     const count = document.createElement("span");
+    count.className = "collapsible-card__meta";
     count.textContent = matchingParts.length;
-    heading.append(label, count);
+    labelWrap.append(label, count);
+
+    const chevron = document.createElement("span");
+    chevron.className = "collapsible-card__chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    const dots = document.createElement("span");
+    dots.className = "collapsible-card__dots";
+    dots.setAttribute("aria-hidden", "true");
+    heading.append(labelWrap, chevron, dots);
     section.append(heading);
+
+    const content = document.createElement("div");
+    content.className = "collapsible-card__content";
+    content.id = contentId;
+    const inner = document.createElement("div");
+    inner.className = "collapsible-card__inner parts-group__body";
 
     for (const part of matchingParts) {
       const row = document.createElement("div");
@@ -598,7 +647,6 @@ function buildPartsList() {
 
       const visibility = document.createElement("label");
       visibility.className = "part-row__visibility";
-      visibility.title = `Toggle ${part.userData.label}`;
       visibility.addEventListener("click", (event) => event.stopPropagation());
 
       const input = document.createElement("input");
@@ -607,14 +655,20 @@ function buildPartsList() {
       input.addEventListener("change", () => {
         poseState.visibility[part.userData.id] = input.checked;
         applyCurrentPose();
+        updateVisibilityToggle(visibility, input, part);
         if (!input.checked && selectedPart === part) {
           selectPart(null);
+        } else {
+          updateSelectedInspector();
         }
+        markDirty(`${part.userData.label ?? part.userData.id} ${input.checked ? "shown" : "hidden"}`);
       });
 
-      const eye = document.createElement("span");
-      eye.className = "visibility-glyph";
-      visibility.append(input, eye);
+      const visibilityIcon = document.createElement("span");
+      visibilityIcon.className = "material-symbols-rounded app-icon visibility-glyph";
+      visibilityIcon.setAttribute("aria-hidden", "true");
+      visibility.append(input, visibilityIcon);
+      updateVisibilityToggle(visibility, input, part);
 
       const dot = document.createElement("span");
       dot.className = `part-dot${["generated", "inferred"].includes(part.userData.type) ? " part-dot--inferred" : ""}`;
@@ -635,9 +689,12 @@ function buildPartsList() {
           selectPart(part);
         }
       });
-      section.append(row);
+      inner.append(row);
       partRowsById.set(part.userData.id, row);
     }
+
+    content.append(inner);
+    section.append(content);
 
     partsList.append(section);
   }
@@ -657,8 +714,23 @@ function updatePartRows() {
 
     row.classList.toggle("is-selected", part === selectedPart);
     const input = row.querySelector("input[type='checkbox']");
-    input.checked = part.visible;
+    const visibility = row.querySelector(".part-row__visibility");
+    if (input) {
+      input.checked = part.visible;
+      updateVisibilityToggle(visibility, input, part);
+    }
   }
+}
+
+function updateVisibilityToggle(label, input, part) {
+  if (!label || !input) return;
+  const visible = Boolean(input.checked);
+  const labelText = part.userData.label ?? part.userData.id;
+  const action = visible ? "Hide" : "Show";
+  const icon = label.querySelector(".visibility-glyph");
+  label.title = `${action} ${labelText}`;
+  input.setAttribute("aria-label", `${action} ${labelText}`);
+  if (icon) icon.textContent = visible ? "layers" : "layers_clear";
 }
 
 function downloadBlob(content, fileName, type) {
@@ -738,10 +810,10 @@ async function openPhysicsWorkbench() {
     await saveCurrentAssemblySnapshot(await createAssemblyGlb());
     window.location.href = `${import.meta.env.BASE_URL}physics.html`;
   } catch (error) {
-    console.error("Physics handoff failed", error);
+    console.error("Workbench handoff failed", error);
     openPhysicsButton.disabled = false;
-    setButtonText(openPhysicsButton, "Physics");
-    showStatus("Unable to prepare physics workbench", 4200);
+    setButtonText(openPhysicsButton, "Workbench");
+    showStatus("Unable to prepare workbench", 4200);
   }
 }
 
@@ -810,6 +882,7 @@ function applyCurrentPose() {
   updateJointHelper();
   updatePartRows();
   updateStageStatus();
+  updateSceneControls();
 }
 
 function updateModeButtons() {
@@ -995,6 +1068,7 @@ function updateAllControls() {
   updateSelectionHelper();
   updateJointHelper();
   updatePartRows();
+  updateSceneControls();
 }
 
 function selectPart(part) {
@@ -1205,6 +1279,78 @@ function removeSelectedPart() {
   markDirty("Part removed");
 }
 
+function disposePart(part) {
+  part.geometry?.dispose?.();
+  for (const material of partMaterials(part)) {
+    material.dispose?.();
+  }
+}
+
+function clearScene({ confirm = true } = {}) {
+  if (!parts.length) return false;
+  if (confirm && !window.confirm("Clear all parts from the scene?")) return false;
+
+  transformControls.detach();
+  selectedPart = null;
+
+  for (const part of parts) {
+    disposePart(part);
+  }
+  scene.remove(assemblyGroup);
+
+  assemblyGroup = createEmptyAssembly();
+  scene.add(assemblyGroup);
+  parts = [];
+  partsById = new Map();
+  partRowsById = new Map();
+  restState = captureRestState(parts);
+  poseState = createDefaultPose(parts);
+  partFilter = "";
+  partSearch.value = "";
+  importedColorIndex = 0;
+
+  buildPartsList();
+  applyCurrentPose();
+  updateAllControls();
+  markDirty("Scene cleared");
+  return true;
+}
+
+function setGridVisible(visible) {
+  gridVisible = visible;
+  grid.visible = visible;
+  for (const button of viewportDockButtons) {
+    if (button.dataset.viewportAction === "grid") {
+      button.classList.toggle("is-active", visible);
+      button.setAttribute("aria-pressed", String(visible));
+    }
+  }
+  updateSceneControls();
+}
+
+function setCameraControlState({ orbit, zoom }) {
+  if (typeof orbit === "boolean") {
+    controls.enableRotate = orbit;
+    orbitToggle.checked = orbit;
+  }
+  if (typeof zoom === "boolean") {
+    controls.enableZoom = zoom;
+    zoomToggle.checked = zoom;
+  }
+  updateSceneControls();
+}
+
+function setAllPartsVisible(visible) {
+  if (!poseState || !parts.length) return;
+  for (const part of parts) {
+    poseState.visibility[part.userData.id] = visible;
+  }
+  if (!visible) selectedPart = null;
+  applyCurrentPose();
+  updateAllControls();
+  markDirty(visible ? "All parts shown" : "All parts hidden");
+}
+
 function captureSelectedOffsetFromTransformControls() {
   const partId = selectedPartId();
   if (!partId || !selectedPart) return;
@@ -1393,22 +1539,11 @@ function mountStudioAssistant() {
         return "Assembly framed in the viewport.";
       },
       studio_set_camera_controls: ({ orbit, zoom }) => {
-        if (typeof orbit === "boolean") {
-          controls.enableRotate = orbit;
-          orbitToggle.checked = orbit;
-        }
-        if (typeof zoom === "boolean") {
-          controls.enableZoom = zoom;
-          zoomToggle.checked = zoom;
-        }
+        setCameraControlState({ orbit, zoom });
         return "Camera controls updated.";
       },
       studio_set_grid_visible: ({ visible }) => {
-        gridVisible = visible;
-        grid.visible = visible;
-        for (const [index, button] of [...viewportDockButtons].entries()) {
-          if (index === 3) button.classList.toggle("is-active", visible);
-        }
+        setGridVisible(visible);
         return visible ? "Grid shown." : "Grid hidden.";
       },
       studio_set_part_visibility: ({ partId, visible }) => {
@@ -1469,11 +1604,15 @@ function mountStudioAssistant() {
       },
       studio_open_physics_workbench: async () => {
         await openPhysicsWorkbench();
-        return "Physics Workbench is opening.";
+        return "Robotics Design Workbench is opening.";
       },
       studio_import_stl_picker: () => {
         stlFileInput.click();
         return "STL import file picker opened.";
+      },
+      studio_clear_scene: () => {
+        const cleared = clearScene({ confirm: false });
+        return cleared ? "Scene cleared." : "Scene already empty.";
       }
     }
   });
@@ -1494,6 +1633,8 @@ clearSearchButton.addEventListener("click", () => {
   updatePartRows();
   partSearch.focus();
 });
+
+clearSceneButton.addEventListener("click", () => clearScene());
 
 selectedVisibleToggle.addEventListener("change", () => {
   const partId = selectedPartId();
@@ -1520,20 +1661,26 @@ for (const button of modeButtons) {
   button.addEventListener("click", () => setStudioMode(button.dataset.mode));
 }
 
-for (const [index, button] of [...viewportDockButtons].entries()) {
-  if (index < 3) {
-    button.addEventListener("click", () => {
-      if (assemblyGroup) fitCameraToObject(assemblyGroup);
-    });
-  } else if (index === 3) {
-    button.classList.add("is-active");
-    button.addEventListener("click", () => {
-      gridVisible = !gridVisible;
-      grid.visible = gridVisible;
-      button.classList.toggle("is-active", gridVisible);
-    });
+for (const button of viewportDockButtons) {
+  if (button.dataset.viewportAction === "grid") {
+    button.classList.toggle("is-active", gridVisible);
+    button.setAttribute("aria-pressed", String(gridVisible));
   }
+
+  button.addEventListener("click", () => {
+    if (button.dataset.viewportAction === "frame") {
+      if (assemblyGroup) fitCameraToObject(assemblyGroup);
+    } else if (button.dataset.viewportAction === "grid") {
+      setGridVisible(!gridVisible);
+    } else if (button.dataset.viewportAction === "show-all") {
+      setAllPartsVisible(true);
+    } else if (button.dataset.viewportAction === "hide-all") {
+      setAllPartsVisible(false);
+    }
+  });
 }
+
+mountShellCardToggles(document);
 
 stage.addEventListener("dragover", (event) => {
   if (!filesContainStl(event.dataTransfer)) return;
@@ -1568,21 +1715,16 @@ transformControls.addEventListener("objectChange", captureSelectedOffsetFromTran
 renderer.domElement.addEventListener("pointerdown", pickPart);
 
 orbitToggle.addEventListener("change", () => {
-  controls.enableRotate = orbitToggle.checked;
+  setCameraControlState({ orbit: orbitToggle.checked });
 });
 
 zoomToggle.addEventListener("change", () => {
-  controls.enableZoom = zoomToggle.checked;
-});
-
-resetButton.addEventListener("click", () => {
-  if (assemblyGroup) fitCameraToObject(assemblyGroup);
+  setCameraControlState({ zoom: zoomToggle.checked });
 });
 
 exportButton.addEventListener("click", exportAssemblyGlb);
 openPhysicsButton.addEventListener("click", openPhysicsWorkbench);
 importStlButton.addEventListener("click", () => stlFileInput.click());
-importStlSecondaryButton.addEventListener("click", () => stlFileInput.click());
 stlFileInput.addEventListener("change", () => importStlFiles(stlFileInput.files));
 savePoseButton.addEventListener("click", savePoseJson);
 loadPoseButton.addEventListener("click", () => poseFileInput.click());
@@ -1626,10 +1768,10 @@ async function init() {
       try {
         assemblyGroup = await createGeneratedAssemblyFromSnapshot(await readCurrentAssemblySnapshot());
         loadedGenerated = true;
-        startupStatus = "Loaded generated parts from Part Studio";
+        startupStatus = "Loaded generated parts from Component Builder";
       } catch (error) {
-        console.warn("Part Studio handoff snapshot is unavailable; falling back to sample arm.", error);
-        startupStatus = "Part Studio handoff unavailable; loaded fallback workspace";
+        console.warn("Component Builder handoff snapshot is unavailable; falling back to sample arm.", error);
+        startupStatus = "Component Builder handoff unavailable; loaded fallback workspace";
       }
     }
     if (!assemblyGroup && import.meta.env.DEV) {

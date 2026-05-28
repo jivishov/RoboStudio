@@ -4,7 +4,7 @@ import { deleteActuator, evaluateActuators, upsertActuator } from "../../src/phy
 import { runDesignAudit } from "../../src/physics/audit.js";
 import { checkCollisionProxies, collisionPairKey } from "../../src/physics/collision.js";
 import { DynamicsRunner } from "../../src/physics/dynamics.js";
-import { serializeRobotDesign, serializeUrdfLike } from "../../src/physics/exporters.js";
+import { createUrdfExport, preflightUrdfExport, serializeRobotDesign, serializeUrdf } from "../../src/physics/exporters.js";
 import { analyzeTopology, computeForwardKinematics, getEndEffectorPosition, getJointAngle, solveIKCCD } from "../../src/physics/kinematics.js";
 import { baseStability, computeMassProperties, estimateJointLoads } from "../../src/physics/mass.js";
 import { createRobotDesign, normalizeRobotDesign, validateRobotDesign } from "../../src/physics/model.js";
@@ -22,7 +22,7 @@ function twoLinkDesign() {
         partIds: ["base"],
         massKg: 1,
         com: [0, 0, 0],
-        inertia: [0, 0, 0],
+        inertia: [0.01, 0.02, 0.03],
         collisionProxies: [{ id: "base_box", type: "box", origin: [0, 0, 0], dimensions: [80, 40, 80], enabled: true }]
       },
       {
@@ -31,7 +31,7 @@ function twoLinkDesign() {
         partIds: ["upper"],
         massKg: 0.4,
         com: [50, 0, 0],
-        inertia: [0, 0, 0],
+        inertia: [0.004, 0.008, 0.01],
         collisionProxies: [{ id: "upper_box", type: "box", origin: [50, 0, 0], dimensions: [100, 20, 20], enabled: true }]
       },
       {
@@ -40,7 +40,7 @@ function twoLinkDesign() {
         partIds: ["forearm"],
         massKg: 0.3,
         com: [50, 0, 0],
-        inertia: [0, 0, 0],
+        inertia: [0.003, 0.006, 0.008],
         collisionProxies: [{ id: "forearm_box", type: "box", origin: [50, 0, 0], dimensions: [100, 20, 20], enabled: true }]
       }
     ],
@@ -443,7 +443,7 @@ test("groups audit findings and gives actions for risks", () => {
   }
 });
 
-test("exports RobotDesign JSON and URDF-style structure", () => {
+test("exports RobotDesign JSON and frame-aware URDF structure", () => {
   const design = twoLinkDesign();
   const partRecords = [
     { id: "base", name: "Base mesh", file: "Base.STL" },
@@ -456,15 +456,64 @@ test("exports RobotDesign JSON and URDF-style structure", () => {
   assert.equal(parsed.joints.length, design.joints.length);
   assert.equal(parsed.exportedAt.length > 0, true);
 
-  const urdf = serializeUrdfLike(design, partRecords);
+  const exportResult = createUrdfExport(design, partRecords);
+  assert.equal(exportResult.ready, true);
+  assert.ok(exportResult.issues.some((issue) => issue.code === "urdf-robot-name"));
+
+  const urdf = serializeUrdf(design, partRecords);
   assert.match(urdf, /<robot name="Two link test">/);
   assert.match(urdf, /<link name="base">/);
   assert.match(urdf, /<inertial>/);
   assert.match(urdf, /<visual name="base">/);
-  assert.match(urdf, /filename="Base.STL"/);
+  assert.match(urdf, /filename="Base.STL" scale="0.001 0.001 0.001"/);
   assert.match(urdf, /<collision name="base_box">/);
+  assert.match(urdf, /<box size="0.08000 0.04000 0.08000" \/>/);
   assert.match(urdf, /<joint name="shoulder" type="revolute">/);
   assert.match(urdf, /<limit lower="-3.141593" upper="3.141593" effort="0.02" velocity="0.349066" \/>/);
+  assert.match(urdf, /<dynamics damping="0.1" friction="0.05" \/>/);
+  assert.match(urdf, /<link name="tool0_link">/);
+  assert.match(urdf, /<joint name="tool0_fixed_joint" type="fixed">/);
+  assert.match(urdf, /<origin xyz="0.10000 0.00000 0.00000" rpy="0.00000 0.00000 0.00000" \/>/);
+});
+
+test("preflights URDF blockers and warnings", () => {
+  const design = twoLinkDesign();
+  design.links[0].massKg = 0;
+  design.links[1].inertia = [0, 0, 0];
+  design.links[2].collisionProxies = [];
+  design.joints[0].axis = [0, 0, 0];
+  design.joints[1].min = 120;
+  design.joints[1].max = -120;
+  design.joints.push({
+    id: "loop",
+    name: "Loop",
+    type: "fixed",
+    parentLinkId: "forearm",
+    childLinkId: "base",
+    origin: [0, 0, 0],
+    axis: [0, 0, 1],
+    min: 0,
+    max: 0,
+    damping: 0,
+    friction: 0,
+    actuatorId: null
+  });
+
+  const issues = preflightUrdfExport(design, [
+    { id: "base", name: "Base mesh", file: "C:\\fixtures\\Base.STL" },
+    { id: "upper", name: "Upper mesh" }
+  ]);
+  const codes = issues.map((issue) => issue.code);
+
+  assert.ok(codes.includes("urdf-invalid-mass"));
+  assert.ok(codes.includes("urdf-invalid-inertia"));
+  assert.ok(codes.includes("urdf-zero-axis"));
+  assert.ok(codes.includes("urdf-bad-limits"));
+  assert.ok(codes.includes("urdf-missing-visual-mesh"));
+  assert.ok(codes.includes("urdf-nonportable-mesh-path"));
+  assert.ok(codes.includes("urdf-missing-collision"));
+  assert.ok(codes.includes("urdf-closed-loop-topology"));
+  assert.equal(createUrdfExport(design, []).ready, false);
 });
 
 test("reports uninitialized simulation status without loading Rapier", () => {

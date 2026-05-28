@@ -29,7 +29,8 @@ export default defineConfig(({ mode }) => {
         input: {
           main: resolve(__dirname, "index.html"),
           physics: resolve(__dirname, "physics.html"),
-          parts: resolve(__dirname, "parts.html")
+          parts: resolve(__dirname, "parts.html"),
+          authCallback: resolve(__dirname, "auth-callback.html")
         }
       }
     },

@@ -1,6 +1,9 @@
 import "./parts.css";
+import "./shellHeader.css";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
+import { isSupabaseConfigured } from "./auth/authConfig.js";
+import { createAuthSessionController } from "./auth/authSession.js";
 import {
   BOOLEAN_OPERATION_KIND,
   REVOLVE_KIND,
@@ -33,6 +36,8 @@ import {
 } from "./parts/projectState.js";
 import { parsePartProjectJson, serializePartProject } from "./parts/serialization.js";
 import {
+  CUT_PROFILE_TYPES,
+  OUTER_PROFILE_TYPES,
   combinedProfileBounds,
   createCircularHole,
   createSlottedHole,
@@ -41,6 +46,21 @@ import {
   profileSize
 } from "./parts/sketch.js";
 import { createBodyFromTemplate, listPartTemplates } from "./parts/templates.js";
+import { createCustomSketchBodyFromArgs, replaceSketchBodyFromArgs } from "./parts/customSketchBody.js";
+import {
+  addPartLibraryItemToProject,
+  createPartLibraryItem,
+  mergePartLibraryItems,
+  normalizePartLibraryItem,
+  parsePartLibraryBundleJson,
+  partLibraryItemSummary,
+  serializePartLibraryBundle
+} from "./parts/library.js";
+import {
+  deleteSupabasePartLibraryItem,
+  syncPartLibraryWithSupabase,
+  upsertSupabasePartLibraryItem
+} from "./parts/supabaseLibrary.js";
 import { validateBody, validatePartProject } from "./parts/validation.js";
 import { createPartPreviewScene } from "./parts/previewScene.js";
 import { createGeneratedAssemblySnapshot } from "./parts/snapshot.js";
@@ -50,7 +70,15 @@ import {
   targetSizeFromAxisEdit
 } from "./parts/resize.js";
 import { SKETCH_MOUSE_RESIZE_MIN_MM, targetSizeFromSketchResize } from "./parts/sketchResize.js";
-import { CURRENT_SNAPSHOT_KEY, SNAPSHOT_STORE_NAME, writeWorkspaceValue } from "./workspaceDb.js";
+import {
+  CURRENT_SNAPSHOT_KEY,
+  PART_LIBRARY_STORE_NAME,
+  SNAPSHOT_STORE_NAME,
+  deleteWorkspaceValue,
+  readAllWorkspaceValues,
+  writeWorkspaceValue
+} from "./workspaceDb.js";
+import { mountShellCardToggles } from "./shellCards.js";
 
 const templateSelect = document.querySelector("#template-select");
 const addTemplateButton = document.querySelector("#add-template");
@@ -61,6 +89,16 @@ const addRevolveBodyButton = document.querySelector("#add-revolve-body");
 const addSpurGearButton = document.querySelector("#add-spur-gear");
 const booleanOperationSelect = document.querySelector("#boolean-operation-select");
 const addBooleanBodyButton = document.querySelector("#add-boolean-body");
+const saveLibraryPartButton = document.querySelector("#save-library-part");
+const exportLibraryButton = document.querySelector("#export-library");
+const importLibraryButton = document.querySelector("#import-library");
+const librarySignInButton = document.querySelector("#library-sign-in");
+const librarySyncButton = document.querySelector("#library-sync");
+const librarySignOutButton = document.querySelector("#library-sign-out");
+const libraryAuthStatus = document.querySelector("#library-auth-status");
+const libraryFileInput = document.querySelector("#library-file-input");
+const libraryList = document.querySelector("#library-list");
+const libraryCount = document.querySelector("#library-count");
 const bodyList = document.querySelector("#body-list");
 const bodyCount = document.querySelector("#body-count");
 const bodyProperties = document.querySelector("#body-properties");
@@ -89,12 +127,15 @@ const compileCount = document.querySelector("#compile-count");
 const buildCount = document.querySelector("#build-count");
 const compileList = document.querySelector("#compile-list");
 
+const CAD_COMPILE_TIMEOUT_MS = 15000;
+const CAD_WORKER_URL = new URL("./parts/cadWorker.js", import.meta.url);
 const history = createProjectHistory();
-const cadWorker = new Worker(new URL("./parts/cadWorker.js", import.meta.url), { type: "module" });
+let cadWorker = null;
 const previewScene = createPartPreviewScene(modelPreview);
 const SVG_NS = "http://www.w3.org/2000/svg";
 let statusTimer = null;
 let compileTimer = null;
+let compileTimeoutTimer = null;
 let workerRequestId = 0;
 let activeCompileRequestId = null;
 let pendingCompileSignature = null;
@@ -107,6 +148,11 @@ let resizeKeepCutSizes = true;
 let sketchResizeDrag = null;
 const pendingStlExports = new Map();
 const compileRequestSignatures = new Map();
+let partLibraryItems = [];
+const authController = createAuthSessionController();
+let authState = authController.getState();
+let libraryCloudBusy = false;
+let lastSyncedUserId = null;
 
 function showStatus(message, timeout = 2400) {
   clearTimeout(statusTimer);
@@ -173,6 +219,89 @@ function projectCompileSignature(project) {
   return JSON.stringify(project.bodies.map(bodyCompileSignature));
 }
 
+function compileFailure(code, message, bodyId = null) {
+  return { bodyId, code, message, issues: [] };
+}
+
+function workerEventMessage(event, fallback) {
+  const message = event?.message || event?.error?.message || fallback;
+  const location = [event?.filename, event?.lineno, event?.colno].filter(Boolean).join(":");
+  return location ? `${message} (${location})` : message;
+}
+
+function clearCompileTimeout() {
+  clearTimeout(compileTimeoutTimer);
+  compileTimeoutTimer = null;
+}
+
+function startCompileTimeout(requestId) {
+  clearCompileTimeout();
+  compileTimeoutTimer = setTimeout(() => {
+    if (requestId !== activeCompileRequestId) return;
+    handleCadWorkerFailure(
+      compileFailure("worker-timeout", "Generated solid build timed out. The CAD worker was restarted.")
+    );
+  }, CAD_COMPILE_TIMEOUT_MS);
+}
+
+function replaceCadWorker() {
+  cadWorker?.terminate?.();
+  cadWorker = null;
+}
+
+function ensureCadWorker() {
+  cadWorker ??= createCadWorker();
+  return cadWorker;
+}
+
+function handleCadWorkerMessage(event) {
+  const message = event.data ?? {};
+  if (message.type === "compileBodiesResult") handleCompileResult(message);
+  if (message.type === "exportStlResult") handleStlExportResult(message);
+  if (message.type === "exportStlError") handleStlExportError(message);
+}
+
+function handleCadWorkerFailure(error) {
+  clearTimeout(compileTimer);
+  clearCompileTimeout();
+  activeCompileRequestId = null;
+  pendingCompileSignature = null;
+  lastCompletedCompileSignature = null;
+  compiling = false;
+  compileRequestSignatures.clear();
+  pendingStlExports.clear();
+  compileResults = new Map();
+  compileErrors = [error];
+  updateGeneratedPreview(history.current);
+  renderCompileStatus(history.current);
+  showStatus("Generated solid build failed. Edit the body or try again.", 5200);
+  replaceCadWorker();
+}
+
+function createCadWorker() {
+  const worker = new Worker(CAD_WORKER_URL, { type: "module" });
+  worker.addEventListener("message", (event) => {
+    if (worker !== cadWorker) return;
+    handleCadWorkerMessage(event);
+  });
+  worker.addEventListener("error", (event) => {
+    if (worker !== cadWorker) return;
+    handleCadWorkerFailure(
+      compileFailure("worker-error", workerEventMessage(event, "Generated solid build failed in the CAD worker."))
+    );
+  });
+  worker.addEventListener("messageerror", (event) => {
+    if (worker !== cadWorker) return;
+    handleCadWorkerFailure(
+      compileFailure(
+        "worker-message-error",
+        workerEventMessage(event, "Generated solid build response could not be read.")
+      )
+    );
+  });
+  return worker;
+}
+
 function renderCompileStatus(project = history.current) {
   const resultCount = compileResultCount(project);
   const total = project.bodies.length;
@@ -195,6 +324,7 @@ function renderCompileStatus(project = history.current) {
 
   if (!total) {
     const item = document.createElement("li");
+    item.className = "validation-note";
     item.textContent = "Add a body to build a solid preview.";
     compileList.append(item);
     return;
@@ -242,10 +372,12 @@ function requestCadCompile(project = history.current) {
   clearTimeout(compileTimer);
 
   if (!project.bodies.length) {
+    clearCompileTimeout();
     activeCompileRequestId = null;
     pendingCompileSignature = null;
     lastCompletedCompileSignature = signature;
     compiling = false;
+    compileRequestSignatures.clear();
     compileResults = new Map();
     compileErrors = [];
     updateGeneratedPreview(project);
@@ -256,17 +388,25 @@ function requestCadCompile(project = history.current) {
   compiling = true;
   pendingCompileSignature = signature;
   activeCompileRequestId = null;
+  clearCompileTimeout();
   renderCompileStatus(project);
 
   compileTimer = setTimeout(() => {
     const requestId = nextWorkerRequestId();
     activeCompileRequestId = requestId;
     compileRequestSignatures.set(requestId, signature);
-    cadWorker.postMessage({
-      type: "compileBodies",
-      requestId,
-      bodies: project.bodies
-    });
+    try {
+      ensureCadWorker().postMessage({
+        type: "compileBodies",
+        requestId,
+        bodies: project.bodies
+      });
+      startCompileTimeout(requestId);
+    } catch (error) {
+      handleCadWorkerFailure(
+        compileFailure("worker-post-message-error", `Unable to start generated solid build: ${error.message}`)
+      );
+    }
   }, 180);
 }
 
@@ -275,11 +415,12 @@ function handleCompileResult(message) {
     compileRequestSignatures.delete(message.requestId);
     return;
   }
+  clearCompileTimeout();
   compiling = false;
   lastCompletedCompileSignature = compileRequestSignatures.get(message.requestId) ?? pendingCompileSignature;
   pendingCompileSignature = null;
   compileRequestSignatures.delete(message.requestId);
-  compileResults = new Map(message.results.map((result) => [result.bodyId, result]));
+  compileResults = new Map((message.results ?? []).map((result) => [result.bodyId, result]));
   compileErrors = message.errors ?? [];
   updateGeneratedPreview();
   renderCompileStatus();
@@ -302,13 +443,6 @@ function handleStlExportError(message) {
   renderCompileStatus();
 }
 
-cadWorker.addEventListener("message", (event) => {
-  const message = event.data ?? {};
-  if (message.type === "compileBodiesResult") handleCompileResult(message);
-  if (message.type === "exportStlResult") handleStlExportResult(message);
-  if (message.type === "exportStlError") handleStlExportError(message);
-});
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -321,6 +455,9 @@ async function waitForCadReady(timeoutMs = 6000) {
     if (!compiling && signature === lastCompletedCompileSignature) {
       renderCompileStatus(history.current);
       return;
+    }
+    if (!compiling && compileErrors.length) {
+      throw new Error(compileErrors[0].issues?.[0]?.message ?? compileErrors[0].message ?? "Generated solid build failed.");
     }
     await sleep(50);
   }
@@ -359,6 +496,229 @@ function renderAdvancedOptions() {
       return option;
     })
   );
+}
+
+function sortLibraryItems(items) {
+  return [...items].sort((first, second) => {
+    const firstTime = Date.parse(first.updatedAt ?? "");
+    const secondTime = Date.parse(second.updatedAt ?? "");
+    if (Number.isFinite(firstTime) && Number.isFinite(secondTime) && firstTime !== secondTime) {
+      return secondTime - firstTime;
+    }
+    return String(first.name).localeCompare(String(second.name));
+  });
+}
+
+function libraryItemById(itemId) {
+  const item = partLibraryItems.find((entry) => entry.id === itemId);
+  if (!item) throw new Error(`Unknown library item: ${itemId}`);
+  return item;
+}
+
+function handleLibraryError(error, fallback = "Part library action failed.") {
+  console.error(fallback, error);
+  showStatus(error?.message ?? fallback, 5200);
+}
+
+function signedInSession() {
+  return authState.status === "authenticated" ? authState.session : null;
+}
+
+function cloudStatusText() {
+  if (!isSupabaseConfigured) return "Configure Supabase to enable cloud sync";
+  if (libraryCloudBusy) return "Cloud sync working";
+  if (authState.status === "checking") return "Checking cloud sign-in";
+  if (authState.status === "authenticated") {
+    return authState.user?.email ? `Signed in as ${authState.user.email}` : "Signed in";
+  }
+  if (authState.status === "error" && authState.error) return authState.error;
+  return "Local library only";
+}
+
+async function persistLocalLibraryItems(items) {
+  for (const item of items) {
+    await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id, item);
+  }
+}
+
+async function syncLibraryToSupabase(options = {}) {
+  const session = signedInSession();
+  if (!session) throw new Error("Sign in before syncing the part library.");
+  libraryCloudBusy = true;
+  renderLibraryPanel();
+  try {
+    const mergedItems = await syncPartLibraryWithSupabase(session, partLibraryItems);
+    await persistLocalLibraryItems(mergedItems);
+    partLibraryItems = sortLibraryItems(mergedItems);
+    if (!options.silent) showStatus(`Synced ${partLibraryItems.length} library part${partLibraryItems.length === 1 ? "" : "s"}`);
+    return partLibraryItems;
+  } finally {
+    libraryCloudBusy = false;
+    renderLibraryPanel();
+  }
+}
+
+async function loadPartLibrary() {
+  try {
+    const storedItems = await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME);
+    const normalizedItems = [];
+    for (const item of storedItems) {
+      try {
+        normalizedItems.push(normalizePartLibraryItem(item));
+      } catch (error) {
+        console.warn("Ignoring invalid part library item", error);
+      }
+    }
+    partLibraryItems = sortLibraryItems(normalizedItems);
+    renderLibraryPanel();
+    if (signedInSession()) {
+      await syncLibraryToSupabase({ silent: true });
+    }
+  } catch (error) {
+    handleLibraryError(error, "Part library could not be loaded.");
+  }
+}
+
+async function saveSelectedPartToLibrary() {
+  const body = selectedProjectBody();
+  if (!body) throw new Error("Select a body before saving to the library.");
+
+  const item = createPartLibraryItem(history.current, body.id, {
+    existingIds: new Set(partLibraryItems.map((entry) => entry.id))
+  });
+  await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id, item);
+  partLibraryItems = sortLibraryItems([item, ...partLibraryItems]);
+  if (signedInSession()) {
+    try {
+      await upsertSupabasePartLibraryItem(signedInSession(), item);
+    } catch (error) {
+      handleLibraryError(error, "Cloud save failed.");
+    }
+  }
+  renderLibraryPanel();
+  showStatus(`${item.name} saved to library`);
+  return item;
+}
+
+function addLibraryItemToCurrentProject(itemId) {
+  const item = libraryItemById(itemId);
+  const result = addPartLibraryItemToProject(history.current, item);
+  commit(result.project, `${item.name} added from library`);
+  return result;
+}
+
+async function deleteLibraryItem(itemId) {
+  const item = libraryItemById(itemId);
+  await deleteWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id);
+  partLibraryItems = partLibraryItems.filter((entry) => entry.id !== item.id);
+  if (signedInSession()) {
+    try {
+      await deleteSupabasePartLibraryItem(signedInSession(), item.id);
+    } catch (error) {
+      handleLibraryError(error, "Cloud delete failed.");
+    }
+  }
+  renderLibraryPanel();
+  showStatus(`${item.name} removed from library`);
+  return item;
+}
+
+function exportLibraryJson() {
+  if (!partLibraryItems.length) throw new Error("Save a part before exporting the library.");
+  downloadBlob(serializePartLibraryBundle(partLibraryItems), "robotic-part-library.json", "application/json");
+  showStatus("Part library JSON export started");
+}
+
+async function importPartLibraryJson(source) {
+  const bundle = parsePartLibraryBundleJson(source);
+  const importedItems = bundle.items.map((item) => normalizePartLibraryItem(item));
+  for (const item of importedItems) {
+    await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id, item);
+  }
+  partLibraryItems = sortLibraryItems(mergePartLibraryItems(partLibraryItems, importedItems));
+  if (signedInSession()) {
+    for (const item of importedItems) {
+      try {
+        await upsertSupabasePartLibraryItem(signedInSession(), item);
+      } catch (error) {
+        handleLibraryError(error, "Cloud import sync failed.");
+      }
+    }
+  }
+  renderLibraryPanel();
+  showStatus(
+    `Imported ${importedItems.length} librar${importedItems.length === 1 ? "y part" : "y parts"}`
+  );
+  return importedItems;
+}
+
+function libraryMetaText(item) {
+  const summary = partLibraryItemSummary(item);
+  const bodyWord = summary.bodyCount === 1 ? "body" : "bodies";
+  return `${summary.bodyCount} ${bodyWord} / ${summary.sourceKind}`;
+}
+
+function renderLibraryPanel() {
+  libraryCount.textContent = String(partLibraryItems.length);
+  saveLibraryPartButton.disabled = !selectedProjectBody();
+  exportLibraryButton.disabled = partLibraryItems.length === 0;
+  libraryAuthStatus.textContent = cloudStatusText();
+  librarySignInButton.disabled = !isSupabaseConfigured || authState.status === "authenticated" || authState.status === "checking" || libraryCloudBusy;
+  librarySyncButton.disabled = !signedInSession() || libraryCloudBusy;
+  librarySignOutButton.disabled = !signedInSession() || libraryCloudBusy;
+  libraryList.replaceChildren();
+
+  if (!partLibraryItems.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-note";
+    empty.textContent = "Save selected parts for reuse";
+    libraryList.append(empty);
+    return;
+  }
+
+  for (const item of partLibraryItems) {
+    const row = document.createElement("div");
+    row.className = "library-row";
+
+    const label = document.createElement("div");
+    label.className = "library-row__label";
+
+    const name = document.createElement("span");
+    name.className = "library-row__name";
+    name.textContent = item.name;
+
+    const meta = document.createElement("span");
+    meta.className = "library-row__meta";
+    meta.textContent = libraryMetaText(item);
+
+    const actions = document.createElement("div");
+    actions.className = "library-row__actions";
+
+    const addButton = document.createElement("button");
+    addButton.className = "library-row__button";
+    addButton.type = "button";
+    addButton.textContent = "Add";
+    addButton.addEventListener("click", () => {
+      try {
+        addLibraryItemToCurrentProject(item.id);
+      } catch (error) {
+        handleLibraryError(error);
+      }
+    });
+
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "library-row__button library-row__button--danger";
+    deleteButton.type = "button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => {
+      void deleteLibraryItem(item.id).catch((error) => handleLibraryError(error));
+    });
+
+    label.append(name, meta);
+    actions.append(addButton, deleteButton);
+    row.append(label, actions);
+    libraryList.append(row);
+  }
 }
 
 function selectedProjectBody() {
@@ -487,7 +847,7 @@ function partsAssistantContext() {
   const resultCount = compileResultCount(project);
   const issues = validatePartProject(project);
   return {
-    page: "Robotic Part Studio",
+    page: "Robotic Component Builder",
     ready: true,
     project: {
       version: project.version,
@@ -507,11 +867,27 @@ function partsAssistantContext() {
       revolvePresetId: revolvePresetSelect.value,
       revolvePresets: listRevolvePresets(),
       booleanOperation: booleanOperationSelect.value,
-      booleanOperations: BOOLEAN_OPERATIONS
+      booleanOperations: BOOLEAN_OPERATIONS,
+      customSketch: {
+        supportedOuterProfileTypes: OUTER_PROFILE_TYPES,
+        supportedCutProfileTypes: CUT_PROFILE_TYPES,
+        sketchPlane: "X/Z",
+        extrusionAxis: "Y"
+      }
     },
     history: {
       canUndo: history.undoStack.length > 0,
       canRedo: history.redoStack.length > 0
+    },
+    library: {
+      count: partLibraryItems.length,
+      items: partLibraryItems.map(partLibraryItemSummary),
+      cloud: {
+        configured: isSupabaseConfigured,
+        status: authState.status,
+        signedIn: Boolean(signedInSession()),
+        userEmail: authState.user?.email ?? null
+      }
     },
     selection: selected ? assistantBodySummary(selected) : null,
     bodies: project.bodies.map(assistantBodySummary),
@@ -609,6 +985,113 @@ function addTemplateBody(templateId = templateSelect.value) {
   const body = createBodyFromTemplate(templateSelect.value, { existingIds });
   commit(addBody(history.current, body), `${templateLabel(templateSelect.value)} added`);
   return body;
+}
+
+function issueData(issues = []) {
+  return issues.map((issue) => ({
+    code: issue.code,
+    message: issue.message,
+    path: issue.path,
+    severity: issue.severity ?? "error"
+  }));
+}
+
+function compileStatusForAssistant(bodyId) {
+  const errors = compileErrors
+    .filter((error) => !error.bodyId || error.bodyId === bodyId)
+    .slice(0, 4)
+    .map((error) => ({
+      bodyId: error.bodyId,
+      code: error.code,
+      message: error.issues?.[0]?.message ?? error.message
+    }));
+  const ready = compileResults.has(bodyId);
+  return {
+    ready,
+    compiling,
+    status: ready ? "ready" : errors.length ? "error" : compiling ? "building" : "queued",
+    errors
+  };
+}
+
+function customSketchToolOutput(action, result, message, options = {}) {
+  const bodyId = result.body?.id ?? null;
+  const validationIssues = issueData(result.validationIssues);
+  const status = options.status ?? (result.accepted ? "accepted" : "validation_failed");
+  const ok = options.ok ?? result.accepted;
+  return {
+    ok,
+    action,
+    status,
+    message,
+    error: ok ? undefined : message,
+    data: {
+      accepted: result.accepted,
+      bodyId,
+      designIntent: result.designIntent,
+      validationIssues,
+      compile: options.compile ?? (bodyId ? compileStatusForAssistant(bodyId) : null)
+    }
+  };
+}
+
+async function createCustomSketchBodyForAssistant(args = {}) {
+  const result = createCustomSketchBodyFromArgs(args, {
+    existingBodyIds: new Set(history.current.bodies.map((body) => body.id))
+  });
+  if (!result.accepted) {
+    return customSketchToolOutput(
+      "parts_create_custom_sketch_body",
+      result,
+      `Custom sketch rejected: ${result.validationIssues[0]?.message ?? "validation failed."}`
+    );
+  }
+
+  commit(addBody(history.current, result.body), `${result.body.name} custom sketch added`);
+  try {
+    await waitForCadReady();
+  } catch {
+    return customSketchToolOutput(
+      "parts_create_custom_sketch_body",
+      result,
+      `${result.body.name} custom sketch body was added, but the build needs refinement.`,
+      { ok: false, status: "compile_failed" }
+    );
+  }
+  return customSketchToolOutput(
+    "parts_create_custom_sketch_body",
+    result,
+    `${result.body.name} custom sketch body added and built.`
+  );
+}
+
+async function replaceSketchBodyForAssistant(args = {}) {
+  const current = selectedSketchBodyForAssistant(args.bodyId);
+  const result = replaceSketchBodyFromArgs(current, args);
+  if (!result.accepted) {
+    return customSketchToolOutput(
+      "parts_replace_sketch_body",
+      result,
+      `Replacement sketch rejected: ${result.validationIssues[0]?.message ?? "validation failed."}`
+    );
+  }
+
+  commit(updateBody(history.current, current.id, () => result.body), `${result.body.name} sketch replaced`);
+  try {
+    await waitForCadReady();
+  } catch {
+    return customSketchToolOutput(
+      "parts_replace_sketch_body",
+      result,
+      `${result.body.name} sketch was replaced, but the build needs refinement.`,
+      { ok: false, status: "compile_failed" }
+    );
+  }
+  return customSketchToolOutput(
+    "parts_replace_sketch_body",
+    result,
+    `${result.body.name} sketch replaced and built.`
+  );
 }
 
 function addCutProfileForAssistant(args = {}) {
@@ -1347,6 +1830,7 @@ function render() {
   redoButton.disabled = history.redoStack.length === 0;
   saveProjectButton.disabled = false;
 
+  renderLibraryPanel();
   renderBodyList(project);
   renderBodyProperties(body);
   if (body && !isSketchBody(body)) {
@@ -1544,9 +2028,10 @@ function addCircularHolePattern() {
 }
 
 function addRevolvedBody(presetId = revolvePresetSelect.value) {
-  ensureSelectValue(revolvePresetSelect, presetId, "revolve preset id");
+  const selectedPresetId = typeof presetId === "string" ? presetId : revolvePresetSelect.value;
+  ensureSelectValue(revolvePresetSelect, selectedPresetId, "revolve preset id");
   const existingIds = new Set(history.current.bodies.map((body) => body.id));
-  const body = createRevolveBodyFromPreset(revolvePresetSelect.value, {}, existingIds);
+  const body = createRevolveBodyFromPreset(selectedPresetId, {}, existingIds);
   commit(addBody(history.current, body), `${body.name} added`);
   return body;
 }
@@ -1578,7 +2063,8 @@ function booleanOperandBodies() {
 }
 
 function addBooleanBody(operation = booleanOperationSelect.value, options = {}) {
-  ensureSelectValue(booleanOperationSelect, operation, "boolean operation");
+  const selectedOperation = typeof operation === "string" ? operation : booleanOperationSelect.value;
+  ensureSelectValue(booleanOperationSelect, selectedOperation, "boolean operation");
   const operands = booleanOperandBodies();
   if (operands.length < 2) {
     if (options.throwOnInvalid) throw new Error("Create at least two bodies before adding a boolean body.");
@@ -1588,15 +2074,15 @@ function addBooleanBody(operation = booleanOperationSelect.value, options = {}) 
 
   const existingIds = new Set(history.current.bodies.map((body) => body.id));
   const body = createBooleanOperationBody(
-    operation,
+    selectedOperation,
     operands,
     {
-      name: `${operation} ${operands[0].name} ${operands[1].name}`,
+      name: `${selectedOperation} ${operands[0].name} ${operands[1].name}`,
       color: "#14b8a6"
     },
     existingIds
   );
-  commit(addBody(history.current, body), `${operation} body added`);
+  commit(addBody(history.current, body), `${selectedOperation} body added`);
   return body;
 }
 
@@ -1613,7 +2099,16 @@ async function exportSelectedStl(options = {}) {
   pendingStlExports.set(requestId, body.id);
   exportStlButton.disabled = true;
   showStatus("Preparing STL...", 8000);
-  cadWorker.postMessage({ type: "exportStl", requestId, body, bodies: history.current.bodies });
+  try {
+    ensureCadWorker().postMessage({ type: "exportStl", requestId, body, bodies: history.current.bodies });
+  } catch (error) {
+    pendingStlExports.delete(requestId);
+    exportStlButton.disabled = false;
+    handleCadWorkerFailure(
+      compileFailure("worker-post-message-error", `Unable to start STL export: ${error.message}`, body.id)
+    );
+    if (options.throwOnInvalid) throw new Error("Unable to start STL export.");
+  }
 }
 
 async function sendGeneratedAssembly(options = {}) {
@@ -1645,7 +2140,7 @@ async function sendGeneratedAssembly(options = {}) {
     await writeWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, snapshot);
     window.location.href = `${import.meta.env.BASE_URL}?fromParts=1`;
   } catch (error) {
-    console.error("Part Studio handoff failed", error);
+    console.error("Component Builder handoff failed", error);
     sendAssemblyButton.disabled = false;
     renderCompileStatus();
     showStatus("Unable to send generated parts to Assembly Studio.", 5200);
@@ -1656,7 +2151,7 @@ async function sendGeneratedAssembly(options = {}) {
 function mountPartsAssistant() {
   const assistant = mountPageAssistant({
     pageId: "parts",
-    title: "Robotic Part Studio",
+    title: "Robotic Component Builder",
     getContext: partsAssistantContext,
     actions: {
       parts_new_project: () => {
@@ -1669,6 +2164,27 @@ function mountPartsAssistant() {
         downloadBlob(serializePartProject(history.current), "robotic-part-project.json", "application/json");
         showStatus("PartProject JSON saved");
         return "PartProject JSON download started.";
+      },
+      parts_save_selected_to_library: async () => {
+        const item = await saveSelectedPartToLibrary();
+        return `${item.name} saved to the local part library.`;
+      },
+      parts_add_library_item: ({ itemId }) => {
+        const item = libraryItemById(itemId);
+        addLibraryItemToCurrentProject(item.id);
+        return `${item.name} added from the local part library.`;
+      },
+      parts_delete_library_item: async ({ itemId }) => {
+        const item = await deleteLibraryItem(itemId);
+        return `${item.name} removed from the local part library.`;
+      },
+      parts_export_library_json: () => {
+        exportLibraryJson();
+        return "Part library JSON export started.";
+      },
+      parts_open_library_import_picker: () => {
+        libraryFileInput.click();
+        return "Part library JSON file picker opened.";
       },
       parts_open_project_picker: () => {
         projectFileInput.click();
@@ -1711,6 +2227,8 @@ function mountPartsAssistant() {
         const body = addTemplateBody(templateId ?? templateSelect.value);
         return `${body.name} added.`;
       },
+      parts_create_custom_sketch_body: (args) => createCustomSketchBodyForAssistant(args),
+      parts_replace_sketch_body: (args) => replaceSketchBodyForAssistant(args),
       parts_duplicate_body: ({ bodyId } = {}) => duplicateBodyForAssistant(bodyId),
       parts_delete_body: ({ bodyId } = {}) => deleteBodyForAssistant(bodyId),
       parts_set_body_properties: (args) => setBodyPropertiesForAssistant(args),
@@ -1760,9 +2278,9 @@ addTemplateButton.addEventListener("click", () => {
 
 addLinearPatternButton.addEventListener("click", addLinearHolePattern);
 addCircularPatternButton.addEventListener("click", addCircularHolePattern);
-addRevolveBodyButton.addEventListener("click", addRevolvedBody);
+addRevolveBodyButton.addEventListener("click", () => addRevolvedBody());
 addSpurGearButton.addEventListener("click", addSpurGear);
-addBooleanBodyButton.addEventListener("click", addBooleanBody);
+addBooleanBodyButton.addEventListener("click", () => addBooleanBody());
 
 newProjectButton.addEventListener("click", () => {
   resetProjectHistory(history);
@@ -1773,6 +2291,48 @@ newProjectButton.addEventListener("click", () => {
 saveProjectButton.addEventListener("click", () => {
   downloadBlob(serializePartProject(history.current), "robotic-part-project.json", "application/json");
   showStatus("PartProject JSON saved");
+});
+
+saveLibraryPartButton.addEventListener("click", () => {
+  void saveSelectedPartToLibrary().catch((error) => handleLibraryError(error));
+});
+
+exportLibraryButton.addEventListener("click", () => {
+  try {
+    exportLibraryJson();
+  } catch (error) {
+    handleLibraryError(error);
+  }
+});
+
+importLibraryButton.addEventListener("click", () => libraryFileInput.click());
+
+librarySignInButton.addEventListener("click", () => {
+  void authController.signIn().catch((error) => handleLibraryError(error, "Google sign-in failed."));
+});
+
+librarySyncButton.addEventListener("click", () => {
+  void syncLibraryToSupabase().catch((error) => handleLibraryError(error, "Cloud sync failed."));
+});
+
+librarySignOutButton.addEventListener("click", () => {
+  void authController.signOut().catch((error) => handleLibraryError(error, "Sign-out failed."));
+});
+
+libraryFileInput.addEventListener("change", () => {
+  const file = libraryFileInput.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    void importPartLibraryJson(reader.result).catch((error) => handleLibraryError(error)).finally(() => {
+      libraryFileInput.value = "";
+    });
+  });
+  reader.addEventListener("error", () => {
+    showStatus("Part library JSON could not be read", 5200);
+    libraryFileInput.value = "";
+  });
+  reader.readAsText(file);
 });
 
 openProjectButton.addEventListener("click", () => projectFileInput.click());
@@ -1857,7 +2417,20 @@ cutProfileFields.addEventListener("click", (event) => {
   }, "Cut removed");
 });
 
+mountShellCardToggles(document);
 renderTemplateOptions();
 renderAdvancedOptions();
+authController.subscribe((nextAuthState) => {
+  authState = nextAuthState;
+  renderLibraryPanel();
+  const userId = signedInSession()?.user?.id ?? null;
+  if (userId && userId !== lastSyncedUserId) {
+    lastSyncedUserId = userId;
+    void syncLibraryToSupabase({ silent: true }).catch((error) => handleLibraryError(error, "Cloud sync failed."));
+  }
+  if (!userId) lastSyncedUserId = null;
+});
 render();
+void loadPartLibrary();
+void authController.refresh();
 mountPartsAssistant();

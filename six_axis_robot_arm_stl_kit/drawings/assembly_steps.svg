@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="850" viewBox="0 0 1800 850" role="img" aria-label="Assembly Steps">
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 z" fill="#111827"/>
+    </marker>
+    <style>
+      .sheet-bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.4; }
+      .title { font: 800 36px Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 18px Arial, sans-serif; fill: #475569; }
+      .label { font: 800 22px Arial, sans-serif; fill: #0f172a; }
+      .body { font: 400 16px Arial, sans-serif; fill: #475569; }
+      .small { font: 400 14px Arial, sans-serif; fill: #64748b; }
+      .tiny { font: 400 12px Arial, sans-serif; fill: #64748b; }
+      .part-num { font: 800 24px Arial, sans-serif; fill: #ffffff; }
+      .axis { stroke: #2563eb; stroke-width: 6; fill: none; marker-end: url(#arrow); }
+      .arrow { stroke: #111827; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .ghost { fill: #e2e8f0; stroke: #475569; stroke-width: 2.4; }
+      .ghost2 { fill: #dbeafe; stroke: #1d4ed8; stroke-width: 2.4; }
+      .teal { fill: #0f766e; stroke: #064e3b; stroke-width: 2.4; }
+      .blue { fill: #2563eb; stroke: #1e3a8a; stroke-width: 2.4; }
+      .gold { fill: #ca8a04; stroke: #713f12; stroke-width: 2.4; }
+      .line { stroke: #334155; stroke-width: 4; fill: none; }
+      .dash { stroke: #94a3b8; stroke-width: 2.2; fill: none; stroke-dasharray: 9 7; }
+      .callout { fill: #111827; }
+    </style>
+  </defs>
+  <rect class="sheet-bg" x="0" y="0" width="1800" height="850"/>
+
+  <text class="title" x="60" y="60">Assembly Steps</text>
+  <text class="subtitle" x="60" y="92">Build one joint group at a time. Check pin fit and free motion before adding the next group.</text>
+
+  <rect class="panel" x="60" y="132" width="520" height="300" rx="16"/>
+  <circle class="callout" cx="106" cy="180" r="24"/>
+  <text class="part-num" x="98" y="189">1</text>
+  <text class="label" x="146" y="175">Base + J1 column</text>
+  <text class="body" x="146" y="202">Bolt column to turntable.</text>
+  <ellipse class="ghost" cx="222" cy="360" rx="108" ry="30"/>
+     <rect class="ghost" x="184" y="218" width="76" height="142" rx="12"/>
+     <path class="axis" d="M 222 382 L 222 190"/>
+     <text class="body" x="286" y="286">J1 yaw axis</text>
+
+  <rect class="panel" x="640" y="132" width="520" height="300" rx="16"/>
+  <circle class="callout" cx="686" cy="180" r="24"/>
+  <text class="part-num" x="678" y="189">2</text>
+  <text class="label" x="726" y="175">Shoulder yoke pair</text>
+  <text class="body" x="726" y="202">Install left and right plates.</text>
+  <rect class="ghost" x="748" y="220" width="48" height="160" rx="12"/>
+     <rect class="ghost" x="902" y="220" width="48" height="160" rx="12"/>
+     <circle class="blue" cx="772" cy="292" r="24"/>
+     <circle class="blue" cx="926" cy="292" r="24"/>
+     <path class="axis" d="M 714 292 L 982 292"/>
+
+  <rect class="panel" x="1220" y="132" width="520" height="300" rx="16"/>
+  <circle class="callout" cx="1266" cy="180" r="24"/>
+  <text class="part-num" x="1258" y="189">3</text>
+  <text class="label" x="1306" y="175">Upper arm + elbow</text>
+  <text class="body" x="1306" y="202">Sandwich hub between arm shells.</text>
+  <path class="ghost" d="M 1340 340 L 1516 250 L 1560 330 L 1384 420 z"/>
+     <circle class="teal" cx="1350" cy="350" r="34"/>
+     <circle class="teal" cx="1540" cy="322" r="38"/>
+     <path class="axis" d="M 1295 350 L 1410 350"/>
+     <path class="axis" d="M 1480 322 L 1605 322"/>
+
+  <rect class="panel" x="60" y="492" width="520" height="300" rx="16"/>
+  <circle class="callout" cx="106" cy="540" r="24"/>
+  <text class="part-num" x="98" y="549">4</text>
+  <text class="label" x="146" y="535">Forearm pair</text>
+  <text class="body" x="146" y="562">Connect forearm shells to elbow.</text>
+  <path class="ghost" d="M 178 704 L 344 640 L 386 708 L 220 772 z"/>
+     <circle class="teal" cx="188" cy="716" r="34"/>
+     <circle class="teal" cx="366" cy="704" r="34"/>
+     <path class="arrow" d="M 400 704 L 510 682"/>
+
+  <rect class="panel" x="640" y="492" width="520" height="300" rx="16"/>
+  <circle class="callout" cx="686" cy="540" r="24"/>
+  <text class="part-num" x="678" y="549">5</text>
+  <text class="label" x="726" y="535">Wrist stack</text>
+  <text class="body" x="726" y="562">Add J4, J5, and J6.</text>
+  <circle class="ghost2" cx="780" cy="704" r="50"/>
+     <path class="ghost" d="M 858 654 L 960 654 L 1002 704 L 960 754 L 858 754 z"/>
+     <circle class="blue" cx="1048" cy="704" r="46"/>
+     <path class="axis" d="M 704 704 L 1118 704"/>
+
+  <rect class="panel" x="1220" y="492" width="520" height="300" rx="16"/>
+  <circle class="callout" cx="1266" cy="540" r="24"/>
+  <text class="part-num" x="1258" y="549">6</text>
+  <text class="label" x="1306" y="535">Tool + support parts</text>
+  <text class="body" x="1306" y="562">Mount adapter, cover, spacers.</text>
+  <circle class="ghost2" cx="1350" cy="710" r="52"/>
+     <rect class="ghost" x="1420" y="670" width="134" height="80" rx="14"/>
+     <rect class="gold" x="1580" y="688" width="82" height="44" rx="8"/>
+     <path class="arrow" d="M 1402 710 L 1418 710"/>
+     <path class="arrow" d="M 1556 710 L 1576 710"/>
+
+</svg>

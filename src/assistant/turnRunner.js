@@ -1,6 +1,7 @@
 import { ACTION_SAFETY, getActionDefinition, validateActionArguments } from "./actionCatalog.js";
 
-export const MAX_ASSISTANT_TOOL_ROUNDS = 6;
+export const MAX_ASSISTANT_TOOL_ROUNDS = 12;
+export const MAX_ASSISTANT_NO_PROGRESS_ROUNDS = 2;
 
 function finiteNumber(value) {
   const numeric = Number(value);
@@ -75,6 +76,33 @@ export async function postAssistantRequest(payload) {
     throw new Error(parsed.error ?? `Assistant request failed with ${response.status}`);
   }
   return parsed;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function toolRoundSignature(toolCalls = []) {
+  return stableJson(
+    toolCalls.map((toolCall) => ({
+      name: toolCall.name,
+      arguments: toolCall.arguments ?? {}
+    }))
+  );
+}
+
+function toolOutputMadeProgress(output) {
+  if (!output || output.ok === false) return false;
+  if (output.status === "pending_confirmation") return false;
+  if (output.status === "no_change") return false;
+  return true;
 }
 
 function pendingConfirmationOutput(definition, toolCall, args) {
@@ -164,9 +192,15 @@ export async function runAssistantTurn({
     toolOutputs: [],
     finalText: "",
     stoppedForMaxRounds: false,
+    stoppedForNoProgress: false,
+    stoppedForGuardedConfirmation: false,
+    stopReason: null,
     usage: null,
     latencyMs: null
   };
+  let toolRoundCount = 0;
+  let consecutiveNoProgressRounds = 0;
+  let lastToolRoundSignature = null;
 
   let response = await requestAssistant({
     model,
@@ -176,6 +210,16 @@ export async function runAssistantTurn({
     previousResponseId,
     message
   });
+
+  async function ingestResponse(nextResponse, round) {
+    result.responses.push(nextResponse);
+    result.previousResponseId = nextResponse.responseId ?? result.previousResponseId;
+    await onResponse?.(nextResponse, { round });
+    if (nextResponse.text) {
+      result.finalText = nextResponse.text;
+      await onAssistantText?.(nextResponse.text, nextResponse, { round });
+    }
+  }
 
   for (let round = 0; ; round += 1) {
     result.responses.push(response);
@@ -188,12 +232,16 @@ export async function runAssistantTurn({
 
     const toolCalls = response.toolCalls ?? [];
     if (!toolCalls.length) break;
-    if (round >= maxToolRounds) {
+    if (toolRoundCount >= maxToolRounds) {
       result.stoppedForMaxRounds = true;
+      result.stopReason = "safety_budget";
       break;
     }
 
+    const signature = toolRoundSignature(toolCalls);
+    const repeatedNoProgressRound = signature === lastToolRoundSignature && consecutiveNoProgressRounds > 0;
     const toolOutputs = [];
+    let guardedInRound = false;
     for (const toolCall of toolCalls) {
       const definition = getActionDefinition(adapter.pageId, toolCall.name);
       const callRecord = {
@@ -214,9 +262,20 @@ export async function runAssistantTurn({
           message: resolved.output?.message ?? ""
         });
       }
+      if (resolved.guarded) guardedInRound = true;
       result.toolOutputs.push(resolved);
       toolOutputs.push({ callId: resolved.callId, output: resolved.output });
       await onToolResult?.(resolved, toolCall, { round });
+    }
+    toolRoundCount += 1;
+
+    const madeProgress = toolOutputs.some((item) => toolOutputMadeProgress(item.output));
+    consecutiveNoProgressRounds = madeProgress ? 0 : consecutiveNoProgressRounds + 1;
+    lastToolRoundSignature = signature;
+    if (repeatedNoProgressRound || consecutiveNoProgressRounds >= MAX_ASSISTANT_NO_PROGRESS_ROUNDS) {
+      result.stoppedForNoProgress = true;
+      result.stopReason = "no_progress";
+      break;
     }
 
     response = await requestAssistant({
@@ -227,6 +286,12 @@ export async function runAssistantTurn({
       previousResponseId: response.responseId,
       toolOutputs
     });
+    if (guardedInRound) {
+      result.stoppedForGuardedConfirmation = true;
+      result.stopReason = "guarded_confirmation";
+      await ingestResponse(response, round + 1);
+      break;
+    }
   }
 
   result.usage = aggregateUsage(result.responses);

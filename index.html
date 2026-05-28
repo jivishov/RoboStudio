@@ -9,85 +9,97 @@
       content="Import, compose, inspect, transform, and export multi-part STL assemblies in a browser-based 3D studio."
     />
     <link rel="icon" href="data:," />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=arrow_selector_tool,center_focus_strong,content_copy,delete,device_hub,drive_folder_upload,folder_open,grid_on,layers,layers_clear,menu,note_add,open_in_full,open_with,orbit,package_2,person,precision_manufacturing,redo,restart_alt,rotate_right,save,smart_toy,undo,upload_file,view_in_ar,zoom_in"
+    />
   </head>
   <body>
     <div id="app">
-      <header class="topbar" aria-label="Studio command bar">
-        <div class="brand">
+      <header class="topbar shell-header shell-header--assembly" aria-label="Studio command bar">
+        <div class="brand shell-header__brand">
           <button class="topbar-icon" type="button" aria-label="Main menu">
-            <span></span>
-            <span></span>
-            <span></span>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">menu</span>
           </button>
-          <span class="brand__name">STL Assembly Studio</span>
+          <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">view_in_ar</span>
+          <span class="brand__name shell-header__title">STL Assembly Studio</span>
+          <nav class="page-links shell-header__pages" aria-label="Workspace pages">
+            <a class="page-link shell-header__page-link" href="./parts.html" aria-label="Open Component Builder" title="Open Component Builder">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">package_2</span>
+              <span><span class="toolbar-label-wide">Component </span>Builder</span>
+            </a>
+            <button id="open-physics" class="page-link shell-header__page-link" type="button" aria-label="Open Robotics Design Workbench" title="Open Robotics Design Workbench">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">precision_manufacturing</span>
+              Workbench
+            </button>
+          </nav>
         </div>
 
-        <nav class="mode-grid" role="toolbar" aria-label="Studio mode">
-          <button class="mode-button" type="button" data-mode="select">
-            <span class="mode-icon mode-icon--select"></span>
-            Select
+        <div class="toolbar-group toolbar-group--project shell-header__actions shell-header__group" role="group" aria-label="Project actions">
+          <button id="load-pose" class="toolbar-button shell-header__button shell-header__button--icon-only" type="button" aria-label="Open layout JSON" title="Open layout JSON" data-tooltip="Open layout">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">folder_open</span>
+            <span class="shell-header__label shell-header__label--hint">Open</span>
           </button>
-          <button class="mode-button" type="button" data-mode="move">
-            <span class="mode-icon mode-icon--move"></span>
-            Move
+          <button id="save-pose" class="toolbar-button shell-header__button shell-header__button--icon-only" type="button" aria-label="Save layout JSON" title="Save layout JSON" data-tooltip="Save layout">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">save</span>
+            <span class="shell-header__label shell-header__label--hint">Save</span>
           </button>
-          <button class="mode-button" type="button" data-mode="rotate">
-            <span class="mode-icon mode-icon--rotate"></span>
-            Rotate
+          <button id="clear-scene" class="toolbar-button toolbar-button--danger shell-header__button shell-header__button--icon-only" type="button" aria-label="Clear scene" title="Clear scene" data-tooltip="Clear scene">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">delete</span>
+            <span class="shell-header__label shell-header__label--hint">Clear Scene</span>
           </button>
-          <button class="mode-button" type="button" data-mode="resize">
-            <span class="mode-icon mode-icon--resize"></span>
-            Resize
+          <input id="pose-file-input" type="file" accept="application/json,.json" hidden />
+        </div>
+
+        <span class="toolbar-separator" aria-hidden="true"></span>
+
+        <nav class="mode-grid toolbar-group toolbar-group--modes shell-header__modes shell-header__group" role="toolbar" aria-label="Edit modes">
+          <button class="mode-button shell-header__button shell-header__button--icon-only" type="button" data-mode="select" aria-label="Select" title="Select" data-tooltip="Select">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">arrow_selector_tool</span>
+            <span class="shell-header__label shell-header__label--hint">Select</span>
           </button>
-          <button class="mode-button is-active" type="button" data-mode="hinge">
-            <span class="mode-icon mode-icon--hinge"></span>
-            Hinge
+          <button class="mode-button shell-header__button shell-header__button--icon-only" type="button" data-mode="move" aria-label="Move" title="Move" data-tooltip="Move">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">open_with</span>
+            <span class="shell-header__label shell-header__label--hint">Move</span>
+          </button>
+          <button class="mode-button shell-header__button shell-header__button--icon-only" type="button" data-mode="rotate" aria-label="Rotate" title="Rotate" data-tooltip="Rotate">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">rotate_right</span>
+            <span class="shell-header__label shell-header__label--hint">Rotate</span>
+          </button>
+          <button class="mode-button shell-header__button shell-header__button--icon-only" type="button" data-mode="resize" aria-label="Resize" title="Resize" data-tooltip="Resize">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">open_in_full</span>
+            <span class="shell-header__label shell-header__label--hint">Resize</span>
+          </button>
+          <button class="mode-button shell-header__button shell-header__button--icon-only is-active" type="button" data-mode="hinge" aria-label="Hinge" title="Hinge" data-tooltip="Hinge">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">device_hub</span>
+            <span class="shell-header__label shell-header__label--hint">Hinge</span>
           </button>
         </nav>
 
-        <div class="toolbar-divider"></div>
-        <button id="import-stl" class="toolbar-button toolbar-button--import" type="button">
-          <span class="button-icon button-icon--folder"></span>
-          Import STL
-        </button>
-        <input id="stl-file-input" type="file" accept=".stl,model/stl" multiple hidden />
-        <button id="reset-view" class="toolbar-button" type="button">
-          <span class="button-icon button-icon--target"></span>
-          Reset View
-        </button>
-        <button id="open-physics" class="toolbar-button" type="button">
-          <span class="button-icon button-icon--target"></span>
-          Physics
-        </button>
-        <a class="toolbar-button" href="./parts.html">
-          <span class="button-icon button-icon--target"></span>
-          Parts
-        </a>
+        <div class="toolbar-group toolbar-group--file shell-header__actions shell-header__group" role="group" aria-label="File actions">
+          <button id="import-stl" class="toolbar-button toolbar-button--import shell-header__button" type="button" aria-label="Import STL files" title="Import STL files">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">drive_folder_upload</span>
+            <span class="shell-header__label">Import STL</span>
+          </button>
+          <button id="export-glb" class="toolbar-button toolbar-button--primary shell-header__button" type="button" aria-label="Export assembly as GLB" title="Export assembly as GLB">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">upload_file</span>
+            <span class="shell-header__label">Export GLB</span>
+          </button>
+          <input id="stl-file-input" type="file" accept=".stl,model/stl" multiple hidden />
+        </div>
 
-        <div class="topbar-spacer"></div>
-
-        <button id="save-pose" class="toolbar-button" type="button">
-          <span class="button-icon button-icon--save"></span>
-          Save
-        </button>
-        <button id="load-pose" class="toolbar-button" type="button">
-          <span class="button-icon button-icon--folder"></span>
-          Open
-        </button>
-        <button id="export-glb" class="toolbar-button toolbar-button--primary" type="button">
-          <span class="button-icon button-icon--export"></span>
-          Export GLB
-        </button>
-        <input id="pose-file-input" type="file" accept="application/json,.json" hidden />
-
-        <label class="topbar-toggle" title="Orbit camera">
-          <input id="orbit-toggle" type="checkbox" checked />
-          <span>Orbit</span>
-        </label>
-        <label class="topbar-toggle" title="Zoom camera">
-          <input id="zoom-toggle" type="checkbox" checked />
-          <span>Zoom</span>
-        </label>
+        <div class="toolbar-group toolbar-group--view shell-header__actions shell-header__group" role="group" aria-label="View">
+          <label class="topbar-toggle shell-header__toggle shell-header__toggle--icon-only" title="Orbit camera" data-tooltip="Orbit camera">
+            <input id="orbit-toggle" type="checkbox" checked aria-label="Orbit camera" />
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">orbit</span>
+            <span class="shell-header__label shell-header__label--hint">Orbit</span>
+          </label>
+          <label class="topbar-toggle shell-header__toggle shell-header__toggle--icon-only" title="Zoom camera" data-tooltip="Zoom camera">
+            <input id="zoom-toggle" type="checkbox" checked aria-label="Zoom camera" />
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">zoom_in</span>
+            <span class="shell-header__label shell-header__label--hint">Zoom</span>
+          </label>
+        </div>
       </header>
 
       <aside class="parts-panel" aria-label="Parts">
@@ -108,12 +120,6 @@
 
         <div id="parts-list" class="parts-list" aria-live="polite"></div>
 
-        <footer class="parts-footer">
-          <button id="import-stl-secondary" class="add-inferred" type="button">
-            Import STL Files
-            <span>+</span>
-          </button>
-        </footer>
       </aside>
 
       <main class="stage">
@@ -125,8 +131,8 @@
 
         <section class="mode-hint" aria-live="polite">
           <div class="mode-hint__icon"></div>
-          <div>
-            <span>Active Mode</span>
+          <div class="mode-hint__label">
+            <span>Active Mode:</span>
             <strong id="active-mode-label">Hinge</strong>
           </div>
           <ul id="active-mode-instructions">
@@ -149,127 +155,175 @@
           <div class="cube-face">view</div>
         </div>
 
-        <div class="viewport-dock" aria-label="Viewport shortcuts">
-          <button type="button" aria-label="Home view" title="Home view"></button>
-          <button type="button" aria-label="Frame selection" title="Frame selection"></button>
-          <button type="button" aria-label="Fit assembly" title="Fit assembly"></button>
-          <button type="button" aria-label="Toggle grid" title="Toggle grid"></button>
-          <button type="button" aria-label="Viewport settings" title="Viewport settings"></button>
+        <div class="viewport-dock" role="toolbar" aria-label="Viewport shortcuts">
+          <button type="button" data-viewport-action="frame" aria-label="Frame assembly" title="Frame assembly" data-tooltip="Frame assembly">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
+            <span class="viewport-dock__label">Frame assembly</span>
+          </button>
+          <button type="button" class="is-active" data-viewport-action="grid" aria-label="Toggle grid" aria-pressed="true" title="Toggle grid" data-tooltip="Toggle grid">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">grid_on</span>
+            <span class="viewport-dock__label">Toggle grid</span>
+          </button>
+          <button type="button" data-viewport-action="show-all" aria-label="Show all parts" title="Show all parts" data-tooltip="Show all" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">layers</span>
+            <span class="viewport-dock__label">Show all</span>
+          </button>
+          <button type="button" data-viewport-action="hide-all" aria-label="Hide all parts" title="Hide all parts" data-tooltip="Hide all" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">layers_clear</span>
+            <span class="viewport-dock__label">Hide all</span>
+          </button>
         </div>
 
         <div id="loading" class="loading">Loading STL assembly...</div>
       </main>
 
       <aside class="inspector-panel" aria-label="Inspector">
-        <div class="inspector-tabs" role="tablist" aria-label="Inspector views">
-          <button class="is-active" type="button" role="tab" aria-selected="true">Inspector</button>
-          <button type="button" role="tab" aria-selected="false">Scene</button>
+        <div class="inspector-content">
+          <section class="inspector-section collapsible-card shell-card" aria-labelledby="joint-controls" data-card-id="assembly-joint-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="assembly-joint-card" aria-expanded="true" aria-controls="assembly-joint-card-content">
+              <span class="collapsible-card__label">
+                <span id="joint-controls" class="collapsible-card__title">Joint</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="assembly-joint-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <p class="section-note">Rig controls affect the sample robotic arm. Imported STLs use transform tools.</p>
+                <label class="field field--stack">
+                  <span class="visually-hidden">Hinge</span>
+                  <select id="joint-select"></select>
+                </label>
+                <div class="field-label-row">
+                  <span>Angle</span>
+                  <input id="joint-angle-number" type="number" value="0" step="1" />
+                </div>
+                <label class="field field--range">
+                  <span class="visually-hidden">Angle</span>
+                  <input id="joint-angle-range" type="range" value="0" />
+                </label>
+                <div class="range-scale" aria-hidden="true">
+                  <span>-180</span>
+                  <span>-90</span>
+                  <span>0</span>
+                  <span>90</span>
+                  <span>180</span>
+                </div>
+                <div class="inspector-button-row">
+                  <button id="reset-joint" class="secondary-button" type="button">Reset Joint</button>
+                  <button id="reset-pose" class="secondary-button" type="button">Zero Pose</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="inspector-section collapsible-card shell-card" aria-labelledby="selection-controls" data-card-id="assembly-selected-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="assembly-selected-card" aria-expanded="true" aria-controls="assembly-selected-card-content">
+              <span class="collapsible-card__label">
+                <span id="selection-controls" class="collapsible-card__title">Selected Part</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="assembly-selected-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <label class="inspector-row">
+                  <span>Name</span>
+                  <output id="selected-part-name" class="selected-name">No part selected</output>
+                </label>
+                <label class="inspector-row">
+                  <span>Source</span>
+                  <output id="selected-part-source">-</output>
+                </label>
+                <label class="inspector-row">
+                  <span>Visible</span>
+                  <input id="selected-visible-toggle" class="switch-input" type="checkbox" checked disabled />
+                </label>
+                <label class="inspector-row">
+                  <span>Opacity</span>
+                  <output id="selected-opacity-value">100%</output>
+                  <input id="selected-opacity" type="range" min="15" max="100" value="100" disabled />
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="inspector-section collapsible-card shell-card" aria-labelledby="transform-controls" data-card-id="assembly-transform-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="assembly-transform-card" aria-expanded="true" aria-controls="assembly-transform-card-content">
+              <span class="collapsible-card__label">
+                <span id="transform-controls" class="collapsible-card__title">Transform</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="assembly-transform-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div class="transform-grid" aria-label="Selected part local offset">
+                  <span>Position (mm)</span>
+                  <label>X <input class="offset-input" data-offset-kind="position" data-axis="0" type="number" step="1" value="0" disabled /></label>
+                  <label>Y <input class="offset-input" data-offset-kind="position" data-axis="1" type="number" step="1" value="0" disabled /></label>
+                  <label>Z <input class="offset-input" data-offset-kind="position" data-axis="2" type="number" step="1" value="0" disabled /></label>
+                  <span>Rotation (deg)</span>
+                  <label>X <input class="offset-input" data-offset-kind="rotation" data-axis="0" type="number" step="1" value="0" disabled /></label>
+                  <label>Y <input class="offset-input" data-offset-kind="rotation" data-axis="1" type="number" step="1" value="0" disabled /></label>
+                  <label>Z <input class="offset-input" data-offset-kind="rotation" data-axis="2" type="number" step="1" value="0" disabled /></label>
+                  <span>Scale ratio</span>
+                  <label>X <input class="scale-input" data-axis="0" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+                  <label>Y <input class="scale-input" data-axis="1" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+                  <label>Z <input class="scale-input" data-axis="2" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
+                  <span>Current size (mm)</span>
+                  <output id="selected-current-size" class="transform-output">-</output>
+                  <span>Target size (mm)</span>
+                  <label>X <input class="resize-size-input" data-axis="0" type="number" min="0.001" step="0.5" value="0" disabled /></label>
+                  <label>Y <input class="resize-size-input" data-axis="1" type="number" min="0.001" step="0.5" value="0" disabled /></label>
+                  <label>Z <input class="resize-size-input" data-axis="2" type="number" min="0.001" step="0.5" value="0" disabled /></label>
+                </div>
+                <label class="resize-toggle-row">
+                  <input id="resize-uniform-toggle" type="checkbox" checked disabled />
+                  <span>Uniform resize</span>
+                </label>
+                <button id="reset-scale" class="secondary-button secondary-button--wide" type="button" disabled>
+                  Reset Scale
+                </button>
+                <button id="reset-selected" class="secondary-button secondary-button--wide" type="button" disabled>
+                  Reset Transform
+                </button>
+                <div class="inspector-button-row">
+                  <button id="duplicate-selected" class="secondary-button" type="button" disabled>Duplicate</button>
+                  <button id="remove-selected" class="secondary-button secondary-button--danger" type="button" disabled>Remove</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="inspector-section inspector-section--last collapsible-card shell-card" aria-labelledby="info-heading" data-card-id="assembly-info-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="assembly-info-card" aria-expanded="true" aria-controls="assembly-info-card-content">
+              <span class="collapsible-card__label">
+                <span id="info-heading" class="collapsible-card__title">Information</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+              <span class="collapsible-card__dots" aria-hidden="true"></span>
+            </button>
+            <div id="assembly-info-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <dl class="info-list">
+                  <div>
+                    <dt>Triangles</dt>
+                    <dd id="selected-triangles">-</dd>
+                  </div>
+                  <div>
+                    <dt>Material</dt>
+                    <dd id="selected-materials">-</dd>
+                  </div>
+                  <div>
+                    <dt>Bounding Box (mm)</dt>
+                    <dd id="selected-bounds">-</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+          </section>
         </div>
-
-        <section class="inspector-section" aria-labelledby="joint-controls">
-          <h2 id="joint-controls">Joint</h2>
-          <p class="section-note">Rig controls affect the sample robotic arm. Imported STLs use transform tools.</p>
-          <label class="field field--stack">
-            <span class="visually-hidden">Hinge</span>
-            <select id="joint-select"></select>
-          </label>
-          <div class="field-label-row">
-            <span>Angle</span>
-            <input id="joint-angle-number" type="number" value="0" step="1" />
-          </div>
-          <label class="field field--range">
-            <span class="visually-hidden">Angle</span>
-            <input id="joint-angle-range" type="range" value="0" />
-          </label>
-          <div class="range-scale" aria-hidden="true">
-            <span>-180</span>
-            <span>-90</span>
-            <span>0</span>
-            <span>90</span>
-            <span>180</span>
-          </div>
-          <div class="inspector-button-row">
-            <button id="reset-joint" class="secondary-button" type="button">Reset Joint</button>
-            <button id="reset-pose" class="secondary-button" type="button">Zero Pose</button>
-          </div>
-        </section>
-
-        <section class="inspector-section" aria-labelledby="selection-controls">
-          <h2 id="selection-controls">Selected Part</h2>
-          <label class="inspector-row">
-            <span>Name</span>
-            <output id="selected-part-name" class="selected-name">No part selected</output>
-          </label>
-          <label class="inspector-row">
-            <span>Source</span>
-            <output id="selected-part-source">-</output>
-          </label>
-          <label class="inspector-row">
-            <span>Visible</span>
-            <input id="selected-visible-toggle" class="switch-input" type="checkbox" checked disabled />
-          </label>
-          <label class="inspector-row">
-            <span>Opacity</span>
-            <output id="selected-opacity-value">100%</output>
-            <input id="selected-opacity" type="range" min="15" max="100" value="100" disabled />
-          </label>
-        </section>
-
-        <section class="inspector-section" aria-labelledby="transform-controls">
-          <h2 id="transform-controls">Transform</h2>
-          <div class="transform-grid" aria-label="Selected part local offset">
-            <span>Position (mm)</span>
-            <label>X <input class="offset-input" data-offset-kind="position" data-axis="0" type="number" step="1" value="0" disabled /></label>
-            <label>Y <input class="offset-input" data-offset-kind="position" data-axis="1" type="number" step="1" value="0" disabled /></label>
-            <label>Z <input class="offset-input" data-offset-kind="position" data-axis="2" type="number" step="1" value="0" disabled /></label>
-            <span>Rotation (deg)</span>
-            <label>X <input class="offset-input" data-offset-kind="rotation" data-axis="0" type="number" step="1" value="0" disabled /></label>
-            <label>Y <input class="offset-input" data-offset-kind="rotation" data-axis="1" type="number" step="1" value="0" disabled /></label>
-            <label>Z <input class="offset-input" data-offset-kind="rotation" data-axis="2" type="number" step="1" value="0" disabled /></label>
-            <span>Scale ratio</span>
-            <label>X <input class="scale-input" data-axis="0" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
-            <label>Y <input class="scale-input" data-axis="1" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
-            <label>Z <input class="scale-input" data-axis="2" type="number" min="0.001" step="0.05" value="1.000" disabled /></label>
-            <span>Current size (mm)</span>
-            <output id="selected-current-size" class="transform-output">-</output>
-            <span>Target size (mm)</span>
-            <label>X <input class="resize-size-input" data-axis="0" type="number" min="0.001" step="0.5" value="0" disabled /></label>
-            <label>Y <input class="resize-size-input" data-axis="1" type="number" min="0.001" step="0.5" value="0" disabled /></label>
-            <label>Z <input class="resize-size-input" data-axis="2" type="number" min="0.001" step="0.5" value="0" disabled /></label>
-          </div>
-          <label class="resize-toggle-row">
-            <input id="resize-uniform-toggle" type="checkbox" checked disabled />
-            <span>Uniform resize</span>
-          </label>
-          <button id="reset-scale" class="secondary-button secondary-button--wide" type="button" disabled>
-            Reset Scale
-          </button>
-          <button id="reset-selected" class="secondary-button secondary-button--wide" type="button" disabled>
-            Reset Transform
-          </button>
-          <div class="inspector-button-row">
-            <button id="duplicate-selected" class="secondary-button" type="button" disabled>Duplicate</button>
-            <button id="remove-selected" class="secondary-button secondary-button--danger" type="button" disabled>Remove</button>
-          </div>
-        </section>
-
-        <section class="inspector-section inspector-section--last" aria-labelledby="info-heading">
-          <h2 id="info-heading">Information</h2>
-          <dl class="info-list">
-            <div>
-              <dt>Triangles</dt>
-              <dd id="selected-triangles">-</dd>
-            </div>
-            <div>
-              <dt>Material</dt>
-              <dd id="selected-materials">-</dd>
-            </div>
-            <div>
-              <dt>Bounding Box (mm)</dt>
-              <dd id="selected-bounds">-</dd>
-            </div>
-          </dl>
-        </section>
       </aside>
     </div>
     <script type="module" src="/src/main.js"></script>
