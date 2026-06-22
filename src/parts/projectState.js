@@ -1,6 +1,7 @@
 import {
   DEFAULT_BODY_COLOR,
   DEFAULT_EXTRUDE_DEPTH_MM,
+  ADVANCED_CAD_RECIPE_KIND,
   BOOLEAN_OPERATION_KIND,
   PART_PROJECT_VERSION,
   PART_UNITS,
@@ -18,6 +19,7 @@ import {
 } from "./contracts.js";
 import { normalizeBooleanFeature, normalizeRevolveFeature, revolveLengthMm } from "./featureOps.js";
 import { normalizeSpurGearSpec } from "./gears.js";
+import { normalizeAdvancedCadRecipe } from "./advancedCadRecipe.js";
 import { normalizeProfile } from "./sketch.js";
 
 const HISTORY_LIMIT = 60;
@@ -74,6 +76,10 @@ export function normalizePartBody(body = {}, existingIds = new Set()) {
 
   if (source.kind === BOOLEAN_OPERATION_KIND) {
     normalized.boolean = normalizeBooleanFeature(body.boolean);
+  }
+
+  if (source.kind === ADVANCED_CAD_RECIPE_KIND) {
+    normalized.advancedCadRecipe = normalizeAdvancedCadRecipe(body.advancedCadRecipe);
   }
 
   if (source.kind !== SKETCH_EXTRUDE_KIND) {

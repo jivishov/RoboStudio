@@ -1,5 +1,6 @@
 import jscad from "@jscad/modeling";
-import { BOOLEAN_OPERATION_KIND, REVOLVE_KIND, SKETCH_EXTRUDE_KIND, SPUR_GEAR_KIND } from "./contracts.js";
+import { ADVANCED_CAD_RECIPE_KIND, BOOLEAN_OPERATION_KIND, REVOLVE_KIND, SKETCH_EXTRUDE_KIND, SPUR_GEAR_KIND } from "./contracts.js";
+import { compileAdvancedCadRecipeToSolid } from "./advancedCadRecipe.js";
 import { applyBooleanOperation, compileRevolveBodyToSolid } from "./featureOps.js";
 import { compileSpurGearBodyToSolid } from "./gears.js";
 import { validateBody } from "./validation.js";
@@ -180,6 +181,7 @@ export function compilePartBodyToSolid(body, options = {}) {
     if (sourceKind === REVOLVE_KIND) return compileRevolveBodyToSolid(body);
     if (sourceKind === SPUR_GEAR_KIND) return compileSpurGearBodyToSolid(body);
     if (sourceKind === BOOLEAN_OPERATION_KIND) return compileBooleanBodyToSolid(body, options);
+    if (sourceKind === ADVANCED_CAD_RECIPE_KIND) return compileAdvancedCadRecipeToSolid(body);
 
     const sketchGeometry = compileSketchToGeom2(body.sketch);
     const solid = extrudeLinear({ height: Number(body.extrudeDepthMm), repair: true }, sketchGeometry);

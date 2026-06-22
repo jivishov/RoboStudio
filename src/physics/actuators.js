@@ -2,10 +2,21 @@ function finiteNumber(value, fallback = 0) {
   return Number.isFinite(Number(value)) ? Number(value) : fallback;
 }
 
+function normalizeActuatorInterface(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  const actuatorClass = ["hobby-servo", "dc-motor", "stepper", "bldc", "linear", "generic"].includes(value.actuatorClass)
+    ? value.actuatorClass
+    : "generic";
+  const commandMode = ["position", "velocity", "pwm-direction", "step-direction", "generic"].includes(value.commandMode)
+    ? value.commandMode
+    : "generic";
+  return { actuatorClass, commandMode };
+}
+
 export function normalizeActuator(actuator = {}, fallbackId = "actuator") {
   const continuousTorqueNm = Math.max(0, finiteNumber(actuator.continuousTorqueNm, 0));
   const peakTorqueNm = Math.max(continuousTorqueNm, finiteNumber(actuator.peakTorqueNm, continuousTorqueNm));
-  return {
+  const normalized = {
     id: String(actuator.id ?? fallbackId),
     name: String(actuator.name ?? actuator.id ?? fallbackId),
     continuousTorqueNm,
@@ -17,6 +28,9 @@ export function normalizeActuator(actuator = {}, fallbackId = "actuator") {
     efficiency: Math.min(1, Math.max(0.01, finiteNumber(actuator.efficiency, 0.7))),
     notes: String(actuator.notes ?? "")
   };
+  const semanticInterface = normalizeActuatorInterface(actuator.interface);
+  if (semanticInterface) normalized.interface = semanticInterface;
+  return normalized;
 }
 
 export function evaluateActuators(design, jointLoads) {

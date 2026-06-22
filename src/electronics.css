@@ -1,0 +1,555 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0d1012;
+  color: #edf2f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#electronics-app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+#electronics-app {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+body {
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 3%), transparent 160px),
+    #0d1012;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  letter-spacing: 0;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.shell-header--electronics .shell-header__brand {
+  flex-basis: 600px;
+}
+
+.electronics-shell {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(300px, 380px);
+  height: auto;
+  min-height: 0;
+  background:
+    linear-gradient(90deg, rgb(30 41 59 / 16%) 0 1px, transparent 1px 100%),
+    linear-gradient(0deg, rgb(30 41 59 / 14%) 0 1px, transparent 1px 100%),
+    #0d1012;
+  background-size: 32px 32px;
+}
+
+.electronics-panel {
+  min-height: 0;
+  overflow: auto;
+  border-color: #26303a;
+  background: rgb(15 19 22 / 92%);
+}
+
+.electronics-panel--left {
+  border-right: 1px solid #26303a;
+}
+
+.electronics-panel--right {
+  border-left: 1px solid #26303a;
+}
+
+.electronics-section {
+  margin: 10px;
+}
+
+.collapsible-card {
+  overflow: hidden;
+  border: 1px solid #303b45;
+  border-radius: 6px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 5%), transparent 52px),
+    #14191d;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 18%);
+}
+
+.collapsible-card__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid #28313a;
+  background: transparent;
+  color: #f8fafc;
+  text-align: left;
+}
+
+.collapsible-card__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.collapsible-card__title {
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 760;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.collapsible-card__meta {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid #394754;
+  border-radius: 4px;
+  color: #b9c4cf;
+  font-size: 0.68rem;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.collapsible-card__chevron {
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #8795a3;
+  border-bottom: 2px solid #8795a3;
+  transform: rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.collapsible-card.is-collapsed .collapsible-card__chevron {
+  transform: rotate(-45deg);
+}
+
+.collapsible-card.is-collapsed .collapsible-card__content {
+  display: none;
+}
+
+.collapsible-card__inner {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.electronics-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #b9c4cf;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.electronics-field input,
+.electronics-field select,
+#code-file-select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #3a4652;
+  border-radius: 4px;
+  background: #0f1418;
+  color: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 620;
+  outline: none;
+}
+
+.electronics-field input {
+  padding: 0 9px;
+}
+
+.electronics-field select,
+#code-file-select {
+  padding: 0 7px;
+}
+
+.electronics-field input:focus,
+.electronics-field select:focus,
+#code-file-select:focus,
+button:focus-visible {
+  outline: 2px solid rgb(20 184 166 / 72%);
+  outline-offset: 2px;
+}
+
+.electronics-readout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  margin: 0;
+  color: #b9c4cf;
+  font-size: 0.72rem;
+}
+
+.electronics-readout div {
+  display: contents;
+}
+
+.electronics-readout dt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.electronics-readout dd {
+  margin: 0;
+  color: #f3f6f8;
+  font-variant-numeric: tabular-nums;
+  font-weight: 730;
+}
+
+.catalog-list,
+.component-list,
+.net-list,
+.drc-list {
+  display: grid;
+  gap: 8px;
+}
+
+.catalog-item,
+.component-item,
+.net-item,
+.drc-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #2f3a43;
+  border-radius: 5px;
+  background: #101519;
+  color: #e5edf3;
+}
+
+.catalog-item {
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.catalog-item__swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 50%;
+}
+
+.catalog-item strong,
+.component-item strong,
+.net-item strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-item span,
+.component-item span,
+.net-item span,
+.drc-item span {
+  overflow: hidden;
+  color: #9aa9b6;
+  font-size: 0.7rem;
+  font-weight: 620;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+.catalog-item button,
+.net-item button,
+.electronics-primary-button,
+.electronics-secondary-button,
+.electronics-danger-button {
+  min-height: 32px;
+  border: 1px solid #44515e;
+  border-radius: 4px;
+  background: #172027;
+  color: #f8fafc;
+  font-size: 0.74rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.catalog-item button {
+  min-width: 58px;
+  padding: 0 9px;
+}
+
+.electronics-primary-button {
+  border-color: #28c6b0;
+  background: linear-gradient(180deg, #17a896, #0e766d);
+}
+
+.electronics-secondary-button {
+  background: #111c23;
+  color: #cae8ff;
+}
+
+.electronics-danger-button {
+  border-color: #8c4542;
+  background: #301719;
+  color: #ffd2cd;
+}
+
+.component-item,
+.net-item {
+  cursor: pointer;
+}
+
+.component-item.is-selected,
+.net-item.is-selected {
+  border-color: #28c6b0;
+  box-shadow: 0 0 0 1px rgb(20 184 166 / 36%);
+}
+
+.component-item__meta,
+.net-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.component-item__meta span,
+.net-item__meta span {
+  padding: 2px 5px;
+  border: 1px solid #35424d;
+  border-radius: 4px;
+  background: #0c1114;
+}
+
+.net-builder {
+  display: grid;
+  gap: 8px;
+}
+
+.net-builder__pending {
+  min-height: 28px;
+  padding: 7px 8px;
+  border: 1px dashed #455462;
+  border-radius: 4px;
+  color: #b9c4cf;
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.electronics-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at center, rgb(20 184 166 / 10%), transparent 46%),
+    linear-gradient(180deg, #101417, #090c0f);
+}
+
+.electronics-viewport {
+  width: 100%;
+  height: 100%;
+}
+
+.electronics-viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.electronics-floating-panel {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100% - 28px));
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 6px;
+  background: rgb(10 14 17 / 86%);
+  box-shadow: 0 18px 38px rgb(0 0 0 / 28%);
+  color: #dfe8ef;
+  font-size: 0.74rem;
+  font-weight: 680;
+}
+
+.electronics-floating-panel span:not(.app-icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.electronics-floating-panel button {
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #394754;
+  border-radius: 4px;
+  background: #121a20;
+  color: #edf2f7;
+}
+
+.selection-summary {
+  min-height: 38px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #303b45;
+  border-radius: 5px;
+  background: #0f1418;
+  color: #d8e1e8;
+  font-size: 0.74rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.electronics-axis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.electronics-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.electronics-inline-actions button {
+  min-width: 92px;
+  padding: 0 10px;
+}
+
+.electronics-inline-actions #code-file-select {
+  flex: 1 1 160px;
+}
+
+.drc-item {
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: start;
+}
+
+.drc-item strong {
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 0.66rem;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.drc-item[data-severity="error"] strong {
+  background: #4b1418;
+  color: #fecaca;
+}
+
+.drc-item[data-severity="warning"] strong {
+  background: #402b0a;
+  color: #fde68a;
+}
+
+.drc-item[data-severity="info"] strong {
+  background: #0b2d35;
+  color: #a5f3fc;
+}
+
+.code-preview {
+  min-height: 280px;
+  max-height: 44vh;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid #303b45;
+  border-radius: 5px;
+  background: #080b0e;
+  color: #dff7ed;
+  font: 0.72rem/1.5 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  tab-size: 2;
+  white-space: pre;
+}
+
+@media (max-width: 1180px) {
+  .electronics-shell {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(300px, 42vh);
+  }
+
+  .electronics-panel--right {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-top: 1px solid #26303a;
+    border-left: 0;
+  }
+
+  .electronics-panel--right .electronics-section {
+    min-width: 0;
+  }
+
+  .code-preview {
+    max-height: 220px;
+  }
+}
+
+@media (max-width: 760px) {
+  body {
+    overflow: auto;
+  }
+
+  #electronics-app {
+    min-height: 100vh;
+    height: auto;
+  }
+
+  .electronics-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(420px, 58vh) auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  .electronics-panel {
+    overflow: visible;
+    border: 0;
+  }
+
+  .electronics-panel--right {
+    display: block;
+  }
+
+  .electronics-stage {
+    min-height: 420px;
+  }
+
+  .electronics-axis-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

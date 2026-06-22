@@ -1,3 +1,8 @@
+import { listPartTemplates } from "../parts/templates.js";
+import { catalog as circuitLabCatalog, starterTemplates as circuitLabStarterTemplates } from "../circuits/catalog.js";
+import { MAX_COMPONENT_SCALE, MIN_COMPONENT_SCALE } from "../circuits/geometry.js";
+import { catalog as electronicsCatalog } from "../electronics/catalog.js";
+
 export const ACTION_SAFETY = Object.freeze({
   AUTO: "auto",
   GUARDED: "guarded"
@@ -6,7 +11,9 @@ export const ACTION_SAFETY = Object.freeze({
 export const ASSISTANT_PAGES = Object.freeze({
   STUDIO: "studio",
   PARTS: "parts",
-  WORKBENCH: "workbench"
+  WORKBENCH: "workbench",
+  ELECTRONICS: "electronics",
+  CIRCUITS: "circuits"
 });
 
 const emptyObjectSchema = Object.freeze({
@@ -55,6 +62,49 @@ const objectSchema = (properties, required = []) => ({
   additionalProperties: false
 });
 
+const circuitEndpointSchema = objectSchema({
+  type: stringSchema("Endpoint owner type.", { enum: ["board", "component"] }),
+  pinId: stringSchema("Pin id.", { maxLength: 120 }),
+  instanceId: stringSchema("Component instance id for component endpoints.", { maxLength: 120 })
+}, ["type", "pinId"]);
+
+const circuitLabEndpointSchema = objectSchema({
+  componentId: stringSchema("Circuit Lab component instance id.", { maxLength: 120 }),
+  terminalId: stringSchema("Circuit Lab terminal id.", { maxLength: 120 })
+}, ["componentId", "terminalId"]);
+
+const stableIdSchema = (description, options = {}) => stringSchema(description, {
+  maxLength: 120,
+  pattern: "^[A-Za-z0-9_.:-]+$",
+  ...options
+});
+
+const stableIdArraySchema = (description) => ({
+  type: "array",
+  description,
+  minItems: 1,
+  items: stableIdSchema("Stable id.")
+});
+
+const commandTransformSchema = objectSchema({
+  invert: booleanSchema("Whether to invert the command value."),
+  scale: numberSchema("Optional command scale factor."),
+  offset: numberSchema("Optional command offset.")
+});
+
+const measurementAnchorSchema = objectSchema({
+  type: stringSchema("Anchor type.", {
+    enum: ["pickedPoint", "partOrigin", "partBoundsCenter", "holeCenter", "slotCenter", "slotEndpoint", "featureEdge"]
+  }),
+  label: stringSchema("Optional anchor label.", { maxLength: 160 }),
+  partId: stringSchema("Optional part id.", { maxLength: 120 }),
+  featureId: stringSchema("Optional feature id.", { maxLength: 120 }),
+  role: stringSchema("Optional anchor role.", { maxLength: 80 }),
+  worldPosition: vector3Schema("Anchor world position in millimeters."),
+  localPosition: vector3Schema("Optional part-local position in millimeters."),
+  edgeOffsetMm: numberSchema("Optional edge offset for clearance calculations.", { minimum: 0 })
+});
+
 function defineAction(page, name, description, parameters, options = {}) {
   return Object.freeze({
     page,
@@ -71,7 +121,7 @@ const studioActions = [
     ASSISTANT_PAGES.STUDIO,
     "studio_set_mode",
     "Switch the Assembly Studio interaction mode.",
-    objectSchema({ mode: stringSchema("Mode to activate.", { enum: ["select", "move", "rotate", "resize", "hinge"] }) }, ["mode"])
+    objectSchema({ mode: stringSchema("Mode to activate.", { enum: ["select", "move", "rotate", "resize", "measure", "feature", "hinge"] }) }, ["mode"])
   ),
   defineAction(
     ASSISTANT_PAGES.STUDIO,
@@ -152,6 +202,81 @@ const studioActions = [
       uniform: booleanSchema("Whether to preserve proportions while resizing.")
     }, ["targetSizeMm"])
   ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_detect_features",
+    "Detect circular holes and rounded slots on the selected or provided Assembly Studio part.",
+    objectSchema({
+      partId: stringSchema("Optional part id to select before detection.", { maxLength: 120 })
+    })
+  ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_select_feature",
+    "Select a detected hole or slot by part and feature id.",
+    objectSchema({
+      partId: stringSchema("Part id containing the detected feature.", { maxLength: 120 }),
+      featureId: stringSchema("Detected feature id.", { maxLength: 120 })
+    }, ["partId", "featureId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_measure_between_anchors",
+    "Measure distance between two anchors or return the current Assembly Studio measurement.",
+    objectSchema({
+      anchorA: measurementAnchorSchema,
+      anchorB: measurementAnchorSchema
+    })
+  ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_set_measurement_target",
+    "Set the active target spacing in millimeters, optionally from a known preset.",
+    objectSchema({
+      targetDistanceMm: numberSchema("Target spacing in millimeters.", { minimum: 0.001 }),
+      presetId: stringSchema("Optional target preset id.", {
+        enum: ["servo_horn_opposite_radial", "servo_horn_adjacent_radial"]
+      })
+    })
+  ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_set_measurement_pick_target",
+    "Set whether the next viewport measurement pick writes Anchor A or Anchor B.",
+    objectSchema({
+      target: stringSchema("Anchor target for the next pick.", { enum: ["A", "B"] })
+    }, ["target"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_apply_feature_edit",
+    "Apply a detected hole or slot edit to the selected imported STL part.",
+    objectSchema({
+      partId: stringSchema("Optional part id to select before editing.", { maxLength: 120 }),
+      featureId: stringSchema("Optional feature id. If omitted, the selected feature is edited.", { maxLength: 120 }),
+      center: vector3Schema("Optional new feature center in part-local millimeters."),
+      radiusMm: numberSchema("Optional circular hole radius in millimeters.", { minimum: 0.001 }),
+      lengthMm: numberSchema("Optional rounded slot length in millimeters.", { minimum: 0.001 }),
+      angleDeg: numberSchema("Optional rounded slot angle in degrees.")
+    }),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Apply the selected feature edit to the imported STL mesh."
+    }
+  ),
+  defineAction(
+    ASSISTANT_PAGES.STUDIO,
+    "studio_apply_feature_spacing",
+    "Apply the active target spacing between measured anchors by moving a feature or part.",
+    objectSchema({
+      targetDistanceMm: numberSchema("Optional target spacing in millimeters.", { minimum: 0.001 }),
+      symmetric: booleanSchema("Whether same-part feature spacing should move both anchors symmetrically.")
+    }),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Apply the active measured spacing adjustment."
+    }
+  ),
   defineAction(ASSISTANT_PAGES.STUDIO, "studio_duplicate_selected_part", "Duplicate the selected part.", emptyObjectSchema, {
     safety: ACTION_SAFETY.GUARDED,
     confirmation: "Duplicate the selected part."
@@ -186,20 +311,30 @@ const studioActions = [
   })
 ];
 
-const partTemplateIds = Object.freeze([
-  "base_plate",
-  "link_bar",
-  "servo_mount_plate",
-  "l_bracket",
-  "u_bracket",
-  "spacer_standoff",
-  "axle_shaft",
-  "gripper_finger"
-]);
+const partTemplateIds = Object.freeze(listPartTemplates().map((template) => template.id));
+const circuitLabComponentTypeIds = Object.freeze(circuitLabCatalog.listComponents().map((component) => component.id));
+const circuitLabStarterTemplateIds = Object.freeze(circuitLabStarterTemplates.map((template) => template.id));
+const electronicsBoardIds = Object.freeze(electronicsCatalog.listBoards().map((board) => board.id));
+const electronicsComponentIds = Object.freeze(electronicsCatalog.listComponents().map((component) => component.id));
 
 const revolvePresetIds = Object.freeze(["shaft", "pulley", "bushing", "wheel", "collar", "knob", "spacer"]);
 const booleanOperations = Object.freeze(["union", "subtract", "intersect"]);
 const sketchProfileTypes = Object.freeze(["rectangle", "circle", "roundedSlot", "polyline"]);
+const advancedCadOperationTypes = Object.freeze([
+  "box",
+  "cylinder",
+  "hole",
+  "slot",
+  "fillet",
+  "chamfer",
+  "shell",
+  "boolean",
+  "pattern",
+  "transform",
+  "label"
+]);
+const advancedCadModes = Object.freeze(["add", "subtract", "intersect"]);
+const advancedCadAxes = Object.freeze(["x", "y", "z"]);
 const hexColorSchema = stringSchema("Optional body color as a six-digit hex value.", {
   maxLength: 7,
   pattern: "^#[0-9a-fA-F]{6}$"
@@ -236,6 +371,57 @@ const customSketchBodyProperties = {
     description: "Optional closed cut profiles inside the outer profile.",
     items: customSketchProfileSchema
   },
+  transform: customSketchTransformSchema,
+  designIntent: stringSchema("Short non-persistent explanation of the intended shape.", { maxLength: 800 })
+};
+const advancedCadOperationSchema = objectSchema({
+  id: stringSchema("Optional stable operation id.", { maxLength: 80 }),
+  type: stringSchema("Advanced CAD operation type.", { enum: advancedCadOperationTypes }),
+  mode: stringSchema("How this operation combines with existing geometry.", { enum: advancedCadModes }),
+  label: stringSchema("Optional operation label.", { maxLength: 160 }),
+  center: vector3Schema("Optional XYZ center in millimeters."),
+  size: vector3Schema("Box size in X/Y/Z millimeters."),
+  axis: stringSchema("Cylinder, hole, or cut axis.", { enum: advancedCadAxes }),
+  radius: numberSchema("Optional radius in millimeters.", { minimum: 0.001 }),
+  diameter: numberSchema("Optional diameter in millimeters.", { minimum: 0.001 }),
+  height: numberSchema("Optional height in millimeters.", { minimum: 0.001 }),
+  depth: numberSchema("Optional cut depth in millimeters.", { minimum: 0.001 }),
+  length: numberSchema("Optional slot or feature length in millimeters.", { minimum: 0.001 }),
+  width: numberSchema("Optional slot or feature width in millimeters.", { minimum: 0.001 }),
+  angleDeg: numberSchema("Optional in-plane angle in degrees."),
+  thicknessMm: numberSchema("Optional wall thickness for shell operations.", { minimum: 0.001 }),
+  operation: stringSchema("Boolean operation.", { enum: booleanOperations }),
+  targetIds: {
+    type: "array",
+    description: "Optional operation ids targeted by this operation.",
+    items: stringSchema("Target operation id.", { maxLength: 80 })
+  },
+  vector: vector3Schema("Optional transform vector in millimeters or degrees."),
+  repeat: {
+    type: "array",
+    description: "Optional pattern repeat counts for X/Y/Z.",
+    minItems: 3,
+    maxItems: 3,
+    items: { type: "number", minimum: 1 }
+  },
+  spacing: vector3Schema("Optional pattern spacing in millimeters.")
+}, ["type"]);
+const advancedCadRecipeSchema = objectSchema({
+  version: numberSchema("Advanced CAD recipe version. Use 1.", { minimum: 1, maximum: 1 }),
+  units: stringSchema("Advanced CAD recipe units.", { enum: ["mm"] }),
+  designIntent: stringSchema("Short non-persistent explanation of the intended shape.", { maxLength: 800 }),
+  operations: {
+    type: "array",
+    description: "Ordered declarative CAD operations.",
+    minItems: 1,
+    maxItems: 80,
+    items: advancedCadOperationSchema
+  }
+}, ["version", "units", "operations"]);
+const advancedCadBodyProperties = {
+  name: stringSchema("Body name for the generated advanced CAD recipe.", { maxLength: 120 }),
+  color: hexColorSchema,
+  advancedCadRecipe: advancedCadRecipeSchema,
   transform: customSketchTransformSchema,
   designIntent: stringSchema("Short non-persistent explanation of the intended shape.", { maxLength: 800 })
 };
@@ -328,6 +514,25 @@ const partsActions = [
       ...customSketchBodyProperties
     }, ["outerProfile", "extrudeDepthMm"])
   ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_create_advanced_cad_body",
+    "Create a new advanced CAD body from a declarative v1 recipe. Use this for STEP-oriented CAD features beyond sketch-extrude templates.",
+    objectSchema(advancedCadBodyProperties, ["name", "advancedCadRecipe"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.PARTS,
+    "parts_replace_advanced_cad_body",
+    "Replace the selected or provided advanced CAD body with a full declarative v1 recipe.",
+    objectSchema({
+      bodyId: stringSchema("Optional body id to replace. If omitted, the selected body is replaced.", { maxLength: 120 }),
+      ...advancedCadBodyProperties
+    }, ["advancedCadRecipe"])
+  ),
+  defineAction(ASSISTANT_PAGES.PARTS, "parts_export_selected_step", "Export the selected advanced CAD body as STEP through the optional local build123d backend.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Export the selected advanced CAD body as STEP."
+  }),
   defineAction(ASSISTANT_PAGES.PARTS, "parts_duplicate_body", "Duplicate the selected or provided body.", objectSchema({
     bodyId: stringSchema("Optional body id to duplicate.", { maxLength: 120 })
   })),
@@ -436,7 +641,7 @@ const workbenchActions = [
     ASSISTANT_PAGES.WORKBENCH,
     "workbench_set_mode",
     "Switch the Robotics Workbench mode.",
-    objectSchema({ mode: stringSchema("Mode to activate.", { enum: ["model", "analyze", "actuators", "simulate", "audit"] }) }, ["mode"])
+    objectSchema({ mode: stringSchema("Mode to activate.", { enum: ["model", "analyze", "lab", "actuators", "simulate", "audit"] }) }, ["mode"])
   ),
   defineAction(ASSISTANT_PAGES.WORKBENCH, "workbench_frame_assembly", "Frame the robot assembly in the viewport.", emptyObjectSchema),
   defineAction(
@@ -636,6 +841,21 @@ const workbenchActions = [
   defineAction(ASSISTANT_PAGES.WORKBENCH, "workbench_run_audit", "Run readiness analysis and refresh audit results.", emptyObjectSchema),
   defineAction(
     ASSISTANT_PAGES.WORKBENCH,
+    "workbench_get_mechatronics_readiness",
+    "Return the current Circuit Lab and mechatronics binding readiness visible in Workbench.",
+    emptyObjectSchema
+  ),
+  defineAction(
+    ASSISTANT_PAGES.WORKBENCH,
+    "workbench_apply_semantic_channel",
+    "Apply one semantic firmware-channel value to the virtual RobotDesign pose when readiness permits it.",
+    objectSchema({
+      channelId: stableIdSchema("Firmware channel id."),
+      value: numberSchema("Finite command value for the semantic channel.")
+    }, ["channelId", "value"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.WORKBENCH,
     "workbench_set_simulation_options",
     "Set simulation options. Re-initialization may be required.",
     objectSchema({
@@ -686,7 +906,313 @@ const workbenchActions = [
   })
 ];
 
-export const ASSISTANT_ACTIONS = Object.freeze([...studioActions, ...partsActions, ...workbenchActions]);
+const electronicsActions = [
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_new_design", "Reset the Electronics Studio to the starter CircuitDesign.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Start a new electronics design."
+  }),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_save_design", "Save the current CircuitDesign to browser storage.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Save the current CircuitDesign."
+  }),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_open_design_picker", "Open a file picker to import CircuitDesign or Circuitiny JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Open the electronics design JSON picker."
+  }),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_export_design_json", "Download the current CircuitDesign JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Download the CircuitDesign JSON."
+  }),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_export_firmware_zip", "Download the generated ESP-IDF project zip when DRC has no blocking errors.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Run electronics DRC and download the ESP-IDF firmware zip if ready."
+  }),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_select_board",
+    "Select the ESP32-family board for the current circuit.",
+    objectSchema({ boardId: stringSchema("Board id.", { enum: electronicsBoardIds }) }, ["boardId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_add_component",
+    "Add a component from the electronics catalog.",
+    objectSchema({
+      componentId: stringSchema("Component catalog id.", { enum: electronicsComponentIds }),
+      name: stringSchema("Optional component instance name.", { maxLength: 120 }),
+      position: vector3Schema("Optional component position in millimeters.")
+    }, ["componentId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_select_component",
+    "Select a component instance by id.",
+    objectSchema({ instanceId: stringSchema("Component instance id.", { maxLength: 120 }) }, ["instanceId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_move_component",
+    "Move a component instance in the Electronics Studio layout.",
+    objectSchema({
+      instanceId: stringSchema("Component instance id.", { maxLength: 120 }),
+      position: vector3Schema("New component position in millimeters.")
+    }, ["instanceId", "position"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_connect_pins",
+    "Create a new named net between two board or component pins.",
+    objectSchema({
+      endpointA: circuitEndpointSchema,
+      endpointB: circuitEndpointSchema,
+      name: stringSchema("Optional net name.", { maxLength: 120 })
+    }, ["endpointA", "endpointB"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_remove_net",
+    "Remove a net from the current circuit.",
+    objectSchema({ netId: stringSchema("Net id.", { maxLength: 120 }) }, ["netId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Remove the selected electronics net."
+    }
+  ),
+  defineAction(
+    ASSISTANT_PAGES.ELECTRONICS,
+    "electronics_remove_component",
+    "Remove a component instance and its attached net endpoints.",
+    objectSchema({ instanceId: stringSchema("Component instance id.", { maxLength: 120 }) }, ["instanceId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Remove the selected electronics component."
+    }
+  ),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_run_drc", "Run electronics design rule checks.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_suggest_safe_pin", "Suggest an unused safe GPIO pin for an input or output.", objectSchema({
+    role: stringSchema("Pin role.", { enum: ["input", "output"] })
+  }, ["role"])),
+  defineAction(ASSISTANT_PAGES.ELECTRONICS, "electronics_generate_code", "Generate ESP-IDF firmware files and refresh the code preview.", emptyObjectSchema)
+];
+
+const circuitLabActions = [
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_new_project", "Reset Circuit Lab to the default robotics starter project.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Start a new Circuit Lab project."
+  }),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_save_project", "Save the current Circuit Lab project to browser storage.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Save the current Circuit Lab project."
+  }),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_open_project_picker", "Open a file picker to import Circuit Lab JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Open the Circuit Lab JSON picker."
+  }),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_export_project_json", "Download the current Circuit Lab project JSON.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Download the Circuit Lab project JSON."
+  }),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_apply_starter_template",
+    "Replace the current bench with a registered Circuit Lab robotics starter circuit.",
+    objectSchema({
+      templateId: stringSchema("Circuit Lab starter template id.", { enum: circuitLabStarterTemplateIds })
+    }, ["templateId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Replace the current Circuit Lab bench with a starter circuit."
+    }
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_add_hardware",
+    "Add a hardware item from the Circuit Lab catalog.",
+    objectSchema({
+      componentTypeId: stringSchema("Circuit Lab catalog component type id.", { enum: circuitLabComponentTypeIds }),
+      name: stringSchema("Optional component instance name.", { maxLength: 120 }),
+      position: vector2Schema("Optional component position in millimeters.")
+    }, ["componentTypeId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_select_component",
+    "Select a Circuit Lab component instance.",
+    objectSchema({ componentId: stringSchema("Circuit Lab component instance id.", { maxLength: 120 }) }, ["componentId"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_move_component",
+    "Move a Circuit Lab component instance on the bench.",
+    objectSchema({
+      componentId: stringSchema("Circuit Lab component instance id.", { maxLength: 120 }),
+      position: vector2Schema("New component position in millimeters.")
+    }, ["componentId", "position"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_resize_component",
+    "Resize a Circuit Lab component instance on the bench.",
+    objectSchema({
+      componentId: stringSchema("Circuit Lab component instance id.", { maxLength: 120 }),
+      scale: numberSchema("Component scale factor.", { minimum: MIN_COMPONENT_SCALE, maximum: MAX_COMPONENT_SCALE })
+    }, ["componentId", "scale"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_rotate_component",
+    "Rotate a Circuit Lab component instance clockwise around its center.",
+    objectSchema({
+      componentId: stringSchema("Circuit Lab component instance id.", { maxLength: 120 }),
+      rotationDegrees: numberSchema("Clockwise component rotation in degrees from 0 to 359.", { minimum: 0, maximum: 359 })
+    }, ["componentId", "rotationDegrees"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_connect_terminals",
+    "Create a wire between two Circuit Lab component terminals.",
+    objectSchema({
+      endpointA: circuitLabEndpointSchema,
+      endpointB: circuitLabEndpointSchema,
+      name: stringSchema("Optional wire name.", { maxLength: 120 })
+    }, ["endpointA", "endpointB"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_remove_component",
+    "Remove a Circuit Lab component and attached wire endpoints.",
+    objectSchema({ componentId: stringSchema("Circuit Lab component instance id.", { maxLength: 120 }) }, ["componentId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Remove the selected Circuit Lab component."
+    }
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_remove_connection",
+    "Remove a Circuit Lab wire.",
+    objectSchema({ connectionId: stringSchema("Circuit Lab wire id.", { maxLength: 120 }) }, ["connectionId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Remove the selected Circuit Lab wire."
+    }
+  ),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_run_test", "Run the deterministic Circuit Lab wiring and power test.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_get_readiness", "Return layered Circuit Lab readiness for DRC, binding, source mapping, and build checklist.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_get_binding_status", "Return current mechatronics binding validation status and diagnostics.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_preview_binding_suggestions", "Preview deterministic binding skeletons from the saved RobotDesign and current Circuit Lab wiring.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_get_pin_map", "Return derived pin-map rows for the current Circuit Lab project and binding.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_get_harness", "Return derived harness rows with persisted display color and recommended physical wire metadata.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_get_bom", "Return derived BOM rows for the current Circuit Lab project.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_get_build_checklist", "Return the derived source-only build checklist.", emptyObjectSchema),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_get_component_controls",
+    "Return normalized persistent controls for a Circuit Lab component, or for every controllable component when omitted.",
+    objectSchema({
+      componentId: stableIdSchema("Optional Circuit Lab component instance id.")
+    })
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_set_component_control",
+    "Set a whitelisted persistent Circuit Lab component control by stable component and control ids.",
+    objectSchema({
+      componentId: stableIdSchema("Circuit Lab component instance id."),
+      controlId: stableIdSchema("Component control id."),
+      value: stringSchema("Control value. Numeric controls may be passed as numeric text.", { maxLength: 40 })
+    }, ["componentId", "controlId", "value"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Set the selected Circuit Lab component control."
+    }
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_focus_terminal",
+    "Focus a Circuit Lab terminal in the current session without changing project state.",
+    objectSchema({
+      endpoint: circuitLabEndpointSchema
+    }, ["endpoint"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_set_actuator_binding",
+    "Set or create an unsaved actuator binding using stable RobotDesign, Circuit Lab, and firmware-channel ids.",
+    objectSchema({
+      bindingId: stableIdSchema("Optional actuator binding id."),
+      jointId: stableIdSchema("RobotDesign joint id."),
+      actuatorId: stableIdSchema("RobotDesign actuator id."),
+      circuitComponentId: stableIdSchema("Circuit Lab actuator or driver component id."),
+      firmwareChannelIds: stableIdArraySchema("Firmware channel ids used by this actuator binding."),
+      commandTransform: commandTransformSchema
+    }, ["jointId", "actuatorId", "circuitComponentId", "firmwareChannelIds"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_set_sensor_binding",
+    "Set or create an unsaved sensor binding using stable RobotDesign, Circuit Lab, and firmware-channel ids.",
+    objectSchema({
+      bindingId: stableIdSchema("Optional sensor binding id."),
+      sensorId: stableIdSchema("RobotDesign sensor id."),
+      circuitComponentId: stableIdSchema("Circuit Lab sensor component id."),
+      firmwareChannelIds: stableIdArraySchema("Firmware channel ids used by this sensor binding.")
+    }, ["sensorId", "circuitComponentId", "firmwareChannelIds"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_set_firmware_channel",
+    "Set or create an unsaved firmware-channel mapping between a controller terminal and device terminal.",
+    objectSchema({
+      channelId: stableIdSchema("Firmware channel id."),
+      semanticRole: stringSchema("Semantic channel role.", {
+        enum: [
+          "joint.command.position",
+          "joint.command.velocity",
+          "joint.command.step",
+          "joint.command.direction",
+          "joint.command.enable",
+          "sensor.read.digital",
+          "sensor.read.analog",
+          "sensor.trigger",
+          "sensor.echo",
+          "sensor.bus.sda",
+          "sensor.bus.scl",
+          "sensor.bus.uart-tx",
+          "sensor.bus.uart-rx"
+        ]
+      }),
+      direction: stringSchema("Signal direction.", { enum: ["controller-to-device", "device-to-controller", "bidirectional"] }),
+      signalType: stringSchema("Signal type.", { enum: ["servo-pulse", "pwm", "digital", "analog", "step", "direction", "enable", "i2c", "uart"] }),
+      valueType: stringSchema("Channel value type.", { enum: ["boolean", "integer", "number"] }),
+      controllerTerminalRef: circuitLabEndpointSchema,
+      deviceTerminalRef: circuitLabEndpointSchema
+    }, ["channelId", "semanticRole", "direction", "signalType", "valueType", "controllerTerminalRef", "deviceTerminalRef"])
+  ),
+  defineAction(
+    ASSISTANT_PAGES.CIRCUITS,
+    "circuits_remove_binding",
+    "Remove an unsaved actuator binding, sensor binding, or firmware channel from the current binding.",
+    objectSchema({
+      targetType: stringSchema("Binding target type.", { enum: ["actuator", "sensor", "firmwareChannel"] }),
+      targetId: stableIdSchema("Binding or firmware-channel id to remove.")
+    }, ["targetType", "targetId"]),
+    {
+      safety: ACTION_SAFETY.GUARDED,
+      confirmation: "Remove the selected mechatronics binding entry."
+    }
+  ),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_suggest_safe_terminal", "Suggest an unused safe controller terminal for an input or output.", objectSchema({
+    role: stringSchema("Terminal role.", { enum: ["input", "output"] })
+  }, ["role"])),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_generate_source", "Generate source-only Arduino or ESP-IDF files for the current Circuit Lab project.", emptyObjectSchema),
+  defineAction(ASSISTANT_PAGES.CIRCUITS, "circuits_export_build_guide", "Download the source-only Circuit Lab build-guide ZIP.", emptyObjectSchema, {
+    safety: ACTION_SAFETY.GUARDED,
+    confirmation: "Download the Circuit Lab build-guide ZIP."
+  })
+];
+
+export const ASSISTANT_ACTIONS = Object.freeze([...studioActions, ...partsActions, ...workbenchActions, ...electronicsActions, ...circuitLabActions]);
 
 const ACTION_BY_PAGE_AND_NAME = new Map(
   ASSISTANT_ACTIONS.map((action) => [`${action.page}:${action.name}`, action])

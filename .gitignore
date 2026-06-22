@@ -5,6 +5,7 @@
 node_modules/
 dist/
 coverage/
+test-results/
 .playwright-mcp/
 
 STL_files/
@@ -16,6 +17,7 @@ artifacts/
 logs/
 *.png
 *.mp4
+!src/circuits/assets/photoreal/**/*.png
 
 AGENTS.md
 plan/

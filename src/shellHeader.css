@@ -75,6 +75,10 @@
   flex-basis: 560px;
 }
 
+.shell-header--electronics .shell-header__brand {
+  flex-basis: 600px;
+}
+
 .shell-header .shell-header__title {
   overflow: hidden;
   color: #ffffff;
@@ -391,13 +395,6 @@
   transform-origin: bottom center;
 }
 
-.shell-header .mode-icon,
-.shell-header .button-icon {
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
-}
-
 .shell-header__toggle {
   cursor: pointer;
 }
@@ -425,6 +422,82 @@
   min-width: 116px;
 }
 
+@media (min-width: 721px) {
+  .shell-header--assembly {
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow: visible;
+  }
+
+  .shell-header--assembly .shell-header__brand {
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .shell-header--assembly .shell-header__title {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .shell-header--assembly .shell-header__pages {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+  }
+
+  .shell-header--assembly .toolbar-group--project,
+  .shell-header--assembly .toolbar-group--modes,
+  .shell-header--assembly .toolbar-group--file,
+  .shell-header--assembly .toolbar-group--view {
+    flex: 0 0 auto;
+  }
+
+  .shell-header--assembly .toolbar-group--project {
+    margin-left: 10px;
+  }
+
+  .shell-header--workbench {
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .shell-header--workbench .shell-header__brand {
+    flex: 0 1 auto;
+    flex-wrap: nowrap;
+    min-width: 0;
+    order: 1;
+  }
+
+  .shell-header--workbench .shell-header__title {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .shell-header--workbench .shell-header__status {
+    flex: 0 1 150px;
+    max-width: 150px;
+  }
+
+  .shell-header--workbench .shell-header__pages,
+  .shell-header--workbench .shell-header__modes,
+  .shell-header--workbench .shell-header__actions,
+  .shell-header--workbench .shell-header__group {
+    flex-wrap: nowrap;
+  }
+
+  .shell-header--workbench .shell-header__actions {
+    flex: 0 0 auto;
+    margin-left: 10px;
+    order: 2;
+  }
+
+  .shell-header--workbench .shell-header__modes {
+    flex: 0 0 auto;
+    order: 3;
+  }
+}
+
 .shell-header .help-button.shell-header__button--icon {
   width: 34px;
   min-width: 34px;
@@ -438,23 +511,173 @@
   padding: 0;
 }
 
-@media (min-width: 1061px) and (max-width: 1500px) {
+@media (min-width: 721px) and (max-width: 1700px) {
+  .shell-header--assembly {
+    gap: 4px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
   .shell-header--assembly .shell-header__brand,
-  .shell-header--assembly .toolbar-group--project,
-  .shell-header--assembly .toolbar-separator,
-  .shell-header--assembly .toolbar-group--modes {
-    order: 1;
+  .shell-header--assembly .shell-header__pages,
+  .shell-header--assembly .shell-header__modes,
+  .shell-header--assembly .shell-header__actions,
+  .shell-header--assembly .shell-header__group {
+    gap: 4px;
   }
 
-  .shell-header--assembly .toolbar-group--file,
-  .shell-header--assembly .toolbar-group--view {
-    order: 2;
+  .shell-header--assembly .shell-header__page-link,
+  .shell-header--assembly .shell-header__button,
+  .shell-header--assembly .shell-header__toggle,
+  .shell-header--assembly .mode-button,
+  .shell-header--assembly .toolbar-button {
+    min-height: 34px;
+    padding-right: 8px;
+    padding-left: 8px;
   }
 
-  .shell-header--assembly .toolbar-group--file {
-    margin-left: 0;
-    padding-left: 0;
-    border-left: 0;
+  .shell-header--assembly .shell-header__button--icon-only,
+  .shell-header--assembly .mode-button.shell-header__button--icon-only,
+  .shell-header--assembly .toolbar-button.shell-header__button--icon-only {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+  }
+
+  .shell-header--assembly .shell-header__toggle--icon-only {
+    width: 54px;
+    min-width: 54px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .shell-header--assembly .toolbar-group--file .toolbar-button:not(.shell-header__button--icon-only) {
+    min-width: 104px;
+  }
+
+  .shell-header--assembly .shell-header__divider {
+    margin-right: 2px;
+    margin-left: 2px;
+  }
+
+  .shell-header--assembly .toolbar-group--project {
+    margin-left: 8px;
+  }
+
+  .shell-header--workbench {
+    gap: 4px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .shell-header--workbench .shell-header__brand,
+  .shell-header--workbench .shell-header__pages,
+  .shell-header--workbench .shell-header__modes,
+  .shell-header--workbench .shell-header__actions,
+  .shell-header--workbench .shell-header__group {
+    gap: 4px;
+  }
+
+  .shell-header--workbench .shell-header__page-link,
+  .shell-header--workbench .shell-header__button,
+  .shell-header--workbench .mode-tabs button {
+    min-height: 34px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .shell-header--workbench .shell-header__button--icon-only {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+  }
+
+  .shell-header--workbench .shell-header__divider {
+    margin-right: 2px;
+    margin-left: 2px;
+  }
+
+  .shell-header--workbench .shell-header__actions {
+    margin-left: 8px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1540px) {
+  .shell-header--assembly .shell-header__title {
+    max-width: 160px;
+  }
+
+  .shell-header--assembly .toolbar-label-wide {
+    display: none;
+  }
+
+  .shell-header--workbench .shell-header__title {
+    max-width: 190px;
+  }
+
+  .shell-header--workbench .shell-header__status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .shell-header--workbench .toolbar-label-wide {
+    display: none;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1320px) {
+  .shell-header--assembly .shell-header__title,
+  .shell-header--assembly .toolbar-group--file .shell-header__label:not(.shell-header__label--hint) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .shell-header--assembly .shell-header__page-link,
+  .shell-header--assembly .toolbar-group--file .toolbar-button:not(.shell-header__button--icon-only) {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+  }
+
+  .shell-header--assembly .shell-header__page-link .app-icon,
+  .shell-header--assembly .toolbar-group--file .app-icon {
+    font-size: 18px;
+  }
+
+  .shell-header--workbench .shell-header__title,
+  .shell-header--workbench .shell-header__label:not(.shell-header__label--hint) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .shell-header--workbench .shell-header__page-link,
+  .shell-header--workbench .shell-header__button:not(.help-button),
+  .shell-header--workbench .mode-tabs button {
+    width: 36px;
+    min-width: 36px;
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+  }
+
+  .shell-header--workbench .shell-header__page-link .app-icon,
+  .shell-header--workbench .shell-header__button .app-icon,
+  .shell-header--workbench .mode-tabs button .app-icon {
+    font-size: 18px;
   }
 }
 
@@ -468,7 +691,8 @@
   .shell-header__brand,
   .shell-header--assembly .shell-header__brand,
   .shell-header--component .shell-header__brand,
-  .shell-header--workbench .shell-header__brand {
+  .shell-header--workbench .shell-header__brand,
+  .shell-header--electronics .shell-header__brand {
     flex: 1 1 100%;
     width: 100%;
     min-width: 0;

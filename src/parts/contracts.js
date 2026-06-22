@@ -5,6 +5,8 @@ export const SKETCH_EXTRUDE_KIND = "sketchExtrude";
 export const REVOLVE_KIND = "revolve";
 export const SPUR_GEAR_KIND = "spurGear";
 export const BOOLEAN_OPERATION_KIND = "booleanOperation";
+export const ADVANCED_CAD_RECIPE_KIND = "advancedCadRecipe";
+export const ADVANCED_CAD_RECIPE_VERSION = 1;
 export const DEFAULT_BODY_COLOR = "#2563eb";
 export const DEFAULT_EXTRUDE_DEPTH_MM = 6;
 export const ID_MAX_LENGTH = 56;
@@ -12,7 +14,8 @@ export const PART_BODY_SOURCE_KINDS = Object.freeze([
   SKETCH_EXTRUDE_KIND,
   REVOLVE_KIND,
   SPUR_GEAR_KIND,
-  BOOLEAN_OPERATION_KIND
+  BOOLEAN_OPERATION_KIND,
+  ADVANCED_CAD_RECIPE_KIND
 ]);
 
 export function timestampNow() {

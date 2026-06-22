@@ -1,4 +1,5 @@
 import {
+  ADVANCED_CAD_RECIPE_KIND,
   BOOLEAN_OPERATION_KIND,
   REVOLVE_KIND,
   SKETCH_EXTRUDE_KIND,
@@ -127,6 +128,37 @@ function gearOutsideDiameter(gear) {
   return (toothCount + 2) * positiveNumber(gear?.moduleMm, 2);
 }
 
+function advancedRecipeSourceSize(recipe) {
+  const bounds = {
+    min: [Infinity, Infinity, Infinity],
+    max: [-Infinity, -Infinity, -Infinity]
+  };
+  let hasBounds = false;
+  function includeBox(center, size) {
+    if (!Array.isArray(center) || !Array.isArray(size)) return;
+    for (let index = 0; index < AXIS_COUNT; index += 1) {
+      const half = positiveNumber(size[index], 0) / 2;
+      const value = asFiniteNumber(center[index], 0);
+      bounds.min[index] = Math.min(bounds.min[index], value - half);
+      bounds.max[index] = Math.max(bounds.max[index], value + half);
+    }
+    hasBounds = true;
+  }
+  for (const operation of recipe?.operations ?? []) {
+    if (operation.type === "box") includeBox(operation.center, operation.size);
+    if (operation.type === "cylinder") {
+      const radius = positiveNumber(operation.radius ?? (operation.diameter ? operation.diameter / 2 : 0), 0);
+      const height = positiveNumber(operation.height ?? operation.depth, 0);
+      const size = [radius * 2, radius * 2, radius * 2];
+      const axis = operation.axis === "x" ? 0 : operation.axis === "z" ? 2 : 1;
+      size[axis] = height;
+      includeBox(operation.center, size);
+    }
+  }
+  if (!hasBounds) return [0, 0, 0];
+  return bounds.max.map((value, index) => Math.max(0, value - bounds.min[index]));
+}
+
 function bodyScale(body) {
   return positiveVector(body?.transform?.scale, [1, 1, 1]);
 }
@@ -146,6 +178,7 @@ function sourceSizeForKind(body) {
     return [diameter, positiveNumber(body.gear?.thicknessMm ?? body.extrudeDepthMm, 0), diameter];
   }
   if (kind === BOOLEAN_OPERATION_KIND) return [0, 0, 0];
+  if (kind === ADVANCED_CAD_RECIPE_KIND) return advancedRecipeSourceSize(body.advancedCadRecipe);
 
   const outer = body?.sketch?.outerProfile;
   if (!outer) return [0, positiveNumber(body?.extrudeDepthMm, 0), 0];
@@ -308,5 +341,6 @@ export function resizePartBodyToTargetSize(body, targetSizeMm, options = {}) {
   if (kind === REVOLVE_KIND) return resizeRevolveBody(body, targetSizeMm, options);
   if (kind === SPUR_GEAR_KIND) return resizeSpurGearBody(body, targetSizeMm, options);
   if (kind === BOOLEAN_OPERATION_KIND) return setPlacementScaleToTarget(body, targetSizeMm, options);
+  if (kind === ADVANCED_CAD_RECIPE_KIND) return setPlacementScaleToTarget(body, targetSizeMm, options);
   return resizeSketchBody(body, targetSizeMm, options);
 }

@@ -1,11 +1,13 @@
 import { sanitizePartId } from "./contracts.js";
 import {
+  ADVANCED_CAD_RECIPE_KIND,
   BOOLEAN_OPERATION_KIND,
   PART_BODY_SOURCE_KINDS,
   REVOLVE_KIND,
   SKETCH_EXTRUDE_KIND,
   SPUR_GEAR_KIND
 } from "./contracts.js";
+import { validateAdvancedCadRecipe } from "./advancedCadRecipe.js";
 import { validateBooleanFeature, validateRevolveFeature } from "./featureOps.js";
 import { validateSpurGearSpec } from "./gears.js";
 import { CUT_PROFILE_TYPES, OUTER_PROFILE_TYPES, profileBounds, profileIsClosed } from "./sketch.js";
@@ -203,6 +205,11 @@ export function validateBody(body, options = {}) {
 
   if (sourceKind === BOOLEAN_OPERATION_KIND) {
     issues.push(...validateBooleanFeature(body?.boolean, `${path}.boolean`, options.bodyIds ?? null, body?.id ?? null));
+    return issues;
+  }
+
+  if (sourceKind === ADVANCED_CAD_RECIPE_KIND) {
+    issues.push(...validateAdvancedCadRecipe(body?.advancedCadRecipe, `${path}.advancedCadRecipe`));
     return issues;
   }
 

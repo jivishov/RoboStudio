@@ -30,7 +30,8 @@ export function toggleShellCard(card) {
   const toggle = card.querySelector("[data-toggle-shell-card]");
   const id = toggle?.dataset.toggleShellCard ?? card.dataset.cardId;
   if (!id) return true;
-  const nextOpen = toggleShellCardState(id);
+  const defaultOpen = toggle?.getAttribute("aria-expanded") !== "false";
+  const nextOpen = toggleShellCardState(id, defaultOpen);
   applyShellCardState(card, nextOpen);
   return nextOpen;
 }

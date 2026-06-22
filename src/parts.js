@@ -5,12 +5,18 @@ import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 import { isSupabaseConfigured } from "./auth/authConfig.js";
 import { createAuthSessionController } from "./auth/authSession.js";
 import {
+  ADVANCED_CAD_RECIPE_KIND,
   BOOLEAN_OPERATION_KIND,
   REVOLVE_KIND,
   SKETCH_EXTRUDE_KIND,
   SPUR_GEAR_KIND,
+  sanitizePartId,
   uniquePartId
 } from "./parts/contracts.js";
+import {
+  createAdvancedCadRecipeBodyFromArgs,
+  replaceAdvancedCadRecipeBodyFromArgs
+} from "./parts/advancedCadRecipe.js";
 import {
   BOOLEAN_OPERATIONS,
   createBooleanOperationBody,
@@ -116,6 +122,7 @@ const projectFileInput = document.querySelector("#project-file-input");
 const undoButton = document.querySelector("#undo-project");
 const redoButton = document.querySelector("#redo-project");
 const exportStlButton = document.querySelector("#export-stl");
+const exportStepButton = document.querySelector("#export-step");
 const sendAssemblyButton = document.querySelector("#send-assembly");
 const duplicateBodyButton = document.querySelector("#duplicate-body");
 const deleteBodyButton = document.querySelector("#delete-body");
@@ -190,11 +197,16 @@ function isSketchBody(body) {
   return bodySourceKind(body) === SKETCH_EXTRUDE_KIND;
 }
 
+function isAdvancedCadRecipeBody(body) {
+  return bodySourceKind(body) === ADVANCED_CAD_RECIPE_KIND;
+}
+
 function sourceLabel(body) {
   const kind = bodySourceKind(body);
   if (kind === REVOLVE_KIND) return "lathe";
   if (kind === SPUR_GEAR_KIND) return "gear";
   if (kind === BOOLEAN_OPERATION_KIND) return body.boolean?.operation ?? "boolean";
+  if (kind === ADVANCED_CAD_RECIPE_KIND) return "advanced CAD";
   return `${formatNumber(body?.extrudeDepthMm, 1)} mm`;
 }
 
@@ -210,7 +222,8 @@ function bodyCompileSignature(body) {
     extrudeDepthMm: body.extrudeDepthMm,
     revolve: body.revolve,
     gear: body.gear,
-    boolean: body.boolean
+    boolean: body.boolean,
+    advancedCadRecipe: body.advancedCadRecipe
   };
 }
 
@@ -307,8 +320,10 @@ function renderCompileStatus(project = history.current) {
   const total = project.bodies.length;
   const hasSelectedResult = Boolean(selectedCompileResult());
   const hasHandoffResult = resultCount > 0;
+  const selected = selectedProjectBody();
 
   exportStlButton.disabled = !hasSelectedResult || compiling;
+  if (exportStepButton) exportStepButton.disabled = !isAdvancedCadRecipeBody(selected) || compiling;
   sendAssemblyButton.disabled = !hasHandoffResult || compiling;
   compileCount.textContent = compiling ? "Building" : total ? `${resultCount}/${total}` : "Idle";
   buildCount.textContent = compileErrors.length ? `${compileErrors.length}` : resultCount ? "OK" : "Idle";
@@ -469,12 +484,26 @@ function templateLabel(templateId) {
 }
 
 function renderTemplateOptions() {
+  const groups = new Map();
+  for (const template of listPartTemplates()) {
+    const category = template.category ?? "Templates";
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push(template);
+  }
+
   templateSelect.replaceChildren(
-    ...listPartTemplates().map((template) => {
-      const option = document.createElement("option");
-      option.value = template.id;
-      option.textContent = template.label;
-      return option;
+    ...[...groups.entries()].map(([category, templates]) => {
+      const group = document.createElement("optgroup");
+      group.label = category;
+      group.append(
+        ...templates.map((template) => {
+          const option = document.createElement("option");
+          option.value = template.id;
+          option.textContent = template.label;
+          return option;
+        })
+      );
+      return group;
     })
   );
 }
@@ -793,6 +822,15 @@ function selectedSketchBodyForAssistant(bodyId) {
   return body;
 }
 
+function selectedAdvancedCadBodyForAssistant(bodyId) {
+  const body = bodyId ? selectBodyForAssistant(bodyId) : selectedProjectBody();
+  if (!body) throw new Error("No body is selected.");
+  if (!isAdvancedCadRecipeBody(body)) {
+    throw new Error(`${body.name} is not an advanced CAD recipe body.`);
+  }
+  return body;
+}
+
 function findCutIndex(body, args = {}) {
   if (args.profileId) {
     const index = body.sketch.cutProfiles.findIndex((profile) => profile.id === args.profileId);
@@ -836,6 +874,19 @@ function assistantBodySummary(body) {
     effectiveSizeMm: currentBodySize(body),
     compileReady: compileResults.has(body.id),
     valid: validateBody(body).length === 0,
+    advancedCadRecipe: isAdvancedCadRecipeBody(body)
+      ? {
+          version: body.advancedCadRecipe?.version,
+          units: body.advancedCadRecipe?.units,
+          operationCount: body.advancedCadRecipe?.operations?.length ?? 0,
+          operations: (body.advancedCadRecipe?.operations ?? []).map((operation) => ({
+            id: operation.id,
+            type: operation.type,
+            mode: operation.mode,
+            label: operation.label
+          }))
+        }
+      : null,
     outerProfile: profileSummary(body.sketch?.outerProfile ?? null),
     cutProfiles: (body.sketch?.cutProfiles ?? []).map((profile, index) => profileSummary(profile, index))
   };
@@ -873,6 +924,13 @@ function partsAssistantContext() {
         supportedCutProfileTypes: CUT_PROFILE_TYPES,
         sketchPlane: "X/Z",
         extrusionAxis: "Y"
+      },
+      advancedCadRecipe: {
+        version: 1,
+        units: "mm",
+        supportedOperations: ["box", "cylinder", "hole", "slot", "fillet", "chamfer", "shell", "boolean", "pattern", "transform", "label"],
+        browserPreviewOperations: ["box", "cylinder", "hole", "slot"],
+        stepExport: "local build123d backend required"
       }
     },
     history: {
@@ -1035,6 +1093,28 @@ function customSketchToolOutput(action, result, message, options = {}) {
   };
 }
 
+function advancedCadToolOutput(action, result, message, options = {}) {
+  const bodyId = result.body?.id ?? null;
+  const validationIssues = issueData(result.validationIssues);
+  const status = options.status ?? (result.accepted ? "accepted" : "validation_failed");
+  const ok = options.ok ?? result.accepted;
+  return {
+    ok,
+    action,
+    status,
+    message,
+    error: ok ? undefined : message,
+    data: {
+      accepted: result.accepted,
+      bodyId,
+      designIntent: result.designIntent,
+      validationIssues,
+      compile: options.compile ?? (bodyId ? compileStatusForAssistant(bodyId) : null),
+      stepExport: "Use parts_export_selected_step after selecting this body when a local build123d backend is available."
+    }
+  };
+}
+
 async function createCustomSketchBodyForAssistant(args = {}) {
   const result = createCustomSketchBodyFromArgs(args, {
     existingBodyIds: new Set(history.current.bodies.map((body) => body.id))
@@ -1091,6 +1171,65 @@ async function replaceSketchBodyForAssistant(args = {}) {
     "parts_replace_sketch_body",
     result,
     `${result.body.name} sketch replaced and built.`
+  );
+}
+
+async function createAdvancedCadBodyForAssistant(args = {}) {
+  const result = createAdvancedCadRecipeBodyFromArgs(args, {
+    existingBodyIds: new Set(history.current.bodies.map((body) => body.id))
+  });
+  if (!result.accepted) {
+    return advancedCadToolOutput(
+      "parts_create_advanced_cad_body",
+      result,
+      `Advanced CAD recipe rejected: ${result.validationIssues[0]?.message ?? "validation failed."}`
+    );
+  }
+
+  commit(addBody(history.current, result.body), `${result.body.name} advanced CAD body added`);
+  try {
+    await waitForCadReady();
+  } catch {
+    return advancedCadToolOutput(
+      "parts_create_advanced_cad_body",
+      result,
+      `${result.body.name} advanced CAD body was added, but the preview build needs refinement or the local build123d backend.`,
+      { ok: false, status: "compile_failed" }
+    );
+  }
+  return advancedCadToolOutput(
+    "parts_create_advanced_cad_body",
+    result,
+    `${result.body.name} advanced CAD body added and built.`
+  );
+}
+
+async function replaceAdvancedCadBodyForAssistant(args = {}) {
+  const current = selectedAdvancedCadBodyForAssistant(args.bodyId);
+  const result = replaceAdvancedCadRecipeBodyFromArgs(current, args);
+  if (!result.accepted) {
+    return advancedCadToolOutput(
+      "parts_replace_advanced_cad_body",
+      result,
+      `Advanced CAD replacement rejected: ${result.validationIssues[0]?.message ?? "validation failed."}`
+    );
+  }
+
+  commit(updateBody(history.current, current.id, () => result.body), `${result.body.name} advanced CAD recipe replaced`);
+  try {
+    await waitForCadReady();
+  } catch {
+    return advancedCadToolOutput(
+      "parts_replace_advanced_cad_body",
+      result,
+      `${result.body.name} advanced CAD recipe was replaced, but the preview build needs refinement or the local build123d backend.`,
+      { ok: false, status: "compile_failed" }
+    );
+  }
+  return advancedCadToolOutput(
+    "parts_replace_advanced_cad_body",
+    result,
+    `${result.body.name} advanced CAD recipe replaced and built.`
   );
 }
 
@@ -1365,6 +1504,8 @@ function createAdvancedBodySummary(body) {
     value.textContent = `${body.gear?.toothCount ?? 0} teeth / module ${body.gear?.moduleMm ?? 0}`;
   } else if (kind === BOOLEAN_OPERATION_KIND) {
     value.textContent = `${body.boolean?.operation ?? "boolean"} / ${(body.boolean?.operandBodyIds ?? []).join(", ")}`;
+  } else if (kind === ADVANCED_CAD_RECIPE_KIND) {
+    value.textContent = `recipe v${body.advancedCadRecipe?.version ?? "?"} / ${body.advancedCadRecipe?.operations?.length ?? 0} operations`;
   } else {
     value.textContent = kind;
   }
@@ -2111,6 +2252,58 @@ async function exportSelectedStl(options = {}) {
   }
 }
 
+function bytesFromBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+async function exportSelectedStep(options = {}) {
+  const body = selectedProjectBody();
+  if (!body || !isAdvancedCadRecipeBody(body)) {
+    showStatus("Select an advanced CAD recipe body before exporting STEP.", 4200);
+    if (options.throwOnInvalid) throw new Error("Select an advanced CAD recipe body before exporting STEP.");
+    return;
+  }
+
+  try {
+    showStatus("Preparing STEP with local CAD backend...", 10000);
+    const response = await fetch("/api/cad/compile", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        body,
+        includeStep: true,
+        includeMesh: false,
+        includeStl: false
+      })
+    });
+    let result = null;
+    try {
+      result = await response.json();
+    } catch {
+      result = { ok: false, message: "Advanced CAD backend did not return JSON." };
+    }
+    if (!response.ok || !result?.ok || !result.stepBase64) {
+      throw new Error(result?.message ?? "Advanced CAD backend is unavailable.");
+    }
+
+    downloadBlob(
+      bytesFromBase64(result.stepBase64),
+      `${sanitizePartId(body.name ?? body.id, "advanced_cad_part")}.step`,
+      "model/step"
+    );
+    showStatus("STEP export started");
+  } catch (error) {
+    const message = error?.message ?? "STEP export failed.";
+    showStatus(message, 6200);
+    if (options.throwOnInvalid) throw new Error(message);
+  }
+}
+
 async function sendGeneratedAssembly(options = {}) {
   if (options.waitForCompile) await waitForCadReady();
   const visibleBodyIds = new Set(previewScene.getVisibleBodyIds());
@@ -2229,6 +2422,12 @@ function mountPartsAssistant() {
       },
       parts_create_custom_sketch_body: (args) => createCustomSketchBodyForAssistant(args),
       parts_replace_sketch_body: (args) => replaceSketchBodyForAssistant(args),
+      parts_create_advanced_cad_body: (args) => createAdvancedCadBodyForAssistant(args),
+      parts_replace_advanced_cad_body: (args) => replaceAdvancedCadBodyForAssistant(args),
+      parts_export_selected_step: async () => {
+        await exportSelectedStep({ throwOnInvalid: true });
+        return "Selected advanced CAD body STEP export started.";
+      },
       parts_duplicate_body: ({ bodyId } = {}) => duplicateBodyForAssistant(bodyId),
       parts_delete_body: ({ bodyId } = {}) => deleteBodyForAssistant(bodyId),
       parts_set_body_properties: (args) => setBodyPropertiesForAssistant(args),
@@ -2359,6 +2558,27 @@ projectFileInput.addEventListener("change", () => {
   reader.readAsText(file);
 });
 
+function shortcutTargetIsTextEditable(target) {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target?.isContentEditable === true;
+}
+
+function handleProjectHistoryShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || shortcutTargetIsTextEditable(event.target)) return;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    undoProject(history);
+    render();
+  } else if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    redoProject(history);
+    render();
+  }
+}
+
 undoButton.addEventListener("click", () => {
   undoProject(history);
   render();
@@ -2369,8 +2589,13 @@ redoButton.addEventListener("click", () => {
   render();
 });
 
+document.addEventListener("keydown", handleProjectHistoryShortcut);
+
 exportStlButton.addEventListener("click", () => {
   void exportSelectedStl();
+});
+exportStepButton?.addEventListener("click", () => {
+  void exportSelectedStep();
 });
 sendAssemblyButton.addEventListener("click", () => {
   void sendGeneratedAssembly();

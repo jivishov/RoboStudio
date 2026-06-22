@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { buildFritzingCustomComponentDefinition } from "../src/circuits/customComponents.js";
 import { readSavedRobotDesign, snapshotNewerThanDesign } from "../src/physics/persistence.js";
+import { createWorkspaceStore } from "../src/workspaceStore.js";
 import {
+  CIRCUIT_DESIGN_STORE_NAME,
+  CURRENT_CIRCUIT_DESIGN_KEY,
+  CURRENT_CIRCUIT_LAB_PROJECT_KEY,
   CURRENT_DESIGN_KEY,
+  CURRENT_MECHATRONICS_BINDING_KEY,
   CURRENT_SNAPSHOT_KEY,
   deleteWorkspaceValue,
   DESIGN_STORE_NAME,
@@ -57,6 +63,7 @@ class FakeTransaction {
     this.error = null;
     this.listeners = new Map();
     this.completed = false;
+    this.pendingOperations = 0;
   }
 
   addEventListener(type, listener) {
@@ -71,9 +78,18 @@ class FakeTransaction {
   }
 
   complete() {
-    if (this.completed) return;
+    if (this.completed || this.pendingOperations > 0) return;
     this.completed = true;
     this.emit("complete");
+  }
+
+  beginOperation() {
+    this.pendingOperations += 1;
+  }
+
+  finishOperation() {
+    this.pendingOperations = Math.max(0, this.pendingOperations - 1);
+    this.complete();
   }
 
   objectStore(storeName) {
@@ -94,45 +110,49 @@ class FakeObjectStore {
 
   get(key) {
     const request = new FakeRequest();
+    this.transaction.beginOperation();
     queueMicrotask(() => {
       request.result = this.store.get(key);
       request.emit("success");
-      this.transaction.complete();
+      this.transaction.finishOperation();
     });
     return request;
   }
 
   put(value, key) {
     const request = new FakeRequest();
+    this.transaction.beginOperation();
     queueMicrotask(() => {
       this.store.set(key, value);
       request.result = key;
       request.emit("success");
-      this.transaction.complete();
+      this.transaction.finishOperation();
     });
     return request;
   }
 
   delete(key) {
     const request = new FakeRequest();
+    this.transaction.beginOperation();
     queueMicrotask(() => {
       this.store.delete(key);
       request.result = undefined;
       request.emit("success");
-      this.transaction.complete();
+      this.transaction.finishOperation();
     });
     return request;
   }
 
   openCursor() {
     const request = new FakeRequest();
+    this.transaction.beginOperation();
     const entries = [...this.store.entries()];
     let index = 0;
     const advance = () => {
       if (index >= entries.length) {
         request.result = null;
         request.emit("success");
-        this.transaction.complete();
+        this.transaction.finishOperation();
         return;
       }
       const [key, value] = entries[index];
@@ -235,9 +255,16 @@ test("workspace opener creates all required stores for a fresh DB", async () => 
 
   const db = await openWorkspaceDb({ indexedDb });
 
+  assert.deepEqual([...db.objectStoreNames].sort(), [
+    CIRCUIT_DESIGN_STORE_NAME,
+    DESIGN_STORE_NAME,
+    PART_LIBRARY_STORE_NAME,
+    SNAPSHOT_STORE_NAME
+  ].sort());
   assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(CIRCUIT_DESIGN_STORE_NAME), true);
   assert.equal(indexedDb.deleteCount, 0);
   db.close();
 });
@@ -254,6 +281,7 @@ test("workspace opener upgrades a version-2 DB and preserves the current snapsho
   assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(CIRCUIT_DESIGN_STORE_NAME), true);
   assert.equal(indexedDb.deleteCount, 0);
   db.close();
   assert.deepEqual(
@@ -262,7 +290,7 @@ test("workspace opener upgrades a version-2 DB and preserves the current snapsho
   );
 });
 
-test("workspace opener repairs a malformed version-3 DB and preserves readable stores", async () => {
+test("workspace opener repairs a malformed current DB and preserves readable stores", async () => {
   const indexedDb = new FakeIndexedDB();
   const snapshot = { savedAt: "2026-05-22T14:00:00.000Z", glb: "binary", parts: [{ id: "base" }] };
   const libraryItem = { version: 1, id: "saved_base", name: "Saved base" };
@@ -276,6 +304,7 @@ test("workspace opener repairs a malformed version-3 DB and preserves readable s
   assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(CIRCUIT_DESIGN_STORE_NAME), true);
   assert.equal(indexedDb.deleteCount, 1);
   db.close();
   assert.deepEqual(
@@ -285,14 +314,16 @@ test("workspace opener repairs a malformed version-3 DB and preserves readable s
   assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [libraryItem]);
 });
 
-test("workspace opener leaves a valid version-3 DB intact", async () => {
+test("workspace opener leaves a valid current DB intact", async () => {
   const indexedDb = new FakeIndexedDB();
   const design = { version: 1, name: "Saved design" };
+  const circuitDesign = { version: 1, units: "mm", name: "Saved circuit" };
   const libraryItem = { version: 1, id: "saved_base", name: "Saved base" };
   indexedDb.seed(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION, {
     [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, { savedAt: "now" }]],
     [DESIGN_STORE_NAME]: [[CURRENT_DESIGN_KEY, design]],
-    [PART_LIBRARY_STORE_NAME]: [[libraryItem.id, libraryItem]]
+    [PART_LIBRARY_STORE_NAME]: [[libraryItem.id, libraryItem]],
+    [CIRCUIT_DESIGN_STORE_NAME]: [[CURRENT_CIRCUIT_DESIGN_KEY, circuitDesign]]
   });
 
   const db = await openWorkspaceDb({ indexedDb });
@@ -300,6 +331,7 @@ test("workspace opener leaves a valid version-3 DB intact", async () => {
   assert.equal(indexedDb.deleteCount, 0);
   db.close();
   assert.deepEqual(await readSavedRobotDesign({ indexedDb }), design);
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_CIRCUIT_DESIGN_KEY, { indexedDb }), circuitDesign);
   assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [libraryItem]);
 });
 
@@ -314,6 +346,150 @@ test("workspace read-all and delete helpers manage library entries", async () =>
 
   await deleteWorkspaceValue(PART_LIBRARY_STORE_NAME, first.id, { indexedDb });
   assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [second]);
+});
+
+test("WorkspaceStore wraps current workspace and part library operations", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const store = createWorkspaceStore({ indexedDb });
+  const snapshot = { savedAt: "2026-05-30T12:00:00.000Z", parts: [{ id: "base" }] };
+  const design = { version: 1, name: "Academic design" };
+  const circuitDesign = { version: 1, units: "mm", name: "Electronics design" };
+  const circuitLabProject = { kind: "CircuitLabProject", version: 1, units: "mm", name: "Circuit Lab design" };
+  const mechatronicsBinding = { kind: "MechatronicsBinding", version: 1, units: "mm", channels: [] };
+  const libraryItem = { version: 1, id: "saved_link", name: "Saved link" };
+
+  await store.writeCurrentAssemblySnapshot(snapshot);
+  await store.writeCurrentRobotDesign(design);
+  await store.writeCurrentCircuitDesign(circuitDesign);
+  await store.writeCurrentCircuitLabProject(circuitLabProject);
+  await store.writeCurrentMechatronicsBinding(mechatronicsBinding);
+  await store.writePartLibraryItem(libraryItem);
+
+  assert.deepEqual(await store.readWorkspace(), {
+    currentAssemblySnapshot: snapshot,
+    currentRobotDesign: design,
+    currentCircuitDesign: circuitDesign,
+    currentCircuitLabProject: circuitLabProject,
+    currentMechatronicsBinding: mechatronicsBinding,
+    partLibraryItems: [libraryItem]
+  });
+
+  await store.deletePartLibraryItem(libraryItem.id);
+  assert.deepEqual(await store.listPartLibraryItems(), []);
+});
+
+test("WorkspaceStore keeps Circuit Lab custom components local-only", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const store = createWorkspaceStore({ indexedDb });
+  const customDefinition = buildFritzingCustomComponentDefinition({
+    fzpText: `
+      <module moduleId="localWidget">
+        <title>Local Widget</title>
+        <connector id="connector0" name="SIG" type="male">
+          <gender>male</gender>
+          <breadboardView><p terminalId="term0" /></breadboardView>
+        </connector>
+      </module>
+    `,
+    svgText: `<svg viewBox="0 0 10 10"><circle id="term0" cx="5" cy="5" r="1" /></svg>`,
+    physicalWidthMm: 10,
+    physicalHeightMm: 10,
+    licenseAccepted: true,
+    now: "2026-06-19T12:00:00.000Z"
+  });
+
+  await store.writeCircuitCustomComponent(customDefinition);
+
+  const customComponents = await store.listCircuitCustomComponents();
+  assert.equal(customComponents.length, 1);
+  assert.equal(customComponents[0].id, "custom:localwidget");
+  assert.equal(customComponents[0].visual.sanitizedSvg.includes("<svg"), true);
+  const workspace = await store.readWorkspace();
+  assert.equal(Object.hasOwn(workspace, "circuitCustomComponents"), false);
+
+  await store.deleteCircuitCustomComponent(customDefinition.id);
+  assert.deepEqual(await store.listCircuitCustomComponents(), []);
+});
+
+test("circuit workspace keys round trip and clear independently", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const store = createWorkspaceStore({ indexedDb });
+  const circuitDesign = { version: 1, units: "mm", name: "Electronics Studio design" };
+  const circuitLabProject = { kind: "CircuitLabProject", version: 1, units: "mm", name: "Circuit Lab project" };
+  const mechatronicsBinding = { kind: "MechatronicsBinding", version: 1, units: "mm", channels: [{ id: "servo_base" }] };
+
+  await store.writeCurrentCircuitDesign(circuitDesign);
+  await store.writeCurrentCircuitLabProject(circuitLabProject);
+  await store.writeCurrentMechatronicsBinding(mechatronicsBinding);
+
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_CIRCUIT_DESIGN_KEY, { indexedDb }), circuitDesign);
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_CIRCUIT_LAB_PROJECT_KEY, { indexedDb }), circuitLabProject);
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_MECHATRONICS_BINDING_KEY, { indexedDb }), mechatronicsBinding);
+
+  await store.deleteCurrentCircuitLabProject();
+  assert.deepEqual(await store.readCurrentCircuitDesign(), circuitDesign);
+  assert.equal(await store.readCurrentCircuitLabProject(), null);
+  assert.deepEqual(await store.readCurrentMechatronicsBinding(), mechatronicsBinding);
+
+  await store.deleteCurrentCircuitDesign();
+  assert.equal(await store.readCurrentCircuitDesign(), null);
+  assert.equal(await store.readCurrentCircuitLabProject(), null);
+  assert.deepEqual(await store.readCurrentMechatronicsBinding(), mechatronicsBinding);
+
+  await store.deleteCurrentMechatronicsBinding();
+  assert.equal(await store.readCurrentCircuitDesign(), null);
+  assert.equal(await store.readCurrentCircuitLabProject(), null);
+  assert.equal(await store.readCurrentMechatronicsBinding(), null);
+});
+
+test("WorkspaceStore restores explicit workspace fields as a validated batch", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const store = createWorkspaceStore({ indexedDb });
+  const originalCircuit = { version: 1, units: "mm", name: "Original circuit" };
+  await store.writeCurrentCircuitDesign(originalCircuit);
+
+  await assert.rejects(
+    async () => store.restoreWorkspace({
+      currentCircuitDesign: { version: 1, units: "mm", name: "Should not write" },
+      partLibraryItems: [{ name: "Missing id" }]
+    }),
+    /stable id/
+  );
+  assert.deepEqual(await store.readCurrentCircuitDesign(), originalCircuit);
+
+  const originalCircuitLab = { kind: "CircuitLabProject", version: 1, units: "mm", name: "Original lab", components: [], connections: [] };
+  await store.writeCurrentCircuitLabProject(originalCircuitLab);
+  await assert.rejects(
+    async () => store.restoreWorkspace({
+      currentCircuitDesign: { version: 1, units: "mm", name: "Should not write" },
+      currentCircuitLabProject: { kind: "CircuitLabProject", version: 2, units: "mm", name: "Bad lab" }
+    }),
+    /version 1/
+  );
+  assert.equal((await store.readCurrentCircuitDesign()).name, "Original circuit");
+  assert.equal((await store.readCurrentCircuitLabProject()).name, "Original lab");
+
+  const workspace = {
+    currentAssemblySnapshot: { savedAt: "now" },
+    currentRobotDesign: { version: 1, name: "Robot" },
+    currentCircuitDesign: { version: 1, units: "mm", name: "Electronics" },
+    currentCircuitLabProject: { kind: "CircuitLabProject", version: 1, units: "mm", name: "Circuit Lab" },
+    currentMechatronicsBinding: { kind: "MechatronicsBinding", version: 1, actuatorBindings: [] },
+    partLibraryItems: [{ id: "saved_link", name: "Saved link" }]
+  };
+  await store.restoreWorkspace(workspace);
+
+  const restored = await store.readWorkspace();
+  assert.deepEqual(restored.currentAssemblySnapshot, workspace.currentAssemblySnapshot);
+  assert.deepEqual(restored.currentRobotDesign, workspace.currentRobotDesign);
+  assert.deepEqual(restored.currentCircuitDesign, workspace.currentCircuitDesign);
+  assert.equal(restored.currentCircuitLabProject.kind, "CircuitLabProject");
+  assert.equal(restored.currentCircuitLabProject.version, 1);
+  assert.equal(restored.currentCircuitLabProject.units, "mm");
+  assert.equal(restored.currentCircuitLabProject.name, "Circuit Lab");
+  assert.equal(restored.currentMechatronicsBinding.kind, "MechatronicsBinding");
+  assert.equal(restored.currentMechatronicsBinding.version, 1);
+  assert.deepEqual(restored.partLibraryItems, [{ id: "saved_link", name: "Saved link" }]);
 });
 
 test("missing saved robot design returns null", async () => {

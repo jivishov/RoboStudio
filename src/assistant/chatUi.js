@@ -9,7 +9,7 @@ import {
 import { createPageAssistantAdapter } from "./pageAdapter.js";
 import { clampAssistantPosition, isAssistantDragBlocked } from "./drag.js";
 import { formatResponseMetrics } from "./metrics.js";
-import { addUsageTotals, runAssistantTurn, summarizeAction } from "./turnRunner.js";
+import { addUsageTotals, runAssistantTurn } from "./turnRunner.js";
 import {
   assistantConversationFileName,
   buildAssistantConversationTranscript,
@@ -85,6 +85,59 @@ function downloadTextFile(fileName, text) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+const MAX_CLIENT_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+function formatFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) return "0 KB";
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / 1024 / 1024).toFixed(size < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+async function fileToBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks = [];
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
+  }
+  return btoa(chunks.join(""));
+}
+
+async function postJson(url, payload, options = {}) {
+  const response = await fetch(url, {
+    method: options.method ?? "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const parsed = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(parsed.error ?? `Request failed with ${response.status}`);
+  return parsed;
+}
+
+async function stageAssistantAttachments(files) {
+  const selected = Array.from(files ?? []);
+  if (!selected.length) return [];
+  const tooLarge = selected.find((file) => file.size > MAX_CLIENT_ATTACHMENT_BYTES);
+  if (tooLarge) throw new Error(`${tooLarge.name} is larger than ${formatFileSize(MAX_CLIENT_ATTACHMENT_BYTES)}.`);
+  const encodedFiles = [];
+  for (const file of selected) {
+    encodedFiles.push({
+      name: file.name,
+      type: file.type,
+      dataBase64: await fileToBase64(file)
+    });
+  }
+  const response = await postJson("/api/assistant/attachments", { files: encodedFiles });
+  return Array.isArray(response.attachments) ? response.attachments : [];
+}
+
+async function cleanupAssistantAttachments(attachmentIds) {
+  const ids = [...new Set((attachmentIds ?? []).filter(Boolean))];
+  if (!ids.length) return;
+  await postJson("/api/assistant/attachments", { attachmentIds: ids }, { method: "DELETE" });
+}
+
 export function mountPageAssistant(config) {
   const adapter = createPageAssistantAdapter(config);
   const root = createElement("section", "assistant-card");
@@ -123,7 +176,14 @@ export function mountPageAssistant(config) {
       <div class="assistant-card__confirmations"></div>
       <form class="assistant-card__form">
         <textarea rows="3" placeholder="Ask the assistant to operate this page..."></textarea>
-        <button type="submit">Send</button>
+        <div class="assistant-card__form-actions">
+          <input type="file" multiple data-assistant-file-input hidden>
+          <button class="assistant-card__attach" type="button" title="Attach files" aria-label="Attach files" data-assistant-attach>
+            ${materialIcon("upload_file")}
+          </button>
+          <button type="submit">Send</button>
+        </div>
+        <div class="assistant-card__attachments" aria-live="polite"></div>
       </form>
       <p class="assistant-card__status" role="status"></p>
     </div>
@@ -139,6 +199,9 @@ export function mountPageAssistant(config) {
   const confirmationsEl = root.querySelector(".assistant-card__confirmations");
   const form = root.querySelector(".assistant-card__form");
   const input = root.querySelector("textarea");
+  const attachButton = root.querySelector("[data-assistant-attach]");
+  const fileInput = root.querySelector("[data-assistant-file-input]");
+  const attachmentsEl = root.querySelector(".assistant-card__attachments");
   const sendButton = root.querySelector("button[type='submit']");
   const statusEl = root.querySelector(".assistant-card__status");
 
@@ -154,23 +217,53 @@ export function mountPageAssistant(config) {
     lastMetrics: "",
     conversationUsage: null,
     messages: [],
-    nextMessageId: 1
+    nextMessageId: 1,
+    attachments: [],
+    uploadingAttachments: false
   };
+
+  function hasPendingConfirmation() {
+    return state.confirmations.length > 0;
+  }
+
+  function pendingConfirmationStatus() {
+    return "Confirm or cancel the pending action before sending another message.";
+  }
+
+  function idleStatusText() {
+    return hasPendingConfirmation() ? pendingConfirmationStatus() : state.lastMetrics;
+  }
+
+  function updateInteractiveState() {
+    const locked = state.busy || state.uploadingAttachments;
+    const pendingConfirmation = hasPendingConfirmation();
+    sendButton.disabled = locked || pendingConfirmation;
+    attachButton.disabled = locked || pendingConfirmation;
+    resetButton.disabled = locked;
+    modelSelect.disabled = locked || pendingConfirmation;
+    reasoningSelect.disabled = locked || pendingConfirmation;
+    for (const button of attachmentsEl.querySelectorAll("button")) button.disabled = locked || pendingConfirmation;
+    for (const button of confirmationsEl.querySelectorAll("button")) button.disabled = locked;
+  }
 
   function setBusy(busy, message = "") {
     state.busy = busy;
-    sendButton.disabled = busy;
-    resetButton.disabled = busy;
-    modelSelect.disabled = busy;
-    reasoningSelect.disabled = busy;
-    statusEl.textContent = message || (!busy ? state.lastMetrics : "");
+    updateInteractiveState();
+    statusEl.textContent = message || (!busy ? idleStatusText() : "");
     root.classList.toggle("is-busy", busy);
+  }
+
+  function setUploadingAttachments(uploading, message = "") {
+    state.uploadingAttachments = uploading;
+    updateInteractiveState();
+    statusEl.textContent = message || (!uploading ? idleStatusText() : "");
+    root.classList.toggle("is-uploading-attachments", uploading);
   }
 
   function setLastMetrics(response) {
     state.conversationUsage = addUsageTotals(state.conversationUsage, response?.usage);
     state.lastMetrics = formatResponseMetrics(response, state.conversationUsage);
-    if (!state.busy && state.lastMetrics) statusEl.textContent = state.lastMetrics;
+    if (!state.busy && !hasPendingConfirmation() && state.lastMetrics) statusEl.textContent = state.lastMetrics;
   }
 
   function appendMessage(role, text) {
@@ -217,6 +310,51 @@ export function mountPageAssistant(config) {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function attachmentIds() {
+    return state.attachments.map((attachment) => attachment.id).filter(Boolean);
+  }
+
+  function userMessageText(message, attachments = []) {
+    if (!attachments.length) return message;
+    const names = attachments.map((attachment) => `${attachment.name} (${formatFileSize(attachment.size)})`).join(", ");
+    return `${message}\n\nAttached: ${names}`;
+  }
+
+  function renderAttachments() {
+    attachmentsEl.replaceChildren();
+    attachmentsEl.hidden = !state.attachments.length;
+    if (!state.attachments.length) {
+      updateInteractiveState();
+      return;
+    }
+    for (const attachment of state.attachments) {
+      const chip = createElement("span", "assistant-attachment");
+      const label = createElement(
+        "span",
+        "assistant-attachment__label",
+        `${attachment.name} (${formatFileSize(attachment.size)})`
+      );
+      const remove = createIconButton("assistant-attachment__remove", `Remove ${attachment.name}`, "delete");
+      remove.addEventListener("click", async () => {
+        if (state.busy || state.uploadingAttachments || hasPendingConfirmation()) return;
+        const previous = state.attachments;
+        state.attachments = state.attachments.filter((item) => item.id !== attachment.id);
+        renderAttachments();
+        try {
+          await cleanupAssistantAttachments([attachment.id]);
+          statusEl.textContent = `Removed ${attachment.name}.`;
+        } catch (error) {
+          state.attachments = previous;
+          renderAttachments();
+          statusEl.textContent = error.message ?? `Could not remove ${attachment.name}.`;
+        }
+      });
+      chip.append(label, remove);
+      attachmentsEl.append(chip);
+    }
+    updateInteractiveState();
+  }
+
   function saveConversation() {
     const savedAt = new Date();
     const title = `${adapter.title ?? "Page"} assistant conversation`;
@@ -230,8 +368,10 @@ export function mountPageAssistant(config) {
     statusEl.textContent = `Saved ${fileName}.`;
   }
 
-  function resetConversation() {
-    if (state.busy) return;
+  async function resetConversation() {
+    if (state.busy || state.uploadingAttachments) return;
+    const cleanupIds = attachmentIds();
+    state.attachments = [];
     state.previousResponseId = null;
     state.confirmations = [];
     state.lastMetrics = "";
@@ -241,7 +381,13 @@ export function mountPageAssistant(config) {
     input.value = "";
     messagesEl.replaceChildren();
     renderConfirmations();
-    statusEl.textContent = "Conversation reset. Start a new request when ready.";
+    renderAttachments();
+    try {
+      await cleanupAssistantAttachments(cleanupIds);
+      statusEl.textContent = "Conversation reset. Start a new request when ready.";
+    } catch (error) {
+      statusEl.textContent = error.message ?? "Conversation reset, but attachment cleanup failed.";
+    }
   }
 
   function assistantStopMessage(result) {
@@ -257,6 +403,103 @@ export function mountPageAssistant(config) {
     return "";
   }
 
+  function addPendingGuardedCall(pendingGuardedCall) {
+    if (!pendingGuardedCall?.responseId || !pendingGuardedCall?.callId || !pendingGuardedCall?.name) return;
+    const confirmation = {
+      id: `${pendingGuardedCall.callId}-${Date.now()}`,
+      responseId: pendingGuardedCall.responseId,
+      callId: pendingGuardedCall.callId,
+      name: pendingGuardedCall.name,
+      args: pendingGuardedCall.args ?? {},
+      label: pendingGuardedCall.label ?? pendingGuardedCall.name
+    };
+    state.confirmations = state.confirmations.filter((item) => item.callId !== confirmation.callId);
+    state.confirmations.push(confirmation);
+    renderConfirmations();
+    appendMessage("action", `Confirmation required: ${confirmation.label}`);
+  }
+
+  function turnCallbacks() {
+    return {
+      onResponse: (response) => setLastMetrics(response),
+      onAssistantText: (text) => appendMessage("assistant", text),
+      onGuardedToolCall: () => ({ defer: true }),
+      onToolResult: (resolved, toolCall) => {
+        if (resolved.guarded) return;
+        const output = resolved.output ?? {};
+        appendMessage("action", output.message ?? output.error ?? `${toolCall.name} completed.`);
+      }
+    };
+  }
+
+  function handleTurnResult(result) {
+    state.previousResponseId = result.previousResponseId;
+    if (result.pendingGuardedCall) addPendingGuardedCall(result.pendingGuardedCall);
+    const stopMessage = assistantStopMessage(result);
+    if (stopMessage) appendMessage("assistant", stopMessage);
+    updateInteractiveState();
+    if (!state.busy) statusEl.textContent = idleStatusText();
+  }
+
+  function removeConfirmation(confirmationId) {
+    state.confirmations = state.confirmations.filter((item) => item.id !== confirmationId);
+    renderConfirmations();
+  }
+
+  async function continueAssistantWithGuardedOutput(confirmation, output) {
+    setBusy(true, "Continuing assistant...");
+    const result = await runAssistantTurn({
+      adapter,
+      model: modelSelect.value,
+      reasoningEffort: reasoningSelect.value,
+      previousResponseId: confirmation.responseId,
+      toolOutputs: [{ callId: confirmation.callId, output }],
+      ...turnCallbacks()
+    });
+    handleTurnResult(result);
+  }
+
+  async function confirmGuardedAction(confirmation) {
+    removeConfirmation(confirmation.id);
+    let output;
+    try {
+      setBusy(true, "Running confirmed action...");
+      output = await adapter.executeAction(confirmation.name, confirmation.args);
+      appendMessage("action", output.message ?? "Confirmed action completed.");
+    } catch (error) {
+      const message = error.message ?? "Confirmed action failed.";
+      output = { ok: false, action: confirmation.name, error: message };
+      appendMessage("action", message);
+    }
+
+    try {
+      await continueAssistantWithGuardedOutput(confirmation, output);
+    } catch (error) {
+      appendMessage("assistant", error.message ?? "Assistant continuation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelGuardedAction(confirmation) {
+    removeConfirmation(confirmation.id);
+    const output = {
+      ok: false,
+      action: confirmation.name,
+      status: "canceled",
+      message: `Canceled: ${confirmation.label}`
+    };
+    appendMessage("action", output.message);
+
+    try {
+      await continueAssistantWithGuardedOutput(confirmation, output);
+    } catch (error) {
+      appendMessage("assistant", error.message ?? "Assistant continuation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function renderConfirmations() {
     confirmationsEl.replaceChildren();
     for (const confirmation of state.confirmations) {
@@ -267,28 +510,15 @@ export function mountPageAssistant(config) {
       const cancel = createElement("button", "", "Cancel");
       confirm.type = "button";
       cancel.type = "button";
-      confirm.addEventListener("click", async () => {
-        state.confirmations = state.confirmations.filter((item) => item.id !== confirmation.id);
-        renderConfirmations();
-        try {
-          setBusy(true, "Running confirmed action...");
-          const result = await adapter.executeAction(confirmation.name, confirmation.args);
-          appendMessage("action", result.message ?? "Confirmed action completed.");
-        } catch (error) {
-          appendMessage("action", error.message ?? "Confirmed action failed.");
-        } finally {
-          setBusy(false);
-        }
-      });
-      cancel.addEventListener("click", () => {
-        state.confirmations = state.confirmations.filter((item) => item.id !== confirmation.id);
-        renderConfirmations();
-        appendMessage("action", `Canceled: ${confirmation.label}`);
-      });
+      confirm.disabled = state.busy || state.uploadingAttachments;
+      cancel.disabled = state.busy || state.uploadingAttachments;
+      confirm.addEventListener("click", () => confirmGuardedAction(confirmation));
+      cancel.addEventListener("click", () => cancelGuardedAction(confirmation));
       actions.append(confirm, cancel);
       card.append(body, actions);
       confirmationsEl.append(card);
     }
+    updateInteractiveState();
   }
 
   collapseButton.addEventListener("click", () => {
@@ -308,13 +538,47 @@ export function mountPageAssistant(config) {
 
   resetButton.addEventListener("click", resetConversation);
   saveButton.addEventListener("click", saveConversation);
+  attachButton.addEventListener("click", () => {
+    if (state.busy || state.uploadingAttachments) return;
+    if (hasPendingConfirmation()) {
+      statusEl.textContent = pendingConfirmationStatus();
+      return;
+    }
+    fileInput.click();
+  });
+  fileInput.addEventListener("change", async () => {
+    const files = Array.from(fileInput.files ?? []);
+    fileInput.value = "";
+    if (!files.length) return;
+    if (hasPendingConfirmation()) {
+      statusEl.textContent = pendingConfirmationStatus();
+      return;
+    }
+    try {
+      setUploadingAttachments(true, "Uploading attachments...");
+      const attachments = await stageAssistantAttachments(files);
+      state.attachments.push(...attachments);
+      renderAttachments();
+      statusEl.textContent =
+        attachments.length === 1 ? `Attached ${attachments[0].name}.` : `Attached ${attachments.length} files.`;
+    } catch (error) {
+      statusEl.textContent = error.message ?? "Attachment upload failed.";
+    } finally {
+      setUploadingAttachments(false, statusEl.textContent);
+    }
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = input.value.trim();
-    if (!message || state.busy) return;
+    if (!message || state.busy || state.uploadingAttachments) return;
+    if (hasPendingConfirmation()) {
+      statusEl.textContent = pendingConfirmationStatus();
+      return;
+    }
+    const attachmentsForTurn = [...state.attachments];
     input.value = "";
-    appendMessage("user", message);
+    appendMessage("user", userMessageText(message, attachmentsForTurn));
     setBusy(true, "Contacting assistant...");
     try {
       const result = await runAssistantTurn({
@@ -323,32 +587,10 @@ export function mountPageAssistant(config) {
         reasoningEffort: reasoningSelect.value,
         previousResponseId: state.previousResponseId,
         message,
-        onResponse: (response) => setLastMetrics(response),
-        onAssistantText: (text) => appendMessage("assistant", text),
-        onGuardedToolCall: ({ toolCall, definition, args }) => {
-          const id = `${toolCall.callId}-${Date.now()}`;
-          const label = definition.confirmation ?? summarizeAction(definition, args);
-          state.confirmations.push({ id, name: toolCall.name, args, label });
-          renderConfirmations();
-          appendMessage("action", `Confirmation required: ${label}`);
-          return {
-            output: {
-              ok: false,
-              action: toolCall.name,
-              status: "pending_confirmation",
-              message: label
-            }
-          };
-        },
-        onToolResult: (resolved, toolCall) => {
-          if (resolved.guarded) return;
-          const output = resolved.output ?? {};
-          appendMessage("action", output.message ?? output.error ?? `${toolCall.name} completed.`);
-        }
+        attachmentIds: attachmentsForTurn.map((attachment) => attachment.id),
+        ...turnCallbacks()
       });
-      state.previousResponseId = result.previousResponseId;
-      const stopMessage = assistantStopMessage(result);
-      if (stopMessage) appendMessage("assistant", stopMessage);
+      handleTurnResult(result);
       setBusy(false);
     } catch (error) {
       appendMessage("assistant", error.message ?? "Assistant request failed.");

@@ -1,0 +1,372 @@
+{
+  "version": 1,
+  "assetKind": "photorealistic-svg-wrapper",
+  "provenanceId": "robostudio-photorealistic-component-wrappers",
+  "components": [
+    {
+      "id": "controller-arduino-uno-r3",
+      "label": "UNO R3",
+      "style": "controller",
+      "color": "#1f8a83",
+      "widthMm": 72.58,
+      "heightMm": 53.34,
+      "rasterSource": "src/circuits/assets/photoreal/raster/controller-arduino-uno-r3.png",
+      "svgWrapper": "src/circuits/assets/photoreal/controller-arduino-uno-r3.svg"
+    },
+    {
+      "id": "controller-esp32-devkit",
+      "label": "ESP32",
+      "style": "controller",
+      "color": "#0f766e",
+      "widthMm": 30,
+      "heightMm": 55,
+      "rasterSource": "src/circuits/assets/photoreal/raster/controller-esp32-devkit.png",
+      "svgWrapper": "src/circuits/assets/photoreal/controller-esp32-devkit.svg"
+    },
+    {
+      "id": "breadboard-bb400-400",
+      "label": "400 POINT",
+      "style": "breadboard",
+      "color": "#f7f4e8",
+      "widthMm": 84,
+      "heightMm": 54.3,
+      "rasterSource": "src/circuits/assets/photoreal/raster/breadboard-bb400-400.png",
+      "svgWrapper": "src/circuits/assets/photoreal/breadboard-bb400-400.svg"
+    },
+    {
+      "id": "supply-servo-6v",
+      "label": "6V SUPPLY",
+      "style": "power",
+      "color": "#313946",
+      "widthMm": 62,
+      "heightMm": 34,
+      "rasterSource": "src/circuits/assets/photoreal/raster/supply-servo-6v.png",
+      "svgWrapper": "src/circuits/assets/photoreal/supply-servo-6v.svg"
+    },
+    {
+      "id": "servo-standard",
+      "label": "SERVO",
+      "style": "servo",
+      "color": "#24446f",
+      "widthMm": 52,
+      "heightMm": 28,
+      "rasterSource": "src/circuits/assets/photoreal/raster/servo-standard.png",
+      "svgWrapper": "src/circuits/assets/photoreal/servo-standard.svg"
+    },
+    {
+      "id": "led-red",
+      "label": "LED",
+      "style": "led",
+      "color": "#d63a3a",
+      "widthMm": 18,
+      "heightMm": 18,
+      "rasterSource": "src/circuits/assets/photoreal/raster/led-red.png",
+      "svgWrapper": "src/circuits/assets/photoreal/led-red.svg"
+    },
+    {
+      "id": "resistor-220",
+      "label": "220R",
+      "style": "resistor",
+      "color": "#c49a55",
+      "widthMm": 30,
+      "heightMm": 10,
+      "rasterSource": "src/circuits/assets/photoreal/raster/resistor-220.png",
+      "svgWrapper": "src/circuits/assets/photoreal/resistor-220.svg"
+    },
+    {
+      "id": "capacitor-electrolytic-470uf",
+      "label": "470uF",
+      "style": "capacitor",
+      "color": "#334155",
+      "widthMm": 24,
+      "heightMm": 22,
+      "rasterSource": "src/circuits/assets/photoreal/raster/capacitor-electrolytic-470uf.png",
+      "svgWrapper": "src/circuits/assets/photoreal/capacitor-electrolytic-470uf.svg"
+    },
+    {
+      "id": "button-tactile",
+      "label": "BTN",
+      "style": "button",
+      "color": "#38bdf8",
+      "widthMm": 12,
+      "heightMm": 12,
+      "rasterSource": "src/circuits/assets/photoreal/raster/button-tactile.png",
+      "svgWrapper": "src/circuits/assets/photoreal/button-tactile.svg"
+    },
+    {
+      "id": "ultrasonic-hcsr04",
+      "label": "HC-SR04",
+      "style": "sensor",
+      "color": "#2f9e44",
+      "widthMm": 45,
+      "heightMm": 24,
+      "rasterSource": "src/circuits/assets/photoreal/raster/ultrasonic-hcsr04.png",
+      "svgWrapper": "src/circuits/assets/photoreal/ultrasonic-hcsr04.svg"
+    },
+    {
+      "id": "driver-l298n",
+      "label": "L298N",
+      "style": "driver",
+      "color": "#8c2f39",
+      "widthMm": 58,
+      "heightMm": 42,
+      "rasterSource": "src/circuits/assets/photoreal/raster/driver-l298n.png",
+      "svgWrapper": "src/circuits/assets/photoreal/driver-l298n.svg"
+    },
+    {
+      "id": "motor-dc",
+      "label": "DC MOTOR",
+      "style": "motor",
+      "color": "#64748b",
+      "widthMm": 42,
+      "heightMm": 28,
+      "rasterSource": "src/circuits/assets/photoreal/raster/motor-dc.png",
+      "svgWrapper": "src/circuits/assets/photoreal/motor-dc.svg"
+    },
+    {
+      "id": "potentiometer-10k",
+      "label": "10K",
+      "style": "potentiometer",
+      "color": "#7c6a52",
+      "widthMm": 26,
+      "heightMm": 30,
+      "rasterSource": "src/circuits/assets/photoreal/raster/potentiometer-10k.png",
+      "svgWrapper": "src/circuits/assets/photoreal/potentiometer-10k.svg"
+    },
+    {
+      "id": "switch-spdt-slide",
+      "label": "SPDT",
+      "style": "switch",
+      "color": "#475569",
+      "widthMm": 18,
+      "heightMm": 10,
+      "rasterSource": "src/circuits/assets/photoreal/raster/switch-spdt-slide.png",
+      "svgWrapper": "src/circuits/assets/photoreal/switch-spdt-slide.svg"
+    },
+    {
+      "id": "controller-arduino-nano",
+      "label": "NANO",
+      "style": "controller",
+      "color": "#1f8a83",
+      "widthMm": 18,
+      "heightMm": 45,
+      "rasterSource": "src/circuits/assets/photoreal/raster/controller-arduino-nano.png",
+      "svgWrapper": "src/circuits/assets/photoreal/controller-arduino-nano.svg"
+    },
+    {
+      "id": "controller-raspberry-pi-pico",
+      "label": "PICO",
+      "style": "controller",
+      "color": "#0f6b7a",
+      "widthMm": 21,
+      "heightMm": 51,
+      "rasterSource": "src/circuits/assets/photoreal/raster/controller-raspberry-pi-pico.png",
+      "svgWrapper": "src/circuits/assets/photoreal/controller-raspberry-pi-pico.svg"
+    },
+    {
+      "id": "driver-pca9685-servo",
+      "label": "PCA9685",
+      "style": "driver",
+      "color": "#1d4ed8",
+      "widthMm": 63,
+      "heightMm": 25,
+      "rasterSource": "src/circuits/assets/photoreal/raster/driver-pca9685-servo.png",
+      "svgWrapper": "src/circuits/assets/photoreal/driver-pca9685-servo.svg"
+    },
+    {
+      "id": "regulator-lm2596-buck",
+      "label": "LM2596",
+      "style": "power",
+      "color": "#2563eb",
+      "widthMm": 48,
+      "heightMm": 26,
+      "rasterSource": "src/circuits/assets/photoreal/raster/regulator-lm2596-buck.png",
+      "svgWrapper": "src/circuits/assets/photoreal/regulator-lm2596-buck.svg"
+    },
+    {
+      "id": "battery-lipo-2s-jst",
+      "label": "2S LiPo",
+      "style": "battery",
+      "color": "#334155",
+      "widthMm": 55,
+      "heightMm": 34,
+      "rasterSource": "src/circuits/assets/photoreal/raster/battery-lipo-2s-jst.png",
+      "svgWrapper": "src/circuits/assets/photoreal/battery-lipo-2s-jst.svg"
+    },
+    {
+      "id": "distribution-servo-power",
+      "label": "SERVO PWR",
+      "style": "power",
+      "color": "#475569",
+      "widthMm": 60,
+      "heightMm": 35,
+      "rasterSource": "src/circuits/assets/photoreal/raster/distribution-servo-power.png",
+      "svgWrapper": "src/circuits/assets/photoreal/distribution-servo-power.svg"
+    },
+    {
+      "id": "level-shifter-4ch",
+      "label": "LEVEL",
+      "style": "module",
+      "color": "#7c3aed",
+      "widthMm": 28,
+      "heightMm": 24,
+      "rasterSource": "src/circuits/assets/photoreal/raster/level-shifter-4ch.png",
+      "svgWrapper": "src/circuits/assets/photoreal/level-shifter-4ch.svg"
+    },
+    {
+      "id": "driver-tb6612fng",
+      "label": "TB6612",
+      "style": "driver",
+      "color": "#b91c1c",
+      "widthMm": 36,
+      "heightMm": 28,
+      "rasterSource": "src/circuits/assets/photoreal/raster/driver-tb6612fng.png",
+      "svgWrapper": "src/circuits/assets/photoreal/driver-tb6612fng.svg"
+    },
+    {
+      "id": "driver-a4988-stepper",
+      "label": "A4988",
+      "style": "driver",
+      "color": "#991b1b",
+      "widthMm": 20,
+      "heightMm": 28,
+      "rasterSource": "src/circuits/assets/photoreal/raster/driver-a4988-stepper.png",
+      "svgWrapper": "src/circuits/assets/photoreal/driver-a4988-stepper.svg"
+    },
+    {
+      "id": "driver-mosfet-low-side",
+      "label": "MOSFET",
+      "style": "driver",
+      "color": "#0f172a",
+      "widthMm": 26,
+      "heightMm": 22,
+      "rasterSource": "src/circuits/assets/photoreal/raster/driver-mosfet-low-side.png",
+      "svgWrapper": "src/circuits/assets/photoreal/driver-mosfet-low-side.svg"
+    },
+    {
+      "id": "servo-micro-9g",
+      "label": "MICRO",
+      "style": "servo",
+      "color": "#2563eb",
+      "widthMm": 34,
+      "heightMm": 16,
+      "rasterSource": "src/circuits/assets/photoreal/raster/servo-micro-9g.png",
+      "svgWrapper": "src/circuits/assets/photoreal/servo-micro-9g.svg"
+    },
+    {
+      "id": "motor-tt-gearmotor",
+      "label": "TT MOTOR",
+      "style": "motor",
+      "color": "#f59e0b",
+      "widthMm": 50,
+      "heightMm": 24,
+      "rasterSource": "src/circuits/assets/photoreal/raster/motor-tt-gearmotor.png",
+      "svgWrapper": "src/circuits/assets/photoreal/motor-tt-gearmotor.svg"
+    },
+    {
+      "id": "stepper-nema17",
+      "label": "NEMA17",
+      "style": "motor",
+      "color": "#475569",
+      "widthMm": 42,
+      "heightMm": 42,
+      "rasterSource": "src/circuits/assets/photoreal/raster/stepper-nema17.png",
+      "svgWrapper": "src/circuits/assets/photoreal/stepper-nema17.svg"
+    },
+    {
+      "id": "actuator-solenoid-6v",
+      "label": "SOLENOID",
+      "style": "motor",
+      "color": "#64748b",
+      "widthMm": 48,
+      "heightMm": 20,
+      "rasterSource": "src/circuits/assets/photoreal/raster/actuator-solenoid-6v.png",
+      "svgWrapper": "src/circuits/assets/photoreal/actuator-solenoid-6v.svg"
+    },
+    {
+      "id": "sensor-line-tcrt5000",
+      "label": "TCRT5000",
+      "style": "sensor",
+      "color": "#111827",
+      "widthMm": 32,
+      "heightMm": 14,
+      "rasterSource": "src/circuits/assets/photoreal/raster/sensor-line-tcrt5000.png",
+      "svgWrapper": "src/circuits/assets/photoreal/sensor-line-tcrt5000.svg"
+    },
+    {
+      "id": "sensor-vl53l0x-tof",
+      "label": "VL53L0X",
+      "style": "sensor",
+      "color": "#2563eb",
+      "widthMm": 22,
+      "heightMm": 16,
+      "rasterSource": "src/circuits/assets/photoreal/raster/sensor-vl53l0x-tof.png",
+      "svgWrapper": "src/circuits/assets/photoreal/sensor-vl53l0x-tof.svg"
+    },
+    {
+      "id": "sensor-mpu6050-imu",
+      "label": "MPU6050",
+      "style": "sensor",
+      "color": "#0f766e",
+      "widthMm": 22,
+      "heightMm": 16,
+      "rasterSource": "src/circuits/assets/photoreal/raster/sensor-mpu6050-imu.png",
+      "svgWrapper": "src/circuits/assets/photoreal/sensor-mpu6050-imu.svg"
+    },
+    {
+      "id": "sensor-wheel-encoder",
+      "label": "ENCODER",
+      "style": "sensor",
+      "color": "#1f2937",
+      "widthMm": 28,
+      "heightMm": 18,
+      "rasterSource": "src/circuits/assets/photoreal/raster/sensor-wheel-encoder.png",
+      "svgWrapper": "src/circuits/assets/photoreal/sensor-wheel-encoder.svg"
+    },
+    {
+      "id": "switch-limit-micro",
+      "label": "LIMIT",
+      "style": "switch",
+      "color": "#374151",
+      "widthMm": 20,
+      "heightMm": 10,
+      "rasterSource": "src/circuits/assets/photoreal/raster/switch-limit-micro.png",
+      "svgWrapper": "src/circuits/assets/photoreal/switch-limit-micro.svg"
+    },
+    {
+      "id": "input-joystick-module",
+      "label": "JOYSTICK",
+      "style": "potentiometer",
+      "color": "#2563eb",
+      "widthMm": 36,
+      "heightMm": 28,
+      "rasterSource": "src/circuits/assets/photoreal/raster/input-joystick-module.png",
+      "svgWrapper": "src/circuits/assets/photoreal/input-joystick-module.svg"
+    },
+    {
+      "id": "sensor-ina219-current",
+      "label": "INA219",
+      "style": "sensor",
+      "color": "#0e7490",
+      "widthMm": 24,
+      "heightMm": 18,
+      "rasterSource": "src/circuits/assets/photoreal/raster/sensor-ina219-current.png",
+      "svgWrapper": "src/circuits/assets/photoreal/sensor-ina219-current.svg"
+    },
+    {
+      "id": "neopixel-strip-8",
+      "label": "8 PIXEL",
+      "style": "led",
+      "color": "#111827",
+      "widthMm": 68,
+      "heightMm": 10,
+      "rasterSource": "src/circuits/assets/photoreal/raster/neopixel-strip-8.png",
+      "svgWrapper": "src/circuits/assets/photoreal/neopixel-strip-8.svg"
+    }
+  ],
+  "sourceSheet": "src/circuits/assets/photoreal/source/robostudio-photoreal-sheet.png",
+  "grid": {
+    "columns": 6,
+    "rows": 6
+  }
+}

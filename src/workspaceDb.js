@@ -1,12 +1,21 @@
 export const WORKSPACE_DB_NAME = "stl-assembly-studio";
-export const WORKSPACE_DB_VERSION = 3;
+export const WORKSPACE_DB_VERSION = 4;
 export const SNAPSHOT_STORE_NAME = "snapshots";
 export const DESIGN_STORE_NAME = "robot-designs";
 export const PART_LIBRARY_STORE_NAME = "part-library";
+export const CIRCUIT_DESIGN_STORE_NAME = "circuit-designs";
 export const CURRENT_SNAPSHOT_KEY = "current-assembly";
 export const CURRENT_DESIGN_KEY = "current-robot-design";
+export const CURRENT_CIRCUIT_DESIGN_KEY = "current-circuit-design";
+export const CURRENT_CIRCUIT_LAB_PROJECT_KEY = "current-circuit-lab-project";
+export const CURRENT_MECHATRONICS_BINDING_KEY = "current-mechatronics-binding";
 
-const REQUIRED_STORE_NAMES = Object.freeze([SNAPSHOT_STORE_NAME, DESIGN_STORE_NAME, PART_LIBRARY_STORE_NAME]);
+const REQUIRED_STORE_NAMES = Object.freeze([
+  SNAPSHOT_STORE_NAME,
+  DESIGN_STORE_NAME,
+  PART_LIBRARY_STORE_NAME,
+  CIRCUIT_DESIGN_STORE_NAME
+]);
 
 export class WorkspaceDbRepairBlockedError extends Error {
   constructor() {
@@ -112,6 +121,21 @@ function deleteStoreValueFromOpenDb(db, storeName, key) {
   });
 }
 
+function writeWorkspaceEntriesToOpenDb(db, entries) {
+  return new Promise((resolve, reject) => {
+    const storeNames = [...new Set(entries.map((entry) => entry.storeName))];
+    const transaction = db.transaction(storeNames, "readwrite");
+    for (const entry of entries) {
+      const store = transaction.objectStore(entry.storeName);
+      if (entry.delete === true) store.delete(entry.key);
+      else store.put(entry.value, entry.key);
+    }
+    transaction.addEventListener("complete", () => resolve());
+    transaction.addEventListener("error", () => reject(transaction.error));
+    transaction.addEventListener("abort", () => reject(transaction.error));
+  });
+}
+
 async function preserveReadableStoreEntries(db) {
   const preserved = new Map();
   for (const storeName of REQUIRED_STORE_NAMES) {
@@ -184,6 +208,27 @@ export async function deleteWorkspaceValue(storeName, key, options = {}) {
   const db = await openWorkspaceDb(options);
   try {
     await deleteStoreValueFromOpenDb(db, storeName, key);
+  } finally {
+    db.close();
+  }
+}
+
+export async function writeWorkspaceBatch(entries, options = {}) {
+  if (!Array.isArray(entries)) throw new Error("Workspace batch entries must be an array.");
+  const normalizedEntries = entries.map((entry) => {
+    if (!REQUIRED_STORE_NAMES.includes(entry?.storeName)) throw new Error(`Unknown workspace store: ${entry?.storeName}`);
+    if (entry.key == null || String(entry.key) === "") throw new Error("Workspace batch entries need stable keys.");
+    return {
+      storeName: entry.storeName,
+      key: String(entry.key),
+      value: entry.value,
+      delete: entry.delete === true
+    };
+  });
+  if (!normalizedEntries.length) return;
+  const db = await openWorkspaceDb(options);
+  try {
+    await writeWorkspaceEntriesToOpenDb(db, normalizedEntries);
   } finally {
     db.close();
   }

@@ -5,6 +5,27 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { collectAssemblyParts, createRoboticArmAssembly } from "./createAssembly.js";
+import { createAssetManifest, manifestSummary } from "./academic/assetManifest.js";
+import {
+  createExperimentRun,
+  createFabricationReadiness,
+  sampleWorkspace,
+  serializeExperimentRunsCsv,
+  simulatePidResponse
+} from "./academic/experiments.js";
+import {
+  createDefaultLabSpec,
+  createLabReportHtml,
+  createLabReportJson,
+  evaluateLabSpec,
+  labProgress
+} from "./academic/labs.js";
+import {
+  createRoboStudioProject,
+  createRoboStudioProjectZip,
+  projectBundlePreflight,
+  serializeRoboStudioProject
+} from "./academic/projectPackage.js";
 import { deleteActuator, evaluateActuators, upsertActuator } from "./physics/actuators.js";
 import { CATEGORY_ORDER, runDesignAudit } from "./physics/audit.js";
 import { checkCollisionProxies, collisionPairKey } from "./physics/collision.js";
@@ -30,11 +51,15 @@ import {
   sanitizeId
 } from "./physics/model.js";
 import { WorkbenchOverlays } from "./physics/overlays.js";
-import { readCurrentSnapshot, readSavedRobotDesign, saveRobotDesign, snapshotNewerThanDesign } from "./physics/persistence.js";
+import { saveRobotDesign, snapshotNewerThanDesign } from "./physics/persistence.js";
 import { mountShellCardToggles } from "./shellCards.js";
+import { commitHistory, createHistory, historyStatus, redoHistory, resetHistory, undoHistory } from "./history.js";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 import { isAssistantEvalEnabled } from "./assistant/evalScenarios.js";
+import { evaluateMechatronicsReadiness } from "./mechatronics/readiness.js";
+import { resolveFirmwareChannelCommand } from "./mechatronics/runtimeBridge.js";
+import { createWorkspaceStore } from "./workspaceStore.js";
 
 const viewport = document.querySelector("#physics-viewport");
 const physicsStage = document.querySelector(".physics-stage");
@@ -47,6 +72,8 @@ const loadDesignButton = document.querySelector("#load-design");
 const exportDesignButton = document.querySelector("#export-design");
 const exportUrdfButton = document.querySelector("#export-urdf");
 const designFileInput = document.querySelector("#design-file-input");
+const undoDesignButton = document.querySelector("#undo-design");
+const redoDesignButton = document.querySelector("#redo-design");
 const modeButtons = document.querySelectorAll("[data-mode]");
 const modeControls = document.querySelector("#mode-controls");
 const robotTree = document.querySelector("#robot-tree");
@@ -130,12 +157,19 @@ const COLLAPSIBLE_CARD_DEFAULTS = Object.freeze({
   "analyze-ik-target": true,
   "analyze-topology": false,
   "analyze-joint-pose": true,
+  "lab-brief": true,
+  "lab-checkpoints": true,
+  "lab-experiments": true,
+  "lab-controls": false,
+  "lab-package": false,
   "actuators-assignment": true,
   "actuators-margins": true,
   "actuators-library": false,
   "actuators-editor": false,
   "simulate-runner": true,
   "audit-readiness": true,
+  "audit-mechatronics": true,
+  "audit-semantic-channel": true,
   "analysis-mass": false,
   "analysis-collisions": false,
   "analysis-loads": false
@@ -146,9 +180,24 @@ const FLOATING_PANEL_DEFAULTS = Object.freeze({
   readout: { collapsed: false, x: null, y: null }
 });
 
+const WORKBENCH_HISTORY_LIMIT = 60;
+const WORKBENCH_HISTORY_COMMIT_DELAY_MS = 250;
+const designHistory = createHistory(null, {
+  limit: WORKBENCH_HISTORY_LIMIT,
+  clone: cloneWorkbenchHistorySnapshot,
+  equals: (left, right) => (left?.signature ?? null) === (right?.signature ?? null)
+});
+let designHistoryCommitTimer = null;
+
 const state = {
   mode: "model",
   assemblyRoot: null,
+  currentSnapshot: null,
+  currentCircuitDesign: null,
+  currentCircuitLabProject: null,
+  currentMechatronicsBinding: null,
+  mechatronicsReadiness: null,
+  partLibraryItems: [],
   partRecords: [],
   design: null,
   transforms: new Map(),
@@ -160,7 +209,17 @@ const state = {
   selectedDensityId: "pla",
   ikTarget: [120, 250, 0],
   ikResult: null,
+  labSpec: createDefaultLabSpec(),
+  labCheckpointResults: [],
+  experimentRuns: [],
+  pidResponse: null,
   analysis: null,
+  semanticCommand: {
+    channelId: "",
+    value: 0,
+    status: "idle",
+    message: "No semantic channel command has been applied."
+  },
   collapsibleCards: { ...COLLAPSIBLE_CARD_DEFAULTS },
   floatingPanels: {
     snapshot: { ...FLOATING_PANEL_DEFAULTS.snapshot },
@@ -250,6 +309,118 @@ function downloadText(content, fileName, type) {
 
 function showStatus(message) {
   snapshotStatus.textContent = message;
+}
+
+function cloneJsonValue(value) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function cloneWorkbenchHistorySnapshot(snapshot) {
+  if (!snapshot) return null;
+  return {
+    ...snapshot,
+    design: cloneJsonValue(snapshot.design),
+    ikTarget: [...(snapshot.ikTarget ?? [])],
+    ikResult: cloneJsonValue(snapshot.ikResult),
+    labCheckpointResults: cloneJsonValue(snapshot.labCheckpointResults),
+    experimentRuns: cloneJsonValue(snapshot.experimentRuns),
+    pidResponse: cloneJsonValue(snapshot.pidResponse)
+  };
+}
+
+function captureWorkbenchHistorySnapshot() {
+  if (!state.design) return null;
+  const snapshot = {
+    design: cloneJsonValue(state.design),
+    selectedLinkId: state.selectedLinkId,
+    selectedJointId: state.selectedJointId,
+    selectedProxyId: state.selectedProxyId,
+    selectedEffectorId: state.selectedEffectorId,
+    selectedActuatorId: state.selectedActuatorId,
+    selectedDensityId: state.selectedDensityId,
+    ikTarget: [...state.ikTarget],
+    ikResult: cloneJsonValue(state.ikResult),
+    labCheckpointResults: cloneJsonValue(state.labCheckpointResults),
+    experimentRuns: cloneJsonValue(state.experimentRuns),
+    pidResponse: cloneJsonValue(state.pidResponse)
+  };
+  snapshot.signature = JSON.stringify(snapshot);
+  return snapshot;
+}
+
+function clearPendingDesignHistoryCommit() {
+  if (!designHistoryCommitTimer) return false;
+  window.clearTimeout(designHistoryCommitTimer);
+  designHistoryCommitTimer = null;
+  return true;
+}
+
+function updateDesignHistoryControls() {
+  const status = historyStatus(designHistory);
+  if (undoDesignButton) undoDesignButton.disabled = !status.canUndo && !designHistoryCommitTimer;
+  if (redoDesignButton) redoDesignButton.disabled = !status.canRedo;
+}
+
+function commitDesignHistoryNow() {
+  const snapshot = captureWorkbenchHistorySnapshot();
+  if (!snapshot) return;
+  commitHistory(designHistory, snapshot);
+  updateDesignHistoryControls();
+}
+
+function scheduleDesignHistoryCommit() {
+  if (!state.design) return;
+  clearPendingDesignHistoryCommit();
+  designHistoryCommitTimer = window.setTimeout(() => {
+    designHistoryCommitTimer = null;
+    commitDesignHistoryNow();
+  }, WORKBENCH_HISTORY_COMMIT_DELAY_MS);
+  updateDesignHistoryControls();
+}
+
+function flushDesignHistoryCommit() {
+  if (!clearPendingDesignHistoryCommit()) return;
+  commitDesignHistoryNow();
+}
+
+function resetDesignHistory() {
+  clearPendingDesignHistoryCommit();
+  resetHistory(designHistory, captureWorkbenchHistorySnapshot());
+  updateDesignHistoryControls();
+}
+
+function restoreWorkbenchHistorySnapshot(snapshot, message) {
+  if (!snapshot?.design) return;
+  state.design = normalizeRobotDesign(snapshot.design, state.partRecords);
+  state.selectedLinkId = snapshot.selectedLinkId;
+  state.selectedJointId = snapshot.selectedJointId;
+  state.selectedProxyId = snapshot.selectedProxyId;
+  state.selectedEffectorId = snapshot.selectedEffectorId;
+  state.selectedActuatorId = snapshot.selectedActuatorId;
+  state.selectedDensityId = snapshot.selectedDensityId ?? state.selectedDensityId;
+  state.ikTarget = roundedVector(snapshot.ikTarget ?? state.ikTarget);
+  state.ikResult = cloneJsonValue(snapshot.ikResult);
+  state.labCheckpointResults = cloneJsonValue(snapshot.labCheckpointResults) ?? [];
+  state.experimentRuns = cloneJsonValue(snapshot.experimentRuns) ?? [];
+  state.pidResponse = cloneJsonValue(snapshot.pidResponse);
+  invalidateSimulation("RobotDesign history restored; initialize simulation when ready.");
+  renderAll();
+  updateDesignHistoryControls();
+  showStatus(message);
+}
+
+function undoDesignHistory() {
+  flushDesignHistoryCommit();
+  if (!historyStatus(designHistory).canUndo) return;
+  restoreWorkbenchHistorySnapshot(undoHistory(designHistory), "Undo");
+}
+
+function redoDesignHistory() {
+  flushDesignHistoryCommit();
+  if (!historyStatus(designHistory).canRedo) return;
+  restoreWorkbenchHistorySnapshot(redoHistory(designHistory), "Redo");
 }
 
 function isCollapsibleCardOpen(id) {
@@ -465,6 +636,7 @@ function uniqueDesignId(base, fallback, existingIds) {
 function updateDesignTimestamp() {
   state.design.updatedAt = new Date().toISOString();
   invalidateSimulation("RobotDesign changed; initialize simulation again.");
+  scheduleDesignHistoryCommit();
 }
 
 function syncSimulationButtons() {
@@ -564,6 +736,30 @@ function designMatchesParts(design, partRecords) {
   return overlap > 0 && overlap / Math.max(1, current.size) > 0.45;
 }
 
+function refreshMechatronicsReadiness() {
+  state.mechatronicsReadiness = evaluateMechatronicsReadiness({
+    robotDesign: state.design,
+    circuitLabProject: state.currentCircuitLabProject,
+    mechatronicsBinding: state.currentMechatronicsBinding
+  });
+  return state.mechatronicsReadiness;
+}
+
+function compactCircuitStatus() {
+  if (!state.currentCircuitLabProject) return "Absent";
+  const status = state.mechatronicsReadiness?.overallStatus;
+  if (status === "ready") return "Ready";
+  if (status === "blocked") return "Blocked";
+  return "Partial";
+}
+
+function circuitControllerLabel() {
+  const project = state.currentCircuitLabProject;
+  if (!project?.controllerId) return "None";
+  const controller = project.components?.find((component) => component.id === project.controllerId);
+  return controller?.name ?? project.controllerId;
+}
+
 function analyzeDesign() {
   state.transforms = computeForwardKinematics(state.design);
   const topology = analyzeTopology(state.design);
@@ -583,8 +779,88 @@ function analyzeDesign() {
   });
   const urdf = createUrdfExport(state.design, state.partRecords);
   state.analysis = { collisions, mass, loads, actuatorResults, stability, topology, audit, urdf };
+  refreshMechatronicsReadiness();
   overlays.update(state.design, state.transforms, { collisions });
   overlays.setTarget(state.ikTarget);
+}
+
+function currentAssetManifest() {
+  return createAssetManifest({
+    snapshot: state.currentSnapshot,
+    robotDesign: state.design,
+    partRecords: state.partRecords,
+    partLibraryItems: state.partLibraryItems,
+    generatedAt: new Date().toISOString()
+  });
+}
+
+function currentLabContext() {
+  return {
+    design: state.design,
+    analysis: state.analysis,
+    ikResult: state.ikResult,
+    experimentRuns: state.experimentRuns,
+    manifest: currentAssetManifest()
+  };
+}
+
+function refreshLabCheckpoints() {
+  state.labCheckpointResults = evaluateLabSpec(state.labSpec, currentLabContext());
+  return state.labCheckpointResults;
+}
+
+function currentCheckpointResults() {
+  return state.labCheckpointResults.length ? state.labCheckpointResults : evaluateLabSpec(state.labSpec, currentLabContext());
+}
+
+function academicMetadataForResults(results) {
+  return {
+    labId: state.labSpec.id,
+    checkpointResults: results.map((result) => ({
+      id: result.id,
+      passed: result.passed,
+      evidence: result.evidence
+    })),
+    experimentRunIds: state.experimentRuns.map((run) => run.id)
+  };
+}
+
+function designWithAcademicMetadata(results = currentCheckpointResults()) {
+  if (!state.design) return null;
+  return {
+    ...state.design,
+    academic: academicMetadataForResults(results),
+    controllers: state.design.controllers ?? [],
+    trajectories: state.design.trajectories ?? [],
+    sensors: state.design.sensors ?? []
+  };
+}
+
+function syncAcademicMetadata() {
+  const design = designWithAcademicMetadata();
+  if (design) state.design = design;
+}
+
+function currentRoboStudioProject() {
+  const results = currentCheckpointResults();
+  return createRoboStudioProject({
+    currentAssemblySnapshot: state.currentSnapshot,
+    robotDesign: designWithAcademicMetadata(results),
+    currentCircuitDesign: state.currentCircuitDesign,
+    currentCircuitLabProject: state.currentCircuitLabProject,
+    currentMechatronicsBinding: state.currentMechatronicsBinding,
+    partRecords: state.partRecords,
+    partLibraryItems: state.partLibraryItems
+  });
+}
+
+function downloadBlob(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function metric(label, value) {
@@ -595,7 +871,17 @@ function renderSummary() {
   designSummary.innerHTML = [
     `<div class="summary-strip__item"><span>Links</span><strong>${state.design.links.length}</strong></div>`,
     `<div class="summary-strip__item"><span>Joints</span><strong>${state.design.joints.length}</strong></div>`,
+    `<div class="summary-strip__item"><span>Circuit</span><strong>${escapeHtml(compactCircuitStatus())}</strong></div>`,
     `<div class="summary-strip__item summary-strip__item--source"><span>Source</span><strong>${state.design.source === "sample-prerigged" ? "Pre-rigged" : "Manual"}</strong></div>`
+  ].join("");
+}
+
+function renderSummaryPlaceholder() {
+  designSummary.innerHTML = [
+    `<div class="summary-strip__item"><span>Links</span><strong>Loading</strong></div>`,
+    `<div class="summary-strip__item"><span>Joints</span><strong>Loading</strong></div>`,
+    `<div class="summary-strip__item"><span>Circuit</span><strong>${escapeHtml(compactCircuitStatus())}</strong></div>`,
+    `<div class="summary-strip__item summary-strip__item--source"><span>Source</span><strong>Loading</strong></div>`
   ].join("");
 }
 
@@ -870,6 +1156,137 @@ function renderAnalyzeControls() {
   `;
 }
 
+function renderLabCheckpointRows(results) {
+  if (!results.length) return `<tr><td colspan="4">No lab checkpoints are configured.</td></tr>`;
+  return results
+    .map(
+      (result) => `
+        <tr data-state="${result.passed ? "ok" : "warn"}">
+          <td>${escapeHtml(result.label)}</td>
+          <td>${result.passed ? "Pass" : "Needs work"}</td>
+          <td>${escapeHtml(result.evidence)}</td>
+          <td>${escapeHtml(result.passed ? "No action needed." : result.action)}</td>
+        </tr>`
+    )
+    .join("");
+}
+
+function renderExperimentRows() {
+  if (!state.experimentRuns.length) return `<tr><td colspan="6">No experiment runs captured yet.</td></tr>`;
+  return state.experimentRuns
+    .slice()
+    .reverse()
+    .map(
+      (run) => `
+        <tr>
+          <td>${escapeHtml(run.label)}</td>
+          <td>${escapeHtml(new Date(run.createdAt).toLocaleTimeString())}</td>
+          <td>${formatNumber(run.metrics?.totalMassKg, 3)}</td>
+          <td>${formatNumber(run.metrics?.ikErrorMm, 2)}</td>
+          <td>${escapeHtml(run.metrics?.collisionCount ?? 0)}</td>
+          <td>${escapeHtml(run.simulation?.status ?? "not initialized")}</td>
+        </tr>`
+    )
+    .join("");
+}
+
+function renderLabControlsEvidence() {
+  const workspace = sampleWorkspace(state.design, selectedEffector()?.id);
+  const fabrication = createFabricationReadiness(state.design, state.partRecords);
+  const pid = state.pidResponse;
+  const warnings = fabrication.warnings.length
+    ? fabrication.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")
+    : "<li>No fabrication readiness warnings.</li>";
+  return `
+    <div class="analysis-kv">
+      <div><span>Workspace samples</span><strong>${workspace.sampleCount}</strong></div>
+      <div><span>Workspace X</span><strong>${formatNumber(workspace.bounds.min[0], 0)} to ${formatNumber(workspace.bounds.max[0], 0)} mm</strong></div>
+      <div><span>Workspace Y</span><strong>${formatNumber(workspace.bounds.min[1], 0)} to ${formatNumber(workspace.bounds.max[1], 0)} mm</strong></div>
+      <div><span>Workspace Z</span><strong>${formatNumber(workspace.bounds.min[2], 0)} to ${formatNumber(workspace.bounds.max[2], 0)} mm</strong></div>
+      <div><span>BOM rows</span><strong>${fabrication.bom.length}</strong></div>
+      <div><span>Missing mesh files</span><strong>${fabrication.missingFileCount}</strong></div>
+      <div><span>PID overshoot</span><strong>${pid ? `${formatNumber(pid.metrics.overshoot, 2)} deg` : "Not run"}</strong></div>
+      <div><span>PID settling</span><strong>${pid?.metrics.settlingTimeS == null ? "Not settled" : `${formatNumber(pid.metrics.settlingTimeS, 2)} s`}</strong></div>
+    </div>
+    <ul class="urdf-issue-list">${warnings}</ul>
+    <div class="form-actions">
+      <button class="compact-button" id="run-pid-demo" type="button">Run PID Demo</button>
+    </div>
+  `;
+}
+
+function renderLabPackageStatus(project) {
+  const bundle = projectBundlePreflight(project);
+  const summary = manifestSummary(project.manifest);
+  const issues = bundle.issues.length
+    ? bundle.issues.slice(0, 5).map((issue) => `<li><b>${escapeHtml(issue.code)}</b> ${escapeHtml(issue.message)}</li>`).join("")
+    : "<li>Project package preflight has no findings.</li>";
+  return `
+    <div class="analysis-kv">
+      <div><span>Package state</span><strong>${bundle.ready ? "Ready" : "Blocked"}</strong></div>
+      <div><span>Assets</span><strong>${summary.assetCount}</strong></div>
+      <div><span>Manifest warnings</span><strong>${summary.warnings}</strong></div>
+      <div><span>Electronics Studio design</span><strong>${project.workspace?.currentCircuitDesign ? "Included" : "None"}</strong></div>
+      <div><span>Circuit Lab project</span><strong>${project.workspace?.currentCircuitLabProject ? "Included" : "None"}</strong></div>
+      <div><span>Mechatronics binding</span><strong>${project.workspace?.currentMechatronicsBinding ? "Included" : "None"}</strong></div>
+      <div><span>Runs</span><strong>${state.experimentRuns.length}</strong></div>
+    </div>
+    <ul class="urdf-issue-list">${issues}</ul>
+    <div class="form-actions">
+      <button class="compact-button" id="export-project-json" type="button">Export .robostudio.json</button>
+      <button class="compact-button ${bundle.ready ? "is-active" : ""}" id="export-project-zip" type="button" ${bundle.ready ? "" : "disabled"}>Export .robostudio.zip</button>
+    </div>
+  `;
+}
+
+function renderLabControls() {
+  const results = refreshLabCheckpoints();
+  const progress = labProgress(results);
+  const objectives = state.labSpec.learningObjectives.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const deliverables = state.labSpec.deliverables.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  const project = currentRoboStudioProject();
+  const briefBody = `
+    <p class="form-note">${escapeHtml(state.labSpec.level)} / ${state.labSpec.durationMinutes} min / ${progress.percent}% complete</p>
+    <h3>Learning objectives</h3>
+    <ul class="urdf-issue-list">${objectives}</ul>
+    <h3>Deliverables</h3>
+    <ul class="urdf-issue-list">${deliverables}</ul>
+  `;
+  const checkpointBody = `
+    <div class="table-scroll">
+      <table class="analysis-table">
+        <thead><tr><th>Checkpoint</th><th>Status</th><th>Evidence</th><th>Next action</th></tr></thead>
+        <tbody>${renderLabCheckpointRows(results)}</tbody>
+      </table>
+    </div>
+    <div class="form-actions">
+      <button class="compact-button" id="run-lab-checkpoints" type="button">Refresh Checkpoints</button>
+      <button class="compact-button" id="export-lab-report" type="button">Export HTML Report</button>
+      <button class="compact-button" id="export-lab-report-json" type="button">Export Report JSON</button>
+    </div>
+  `;
+  const experimentsBody = `
+    <div class="table-scroll">
+      <table class="analysis-table">
+        <thead><tr><th>Run</th><th>Time</th><th>Mass kg</th><th>IK error mm</th><th>Collisions</th><th>Simulation</th></tr></thead>
+        <tbody>${renderExperimentRows()}</tbody>
+      </table>
+    </div>
+    <div class="form-actions">
+      <button class="compact-button" id="capture-experiment-run" type="button">Capture Run</button>
+      <button class="compact-button" id="export-runs-csv" type="button" ${state.experimentRuns.length ? "" : "disabled"}>Export CSV</button>
+    </div>
+  `;
+  modeControls.innerHTML = `
+    <h2>Lab Mode</h2>
+    ${collapsibleCard("lab-brief", state.labSpec.title, briefBody, { meta: `${progress.passed}/${progress.total}` })}
+    ${collapsibleCard("lab-checkpoints", "Course checkpoints", checkpointBody, { kind: "analysis-table-card", meta: `${progress.percent}%` })}
+    ${collapsibleCard("lab-experiments", "Experiment evidence", experimentsBody, { kind: "analysis-table-card", meta: `${state.experimentRuns.length} runs` })}
+    ${collapsibleCard("lab-controls", "Controls and fabrication basics", renderLabControlsEvidence(), { meta: "Evidence" })}
+    ${collapsibleCard("lab-package", "Project package", renderLabPackageStatus(project), { meta: projectBundlePreflight(project).ready ? "Ready" : "Blocked" })}
+  `;
+}
+
 function renderActuatorLibraryRows() {
   if (!state.design.actuators.length) return `<tr><td colspan="9">No actuators in the library.</td></tr>`;
   return state.design.actuators
@@ -1004,19 +1421,71 @@ function renderSimulateControls() {
   `;
 }
 
+function renderMechatronicsReadinessCard() {
+  const readiness = state.mechatronicsReadiness ?? refreshMechatronicsReadiness();
+  const validation = readiness.validation;
+  const diagnostics = validation.diagnostics ?? [];
+  const blockingCount = diagnostics.filter((item) => item.severity === "error").length;
+  const voltageBlocked = diagnostics.some((item) => /voltage/i.test(item.code));
+  const diagnosticItems = diagnostics.length
+    ? diagnostics.slice(0, 5).map((item) => `<li><b>${escapeHtml(item.code)}</b> ${escapeHtml(item.message)}</li>`).join("")
+    : "<li>No mechatronics binding diagnostics.</li>";
+  return `
+    <div class="analysis-kv">
+      <div><span>Circuit Lab project present</span><strong>${state.currentCircuitLabProject ? "Yes" : "No"}</strong></div>
+      <div><span>Selected controller</span><strong>${escapeHtml(circuitControllerLabel())}</strong></div>
+      <div><span>Circuit DRC state</span><strong>${escapeHtml(readiness.electrical.status)}</strong></div>
+      <div><span>Bound actuators</span><strong>${validation.coverage.boundActuators}/${validation.coverage.eligibleActuators}</strong></div>
+      <div><span>Bound sensors</span><strong>${validation.coverage.boundSensors}/${validation.coverage.totalSensors}</strong></div>
+      <div><span>Firmware channels valid</span><strong>${validation.coverage.validChannels}/${validation.coverage.totalChannels}</strong></div>
+      <div><span>Voltage compatibility</span><strong>${voltageBlocked ? "Blocked" : blockingCount ? "Review diagnostics" : "No blocking voltage diagnostics"}</strong></div>
+      <div><span>Semantic control availability</span><strong>${readiness.semanticRunAllowed ? "Available" : "Unavailable"}</strong></div>
+    </div>
+    <ul class="urdf-issue-list">${diagnosticItems}</ul>
+    <p class="form-note">Binding edits remain in Circuit Lab V1. Workbench uses this view for read-only readiness and single-step semantic channel testing.</p>
+    <div class="form-actions">
+      <a class="compact-button" href="./circuits.html">Open Circuit Lab</a>
+    </div>
+  `;
+}
+
+function renderSemanticChannelCard() {
+  const readiness = state.mechatronicsReadiness ?? refreshMechatronicsReadiness();
+  const channels = readiness.validation.binding.firmwareChannels ?? [];
+  const selectedChannelId = channels.some((channel) => channel.id === state.semanticCommand.channelId)
+    ? state.semanticCommand.channelId
+    : channels[0]?.id ?? "";
+  const channelOptions = channels.length
+    ? channels.map((channel) => `<option value="${escapeHtml(channel.id)}" ${channel.id === selectedChannelId ? "selected" : ""}>${escapeHtml(channel.id)} / ${escapeHtml(channel.semanticRole || "unmapped")}</option>`).join("")
+    : `<option value="">No channels</option>`;
+  const disabled = readiness.semanticRunAllowed && channels.length ? "" : "disabled";
+  return `
+    <label class="form-field"><span>Firmware channel</span><select id="semantic-channel-select">${channelOptions}</select></label>
+    <label class="form-field"><span>Command value</span><input id="semantic-channel-value" type="number" step="1" value="${escapeHtml(state.semanticCommand.value)}" /></label>
+    <p class="form-note">${escapeHtml(state.semanticCommand.message)}</p>
+    <div class="form-actions">
+      <button class="compact-button ${readiness.semanticRunAllowed ? "is-active" : ""}" id="apply-semantic-channel" type="button" ${disabled}>Apply Semantic Channel</button>
+    </div>
+  `;
+}
+
 function renderAuditControls() {
   const auditBody = `
     <span>Audit uses the same robot model for links, joints, proxies, mass, IK, actuators, and simulation readiness.</span>
     <button class="compact-button" id="audit-now" type="button">Run Audit</button>
   `;
+  const readiness = state.mechatronicsReadiness ?? refreshMechatronicsReadiness();
   modeControls.innerHTML = `
     <h2>Audit Mode</h2>
     ${collapsibleCard("audit-readiness", "Readiness checks", auditBody, { meta: `${state.analysis?.audit?.length ?? 0} checks` })}
+    ${collapsibleCard("audit-mechatronics", "Mechatronics readiness", renderMechatronicsReadinessCard(), { meta: compactCircuitStatus() })}
+    ${collapsibleCard("audit-semantic-channel", "Semantic channel test", renderSemanticChannelCard(), { meta: readiness.semanticRunAllowed ? "Ready" : "Blocked" })}
   `;
 }
 
 function renderModeControls() {
   if (state.mode === "analyze") renderAnalyzeControls();
+  else if (state.mode === "lab") renderLabControls();
   else if (state.mode === "actuators") renderActuatorControls();
   else if (state.mode === "simulate") renderSimulateControls();
   else if (state.mode === "audit") renderAuditControls();
@@ -1274,6 +1743,7 @@ function renderAll() {
   renderAudit();
   renderViewportReadout();
   applyFloatingPanelStates();
+  updateDesignHistoryControls();
 }
 
 function requireWorkbenchReady() {
@@ -1405,6 +1875,21 @@ function workbenchAssistantContext() {
           totalMassKg: state.analysis.mass.totalMassKg,
           stabilityOk: state.analysis.stability.ok,
           simulationStatus: state.simulation.status
+        }
+      : null,
+    mechatronics: state.mechatronicsReadiness
+      ? {
+          circuitLabProjectPresent: Boolean(state.currentCircuitLabProject),
+          electronicsDesignPresent: Boolean(state.currentCircuitDesign),
+          bindingStatus: state.mechatronicsReadiness.binding.status,
+          overallStatus: state.mechatronicsReadiness.overallStatus,
+          semanticRunAllowed: state.mechatronicsReadiness.semanticRunAllowed,
+          coverage: state.mechatronicsReadiness.coverage,
+          diagnostics: state.mechatronicsReadiness.validation.diagnostics.map((item) => ({
+            severity: item.severity,
+            code: item.code,
+            message: item.message
+          }))
         }
       : null,
     simulation: {
@@ -1592,6 +2077,73 @@ function solveWorkbenchIk() {
     : `IK did not solve: ${state.ikResult.reason}`;
 }
 
+function applySemanticChannelCommand(channelId, value) {
+  requireWorkbenchReady();
+  const result = resolveFirmwareChannelCommand({
+    robotDesign: state.design,
+    circuitLabProject: state.currentCircuitLabProject,
+    mechatronicsBinding: state.currentMechatronicsBinding,
+    channelId,
+    value
+  });
+  state.semanticCommand = {
+    channelId,
+    value,
+    status: result.ok ? "resolved" : "blocked",
+    message: result.ok
+      ? `Resolved ${channelId}.`
+      : `Semantic channel blocked: ${result.reason}${result.diagnostics?.length ? ` (${result.diagnostics.map((item) => item.code).join(", ")})` : ""}.`
+  };
+  if (!result.ok) {
+    renderAll();
+    return state.semanticCommand.message;
+  }
+  if (result.type === "joint-command" && result.command === "position") {
+    const joint = state.design.joints.find((item) => item.id === result.jointId);
+    if (!joint) throw new Error(`Unknown joint id: ${result.jointId}`);
+    state.design.pose.jointAngles = {
+      ...state.design.pose.jointAngles,
+      [joint.id]: result.value
+    };
+    state.ikResult = null;
+    state.selectedJointId = joint.id;
+    state.semanticCommand = {
+      channelId,
+      value,
+      status: "applied",
+      message: `${channelId} set ${joint.name} to ${formatNumber(result.value, 1)} degrees. Simulation was invalidated.`
+    };
+    updateDesignTimestamp();
+    renderAll();
+    return state.semanticCommand.message;
+  }
+  if (result.type === "sensor-expectation") {
+    state.semanticCommand = {
+      channelId,
+      value,
+      status: "resolved",
+      message: `${channelId} expects ${result.measurement} on sensor ${result.sensorId}: ${result.expectedValue}.`
+    };
+    renderAll();
+    return state.semanticCommand.message;
+  }
+  state.semanticCommand = {
+    channelId,
+    value,
+    status: "unsupported",
+    message: `${channelId} resolved to ${result.type}; V1 only applies position joint commands to the virtual pose.`
+  };
+  renderAll();
+  return state.semanticCommand.message;
+}
+
+function applySemanticChannelFromControls() {
+  const channelId = modeControls.querySelector("#semantic-channel-select")?.value ?? "";
+  const value = finiteNumber(modeControls.querySelector("#semantic-channel-value")?.value, state.semanticCommand.value);
+  const message = applySemanticChannelCommand(channelId, value);
+  showStatus(message, 6200);
+}
+
 function upsertWorkbenchActuator(args) {
   const existing = args.actuatorId ? workbenchActuatorById(args.actuatorId) : selectedActuator();
   const name = args.name?.trim() || existing?.name || "Custom actuator";
@@ -1707,6 +2259,7 @@ function mountWorkbenchAssistant() {
         if (effectorId) state.selectedEffectorId = workbenchEffectorById(effectorId).id;
         state.ikTarget = roundedVector(target);
         state.ikResult = null;
+        scheduleDesignHistoryCommit();
         renderAll();
         return `IK target set to ${formatVector(state.ikTarget, 1)} mm.`;
       },
@@ -1748,6 +2301,25 @@ function mountWorkbenchAssistant() {
         requireWorkbenchReady();
         renderAll();
         return "Audit refreshed.";
+      },
+      workbench_get_mechatronics_readiness: () => {
+        requireWorkbenchReady();
+        const readiness = refreshMechatronicsReadiness();
+        return {
+          ok: true,
+          message: `Mechatronics readiness is ${readiness.overallStatus}.`,
+          data: readiness
+        };
+      },
+      workbench_apply_semantic_channel: ({ channelId, value }) => {
+        requireWorkbenchReady();
+        const message = applySemanticChannelCommand(channelId, value);
+        showStatus(message, 6200);
+        return {
+          ok: state.semanticCommand.status === "applied" || state.semanticCommand.status === "resolved",
+          message,
+          data: state.semanticCommand
+        };
       },
       workbench_set_simulation_options: ({ gravityEnabled, timestep }) => {
         requireWorkbenchReady();
@@ -2191,6 +2763,7 @@ async function toggleSimulation() {
 }
 
 async function saveCurrentDesign() {
+  syncAcademicMetadata();
   await saveRobotDesign(state.design);
   showStatus("RobotDesign saved");
 }
@@ -2200,6 +2773,7 @@ function importDesignFile(file) {
   reader.addEventListener("load", () => {
     try {
       const parsed = JSON.parse(reader.result);
+      flushDesignHistoryCommit();
       state.design = normalizeRobotDesign(parsed, state.partRecords);
       state.selectedLinkId = state.design.links[0]?.id ?? null;
       state.selectedJointId = state.design.joints[0]?.id ?? null;
@@ -2209,6 +2783,7 @@ function importDesignFile(file) {
       invalidateSimulation("RobotDesign imported; initialize simulation when ready.");
       showStatus("RobotDesign imported");
       renderAll();
+      commitDesignHistoryNow();
     } catch (error) {
       console.error(error);
       showStatus("Unable to import RobotDesign");
@@ -2248,10 +2823,151 @@ function showUrdfExportFlow() {
   }
 }
 
+function captureExperimentRun() {
+  requireWorkbenchReady();
+  flushDesignHistoryCommit();
+  const status = dynamics.status();
+  const run = createExperimentRun({
+    design: state.design,
+    transforms: state.transforms,
+    analysis: state.analysis,
+    ikResult: state.ikResult,
+    simulation: {
+      status: state.simulation.status,
+      steps: status.steps,
+      timestep: state.simulation.timestep,
+      gravityEnabled: state.simulation.gravityEnabled
+    },
+    runIndex: state.experimentRuns.length,
+    label: `Run ${state.experimentRuns.length + 1}`
+  });
+  state.experimentRuns.push(run);
+  refreshLabCheckpoints();
+  syncAcademicMetadata();
+  showStatus(`${run.label} captured for lab evidence`);
+  renderAll();
+  commitDesignHistoryNow();
+}
+
+function exportExperimentRunsCsv() {
+  if (!state.experimentRuns.length) {
+    showStatus("Capture an experiment run before exporting CSV.");
+    return;
+  }
+  downloadText(serializeExperimentRunsCsv(state.experimentRuns), "robostudio-experiment-runs.csv", "text/csv");
+  showStatus("Experiment CSV download started");
+}
+
+function labReportInput() {
+  const manifest = currentAssetManifest();
+  const checkpointResults = state.labCheckpointResults.length ? state.labCheckpointResults : refreshLabCheckpoints();
+  return {
+    labSpec: state.labSpec,
+    checkpointResults,
+    experimentRuns: state.experimentRuns,
+    design: designWithAcademicMetadata(checkpointResults),
+    analysis: state.analysis,
+    manifest
+  };
+}
+
+function exportLabReportHtml() {
+  downloadText(createLabReportHtml(labReportInput()), "robostudio-lab-report.html", "text/html");
+  showStatus("Lab report HTML download started");
+}
+
+function exportLabReportJson() {
+  downloadText(JSON.stringify(createLabReportJson(labReportInput()), null, 2), "robostudio-lab-report.json", "application/json");
+  showStatus("Lab report JSON download started");
+}
+
+function runPidDemo() {
+  flushDesignHistoryCommit();
+  const firstMovableJoint = state.design.joints.find((joint) => joint.type !== "fixed");
+  const initial = firstMovableJoint ? getJointAngle(state.design, firstMovableJoint.id) : 0;
+  const target = firstMovableJoint ? Math.min(firstMovableJoint.max, Math.max(firstMovableJoint.min, initial + 45)) : 45;
+  state.pidResponse = simulatePidResponse({ initial, target, durationS: 2, dt: 0.02, kp: 8, kd: 1.2 });
+  state.design.controllers = [
+    ...(state.design.controllers ?? []).filter((controller) => controller.id !== "lab_pid_demo"),
+    {
+      id: "lab_pid_demo",
+      name: "Lab PID demo",
+      type: "pid",
+      jointId: firstMovableJoint?.id ?? null,
+      gains: state.pidResponse.options,
+      metrics: state.pidResponse.metrics
+    }
+  ];
+  syncAcademicMetadata();
+  showStatus("PID response demo captured");
+  renderAll();
+  commitDesignHistoryNow();
+}
+
+function exportProjectJson() {
+  const project = currentRoboStudioProject();
+  downloadText(serializeRoboStudioProject(project), "robostudio-project.robostudio.json", "application/json");
+  showStatus("RoboStudio project JSON download started");
+}
+
+async function collectProjectBundleAssets(project) {
+  const assets = [];
+  if (state.currentSnapshot?.glb) {
+    assets.push({ path: "assets/current-assembly.glb", data: state.currentSnapshot.glb });
+  }
+  const fileNames = new Set(
+    (project.manifest?.assets ?? [])
+      .filter((asset) => asset.fileName && asset.availability === "available")
+      .map((asset) => asset.fileName)
+  );
+  for (const fileName of fileNames) {
+    try {
+      const response = await fetch(assetUrlForFile(fileName));
+      if (!response.ok) continue;
+      assets.push({ path: `assets/${fileName}`, data: await response.arrayBuffer() });
+    } catch {
+      // Imported user files are not always fetchable from the app origin; the manifest keeps that limitation visible.
+    }
+  }
+  return assets;
+}
+
+async function exportProjectZip() {
+  const project = currentRoboStudioProject();
+  const preflight = projectBundlePreflight(project);
+  if (!preflight.ready) {
+    showStatus("Project ZIP is blocked by missing required assets.");
+    renderAll();
+    return;
+  }
+  const blob = await createRoboStudioProjectZip(project, { assets: await collectProjectBundleAssets(project) });
+  downloadBlob(blob, "robostudio-project.robostudio.zip");
+  showStatus("RoboStudio project ZIP download started");
+}
+
 function setMode(mode) {
   state.mode = mode;
   for (const button of modeButtons) button.classList.toggle("is-active", button.dataset.mode === mode);
   renderAll();
+}
+
+function shortcutTargetIsTextEditable(target) {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target?.isContentEditable === true;
+}
+
+function handleDesignHistoryShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || shortcutTargetIsTextEditable(event.target)) return;
+  const key = event.key.toLowerCase();
+  if (key === "z" && !event.shiftKey) {
+    event.preventDefault();
+    undoDesignHistory();
+  } else if ((key === "z" && event.shiftKey) || key === "y") {
+    event.preventDefault();
+    redoDesignHistory();
+  }
 }
 
 modeControls.addEventListener("click", (event) => {
@@ -2289,6 +3005,24 @@ modeControls.addEventListener("click", (event) => {
   if (target.id === "sim-step-panel") stepSimulation();
   if (target.id === "sim-run-panel") toggleSimulation();
   if (target.id === "audit-now") renderAll();
+  if (target.id === "apply-semantic-channel") applySemanticChannelFromControls();
+  if (target.id === "run-lab-checkpoints") {
+    flushDesignHistoryCommit();
+    refreshLabCheckpoints();
+    syncAcademicMetadata();
+    renderAll();
+    commitDesignHistoryNow();
+  }
+  if (target.id === "capture-experiment-run") captureExperimentRun();
+  if (target.id === "export-runs-csv") exportExperimentRunsCsv();
+  if (target.id === "export-lab-report") exportLabReportHtml();
+  if (target.id === "export-lab-report-json") exportLabReportJson();
+  if (target.id === "run-pid-demo") runPidDemo();
+  if (target.id === "export-project-json") exportProjectJson();
+  if (target.id === "export-project-zip") exportProjectZip().catch((error) => {
+    console.error(error);
+    showStatus(error.message ?? "Unable to export project ZIP.");
+  });
 });
 
 modeControls.addEventListener("input", (event) => {
@@ -2304,6 +3038,7 @@ modeControls.addEventListener("input", (event) => {
   if (!target.classList.contains("joint-angle") || !target.dataset.jointId) return;
   state.design.pose.jointAngles[target.dataset.jointId] = Number(target.value);
   state.ikResult = null;
+  updateDesignTimestamp();
   renderAll();
 });
 
@@ -2363,7 +3098,13 @@ designFileInput.addEventListener("change", () => {
   if (file) importDesignFile(file);
   designFileInput.value = "";
 });
-exportDesignButton.addEventListener("click", () => downloadText(serializeRobotDesign(state.design), "robot-design.json", "application/json"));
+undoDesignButton?.addEventListener("click", undoDesignHistory);
+redoDesignButton?.addEventListener("click", redoDesignHistory);
+document.addEventListener("keydown", handleDesignHistoryShortcut);
+exportDesignButton.addEventListener("click", () => {
+  syncAcademicMetadata();
+  downloadText(serializeRobotDesign(state.design), "robot-design.json", "application/json");
+});
 exportUrdfButton.addEventListener("click", showUrdfExportFlow);
 analysisResults.addEventListener("click", (event) => {
   const target = event.target;
@@ -2415,10 +3156,28 @@ function animate() {
 
 async function loadAssembly() {
   showStatus("Checking current assembly snapshot");
+  renderSummaryPlaceholder();
   try {
     const evalMode = isAssistantEvalEnabled();
-    const snapshot = evalMode ? null : await readCurrentSnapshot();
+    const workspace = evalMode
+      ? { currentAssemblySnapshot: null, currentRobotDesign: null, currentCircuitDesign: null, currentCircuitLabProject: null, currentMechatronicsBinding: null, partLibraryItems: [] }
+      : await createWorkspaceStore().readWorkspace();
+    const snapshot = workspace.currentAssemblySnapshot;
+    state.currentCircuitDesign = workspace.currentCircuitDesign ?? null;
+    state.currentCircuitLabProject = workspace.currentCircuitLabProject ?? null;
+    state.currentMechatronicsBinding = workspace.currentMechatronicsBinding ?? null;
+    state.partLibraryItems = workspace.partLibraryItems ?? [];
+    const savedDesign = workspace.currentRobotDesign;
+    if (savedDesign) {
+      state.mechatronicsReadiness = evaluateMechatronicsReadiness({
+        robotDesign: savedDesign,
+        circuitLabProject: state.currentCircuitLabProject,
+        mechatronicsBinding: state.currentMechatronicsBinding
+      });
+    }
+    renderSummaryPlaceholder();
     if (snapshot?.glb) {
+      state.currentSnapshot = snapshot;
       state.assemblyRoot = await glbToObject(snapshot.glb);
       state.assemblyRoot.name = "current_design_snapshot";
       assemblySource.textContent = "Current snapshot";
@@ -2449,6 +3208,12 @@ async function loadAssembly() {
           : "Open the Assembly Studio and import STL files to begin"
       );
       state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, collectAssemblyParts(state.assemblyRoot));
+      state.currentSnapshot = {
+        savedAt: new Date().toISOString(),
+        glb: null,
+        parts: state.partRecords,
+        layout: null
+      };
     }
 
     state.assemblyRoot.traverse((child) => {
@@ -2459,7 +3224,6 @@ async function loadAssembly() {
     scene.add(state.assemblyRoot);
     fitCameraToObject(state.assemblyRoot);
 
-    const savedDesign = evalMode ? null : await readSavedRobotDesign();
     const reuseSavedDesign = designMatchesParts(savedDesign, state.partRecords);
     state.design = reuseSavedDesign
       ? normalizeRobotDesign(savedDesign, state.partRecords)
@@ -2470,6 +3234,7 @@ async function loadAssembly() {
     state.selectedEffectorId = state.design.endEffectors[0]?.id ?? null;
     state.selectedActuatorId = state.design.actuators[0]?.id ?? null;
     invalidateSimulation("Simulation has not been initialized.");
+    resetDesignHistory();
     renderAll();
     if (reuseSavedDesign && snapshotNewerThanDesign(snapshot, savedDesign)) {
       showStatus("Assembly geometry changed after the saved RobotDesign; refresh mass and proxies from bounds if needed.", 7200);

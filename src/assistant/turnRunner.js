@@ -105,16 +105,20 @@ function toolOutputMadeProgress(output) {
   return true;
 }
 
+function guardedConfirmationLabel(definition, args) {
+  return definition.confirmation ?? summarizeAction(definition, args);
+}
+
 function pendingConfirmationOutput(definition, toolCall, args) {
   return {
     ok: false,
     action: toolCall.name,
     status: "pending_confirmation",
-    message: definition.confirmation ?? summarizeAction(definition, args)
+    message: guardedConfirmationLabel(definition, args)
   };
 }
 
-async function resolveAssistantToolCall({ adapter, toolCall, onGuardedToolCall }) {
+async function resolveAssistantToolCall({ adapter, toolCall, responseId, onGuardedToolCall }) {
   const definition = getActionDefinition(adapter.pageId, toolCall.name);
   if (!definition) {
     return {
@@ -139,7 +143,26 @@ async function resolveAssistantToolCall({ adapter, toolCall, onGuardedToolCall }
   }
 
   if (definition.safety === ACTION_SAFETY.GUARDED) {
-    const handled = await onGuardedToolCall?.({ toolCall, definition, args });
+    const label = guardedConfirmationLabel(definition, args);
+    const handled = await onGuardedToolCall?.({ toolCall, definition, args, responseId, label });
+    if (handled?.defer) {
+      const deferredLabel = handled.label ?? label;
+      return {
+        callId: toolCall.callId,
+        output: null,
+        definition,
+        args,
+        guarded: true,
+        deferred: true,
+        pendingGuardedCall: {
+          responseId,
+          callId: toolCall.callId,
+          name: toolCall.name,
+          args,
+          label: deferredLabel
+        }
+      };
+    }
     return {
       callId: toolCall.callId,
       output: handled?.output ?? pendingConfirmationOutput(definition, toolCall, args),
@@ -175,7 +198,9 @@ export async function runAssistantTurn({
   model,
   reasoningEffort,
   message,
+  attachmentIds = [],
   previousResponseId = null,
+  toolOutputs: startingToolOutputs = [],
   maxToolRounds = MAX_ASSISTANT_TOOL_ROUNDS,
   requestAssistant = postAssistantRequest,
   onResponse,
@@ -195,6 +220,7 @@ export async function runAssistantTurn({
     stoppedForNoProgress: false,
     stoppedForGuardedConfirmation: false,
     stopReason: null,
+    pendingGuardedCall: null,
     usage: null,
     latencyMs: null
   };
@@ -202,14 +228,27 @@ export async function runAssistantTurn({
   let consecutiveNoProgressRounds = 0;
   let lastToolRoundSignature = null;
 
-  let response = await requestAssistant({
-    model,
-    reasoningEffort,
-    pageId: adapter.pageId,
-    pageContext: adapter.getContext(),
-    previousResponseId,
-    message
-  });
+  const initialToolOutputs = Array.isArray(startingToolOutputs) ? startingToolOutputs : [];
+  let response = await requestAssistant(
+    initialToolOutputs.length
+      ? {
+          model,
+          reasoningEffort,
+          pageId: adapter.pageId,
+          pageContext: adapter.getContext(),
+          previousResponseId,
+          toolOutputs: initialToolOutputs
+        }
+      : {
+          model,
+          reasoningEffort,
+          pageId: adapter.pageId,
+          pageContext: adapter.getContext(),
+          previousResponseId,
+          message,
+          attachmentIds
+        }
+  );
 
   async function ingestResponse(nextResponse, round) {
     result.responses.push(nextResponse);
@@ -242,6 +281,7 @@ export async function runAssistantTurn({
     const repeatedNoProgressRound = signature === lastToolRoundSignature && consecutiveNoProgressRounds > 0;
     const toolOutputs = [];
     let guardedInRound = false;
+    let deferredGuardedCall = null;
     for (const toolCall of toolCalls) {
       const definition = getActionDefinition(adapter.pageId, toolCall.name);
       const callRecord = {
@@ -253,19 +293,36 @@ export async function runAssistantTurn({
       result.toolCalls.push(callRecord);
       await onToolCall?.(callRecord, toolCall, { round });
 
-      const resolved = await resolveAssistantToolCall({ adapter, toolCall, onGuardedToolCall });
+      const resolved = await resolveAssistantToolCall({
+        adapter,
+        toolCall,
+        responseId: response.responseId ?? result.previousResponseId,
+        onGuardedToolCall
+      });
       if (resolved.guarded) {
         result.guardedCalls.push({
           callId: toolCall.callId,
           name: toolCall.name,
           arguments: resolved.args,
-          message: resolved.output?.message ?? ""
+          message: resolved.output?.message ?? resolved.pendingGuardedCall?.label ?? ""
         });
       }
       if (resolved.guarded) guardedInRound = true;
       result.toolOutputs.push(resolved);
-      toolOutputs.push({ callId: resolved.callId, output: resolved.output });
+      if (resolved.deferred) {
+        deferredGuardedCall = resolved.pendingGuardedCall;
+      } else {
+        toolOutputs.push({ callId: resolved.callId, output: resolved.output });
+      }
       await onToolResult?.(resolved, toolCall, { round });
+      if (deferredGuardedCall) break;
+    }
+
+    if (deferredGuardedCall) {
+      result.stoppedForGuardedConfirmation = true;
+      result.stopReason = "guarded_confirmation";
+      result.pendingGuardedCall = deferredGuardedCall;
+      break;
     }
     toolRoundCount += 1;
 

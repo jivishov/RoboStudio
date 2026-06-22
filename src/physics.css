@@ -394,6 +394,10 @@ h3 {
 
 .tree-card button,
 .compact-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
   min-height: 28px;
   border: 1px solid #c7ced9;
   border-radius: 4px;
@@ -401,6 +405,7 @@ h3 {
   color: #202936;
   font-size: 0.72rem;
   font-weight: 800;
+  text-decoration: none;
 }
 
 .compact-button.is-risk {

@@ -278,7 +278,11 @@ export function createRobotDesign(partRecords, options = {}) {
     ],
     actuators: DEFAULT_ACTUATORS.map((actuator) => ({ ...actuator })),
     allowedCollisions: joints.map((joint) => [joint.parentLinkId, joint.childLinkId].sort().join("|")),
-    pose
+    pose,
+    academic: { labId: null, checkpointResults: [], experimentRunIds: [] },
+    trajectories: [],
+    controllers: [],
+    sensors: []
   };
 }
 
@@ -325,6 +329,43 @@ function normalizeAllowedCollisions(allowedCollisions, knownLinks) {
     pairs.add([a, b].sort().join("|"));
   }
   return [...pairs];
+}
+
+function normalizeAcademicMetadata(input = {}) {
+  return {
+    labId: input.labId ? String(input.labId) : null,
+    checkpointResults: Array.isArray(input.checkpointResults) ? input.checkpointResults : [],
+    experimentRunIds: Array.isArray(input.experimentRunIds) ? input.experimentRunIds.map(String) : []
+  };
+}
+
+function normalizeNamedCollection(items) {
+  return Array.isArray(items)
+    ? items
+        .filter((item) => item && typeof item === "object")
+        .map((item, index) => ({
+          ...item,
+          id: String(item.id ?? `item_${index + 1}`),
+          name: String(item.name ?? item.id ?? `Item ${index + 1}`)
+        }))
+    : [];
+}
+
+function normalizeSensorInterface(value = {}) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    sensorClass: String(value.sensorClass ?? "generic"),
+    measurement: String(value.measurement ?? "generic"),
+    valueType: ["boolean", "integer", "number"].includes(value.valueType) ? value.valueType : "number",
+    units: String(value.units ?? "")
+  };
+}
+
+function normalizeSensorCollection(items) {
+  return normalizeNamedCollection(items).map((item) => {
+    const semanticInterface = normalizeSensorInterface(item.interface);
+    return semanticInterface ? { ...item, interface: semanticInterface } : item;
+  });
 }
 
 export function normalizeRobotDesign(input, partRecords = []) {
@@ -427,7 +468,11 @@ export function normalizeRobotDesign(input, partRecords = []) {
     allowedCollisions: normalizeAllowedCollisions(inputDesign.allowedCollisions, knownLinks),
     pose: {
       jointAngles: Object.fromEntries(Object.entries(poseJointAngles).filter(([jointId]) => knownJoints.has(jointId)))
-    }
+    },
+    academic: normalizeAcademicMetadata(inputDesign.academic),
+    trajectories: normalizeNamedCollection(inputDesign.trajectories),
+    controllers: normalizeNamedCollection(inputDesign.controllers),
+    sensors: normalizeSensorCollection(inputDesign.sensors)
   };
 }
 

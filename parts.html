@@ -29,6 +29,10 @@
               <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">precision_manufacturing</span>
               Workbench
             </a>
+            <a class="page-link shell-header__page-link" href="./circuits.html" aria-label="Open Circuit Lab" title="Open Circuit Lab">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">device_hub</span>
+              Circuit Lab
+            </a>
           </nav>
         </div>
         <nav class="parts-toolbar shell-header__actions shell-header__group" aria-label="Component Builder tools">
@@ -56,6 +60,7 @@
           </button>
           <span class="parts-toolbar__divider shell-header__divider" aria-hidden="true"></span>
           <button id="export-stl" class="parts-button shell-header__button" type="button" disabled>Export STL</button>
+          <button id="export-step" class="parts-button shell-header__button" type="button" disabled>Export STEP</button>
           <button id="send-assembly" class="parts-button shell-header__button" type="button" disabled>Send Assembly</button>
         </nav>
       </header>
@@ -156,25 +161,18 @@
         </section>
       </aside>
 
-      <main class="parts-stage" aria-label="Sketch and generated part previews">
+      <main class="parts-stage" aria-label="Generated part preview">
         <div class="preview-layout">
-          <section class="sketch-card" aria-labelledby="sketch-heading">
-            <div class="sketch-card__header">
-              <div>
-                <h2 id="sketch-heading">X/Z Sketch</h2>
-                <p id="selected-body-summary">No body selected</p>
-              </div>
-              <output id="project-updated-at">-</output>
-            </div>
-            <div id="sketch-preview" class="sketch-preview"></div>
-          </section>
           <section class="sketch-card model-card" aria-labelledby="model-heading">
             <div class="sketch-card__header">
               <div>
                 <h2 id="model-heading">3D Preview</h2>
-                <p>Generated solids</p>
+                <p id="selected-body-summary">No body selected</p>
               </div>
-              <output id="compile-count">Idle</output>
+              <div class="preview-status">
+                <output id="project-updated-at">-</output>
+                <output id="compile-count">Idle</output>
+              </div>
             </div>
             <div id="model-preview" class="model-preview"></div>
           </section>
@@ -214,6 +212,22 @@
           <div id="parts-body-card-content" class="collapsible-card__content">
             <div class="collapsible-card__inner">
               <div id="body-properties" class="inspector-stack"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="parts-panel-section collapsible-card shell-card is-collapsed" aria-labelledby="sketch-heading" data-card-id="parts-sketch-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-sketch-card" aria-expanded="false" aria-controls="parts-sketch-card-content">
+            <span class="collapsible-card__label">
+              <span id="sketch-heading" class="collapsible-card__title">Sketch Map</span>
+              <span class="collapsible-card__meta">X/Z</span>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-sketch-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div id="sketch-preview" class="sketch-preview"></div>
             </div>
           </div>
         </section>

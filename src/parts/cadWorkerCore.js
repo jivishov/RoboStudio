@@ -1,13 +1,20 @@
 import { PartCadCompileError, compilePartBodyToSolid } from "./cadCompile.js";
+import { AdvancedCadBackendRequiredError } from "./advancedCadRecipe.js";
 import { solidToMeshData } from "./meshConversion.js";
 
 export function serializeWorkerError(error, bodyId = null) {
   const message = error?.message ? String(error.message) : String(error ?? "Unknown CAD worker error.");
+  const cause = error?.cause ?? null;
+  const code = error?.code ?? cause?.code ?? (error instanceof AdvancedCadBackendRequiredError || cause instanceof AdvancedCadBackendRequiredError
+    ? "advanced-cad-backend-required"
+    : error instanceof PartCadCompileError
+      ? "cad-compile-error"
+      : "worker-error");
   return {
     bodyId: error?.bodyId ?? bodyId,
-    code: error instanceof PartCadCompileError ? "cad-compile-error" : "worker-error",
+    code,
     message,
-    issues: error?.issues ?? []
+    issues: error?.issues?.length ? error.issues : cause?.issues ?? []
   };
 }
 

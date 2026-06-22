@@ -5,20 +5,40 @@ import {
   isSupportedReasoningEffort
 } from "./modelCatalog.js";
 import { ASSISTANT_PAGES, toolsForPage } from "./actionCatalog.js";
+import {
+  MAX_ASSISTANT_UPLOAD_BODY_BYTES,
+  createAssistantAttachmentStore,
+  decodeUploadFiles
+} from "./attachments.js";
 
 const PAGE_LABELS = Object.freeze({
   [ASSISTANT_PAGES.STUDIO]: "STL Assembly Studio",
   [ASSISTANT_PAGES.PARTS]: "Robotic Component Builder",
-  [ASSISTANT_PAGES.WORKBENCH]: "Robotics Design Workbench"
+  [ASSISTANT_PAGES.WORKBENCH]: "Robotics Design Workbench",
+  [ASSISTANT_PAGES.ELECTRONICS]: "Electronics Studio",
+  [ASSISTANT_PAGES.CIRCUITS]: "Circuit Lab"
 });
 
 const PAGE_INSTRUCTIONS = Object.freeze({
   [ASSISTANT_PAGES.PARTS]: [
     "For Component Builder requests, use starter templates when they clearly match the requested object.",
     "If no template matches, design a custom sketch-extrude body with the supported V1 profile types: rectangle, circle, roundedSlot, and closed polyline.",
+    "For STEP-oriented mechanical CAD that needs advanced operations, use a declarative advanced CAD recipe with registered recipe actions; never emit raw Python, local paths, temp paths, file hashes, or backend identifiers.",
     "Prefer one coherent custom body. Use multiple bodies only when the user clearly asks for separate physical parts.",
     "After custom creation or replacement, inspect validation and build status from tool output or page context. Refine with parts_replace_sketch_body when validation or build feedback shows a fixable geometry problem.",
     "If the requested shape needs unsupported freeform surfaces, helical sweeps, or true 3D blades, create the closest valid sketch-extrude approximation and state the limitation briefly."
+  ],
+  [ASSISTANT_PAGES.ELECTRONICS]: [
+    "For electronics requests, keep changes inside CircuitDesign state on the Electronics Studio page.",
+    "Prefer safe GPIO suggestions before connecting LEDs, buttons, or other starter components to ESP32-family board pins.",
+    "Run electronics DRC after wiring changes and mention blocking errors before export.",
+    "Generate ESP-IDF source files from the registered code generation tool; do not claim that firmware was built, flashed, or simulated on hardware."
+  ],
+  [ASSISTANT_PAGES.CIRCUITS]: [
+    "For Circuit Lab requests, keep changes inside the new CircuitLabProject state and do not use Circuitiny concepts, imports, or implementation details.",
+    "Use registered Circuit Lab tools to add hardware, apply starter templates, connect terminals, run tests, and generate source.",
+    "Run the Circuit Lab test after wiring changes and report blocking power, ground, polarity, or actuator-supply errors before source generation.",
+    "Generated files are source-only. Do not claim that firmware was built, flashed, simulated natively, or tested on hardware."
   ]
 });
 
@@ -30,13 +50,13 @@ function jsonResponse(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function readJsonBody(req) {
+function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let body = "";
     req.setEncoding("utf8");
     req.on("data", (chunk) => {
       body += chunk;
-      if (body.length > MAX_BODY_BYTES) {
+      if (body.length > maxBytes) {
         reject(new Error("Request body is too large."));
         req.destroy();
       }
@@ -109,15 +129,47 @@ export function buildAssistantInstructions(pageId) {
   ].join("\n");
 }
 
+function fileInputsForPayload(payload) {
+  const fileInputs = Array.isArray(payload.fileInputs) ? payload.fileInputs : [];
+  return fileInputs.map((fileInput) => {
+    if (!fileInput || typeof fileInput.fileId !== "string" || !fileInput.fileId) {
+      throw new Error("Invalid assistant file input.");
+    }
+    return {
+      fileId: fileInput.fileId,
+      name: typeof fileInput.name === "string" ? fileInput.name : "",
+      inputKind: fileInput.inputKind === "image" ? "image" : "file"
+    };
+  });
+}
+
+function attachedFilesText(fileInputs) {
+  const names = fileInputs.map((fileInput) => fileInput.name).filter(Boolean);
+  return names.length ? `Attached files: ${names.join(", ")}\n\n` : "";
+}
+
 function userInputForPayload(payload) {
   const pageContext = JSON.stringify(payload.pageContext ?? {}, null, 2);
+  const fileInputs = fileInputsForPayload(payload);
   return [
     {
       role: "user",
       content: [
+        ...fileInputs.map((fileInput) =>
+          fileInput.inputKind === "image"
+            ? {
+                type: "input_image",
+                file_id: fileInput.fileId,
+                detail: "auto"
+              }
+            : {
+                type: "input_file",
+                file_id: fileInput.fileId
+              }
+        ),
         {
           type: "input_text",
-          text: `Current page context:\n${pageContext}\n\nUser request:\n${payload.message}`
+          text: `${attachedFilesText(fileInputs)}Current page context:\n${pageContext}\n\nUser request:\n${payload.message}`
         }
       ]
     }
@@ -159,8 +211,16 @@ export function buildResponsesRequest(payload) {
   return request;
 }
 
-async function callOpenAiResponses({ apiKey, payload, fetchImpl = fetch }) {
-  const requestBody = buildResponsesRequest(payload);
+async function resolveAttachmentFileInputs({ apiKey, payload, attachmentStore, fetchImpl }) {
+  const attachmentIds = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
+  const hasToolOutputs = Array.isArray(payload.toolOutputs) && payload.toolOutputs.length > 0;
+  if (!attachmentIds.length || hasToolOutputs) return [];
+  return attachmentStore.openAiFileInputsForIds(attachmentIds, { apiKey, fetchImpl });
+}
+
+async function callOpenAiResponses({ apiKey, payload, attachmentStore, fetchImpl = fetch }) {
+  const fileInputs = await resolveAttachmentFileInputs({ apiKey, payload, attachmentStore, fetchImpl });
+  const requestBody = buildResponsesRequest({ ...payload, fileInputs });
   const startedAt = Date.now();
   const response = await fetchImpl("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -193,6 +253,7 @@ async function callOpenAiResponses({ apiKey, payload, fetchImpl = fetch }) {
 export function createAssistantProxyMiddleware(options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiKeyProvider = options.apiKeyProvider ?? (() => process.env.OPENAI_API_KEY);
+  const attachmentStore = options.attachmentStore ?? createAssistantAttachmentStore();
   return async function assistantProxy(req, res, next) {
     if (req.method !== "POST") {
       if (typeof next === "function") return next();
@@ -208,11 +269,48 @@ export function createAssistantProxyMiddleware(options = {}) {
     }
     try {
       const payload = await readJsonBody(req);
-      const assistantResponse = await callOpenAiResponses({ apiKey, payload, fetchImpl });
+      const assistantResponse = await callOpenAiResponses({ apiKey, payload, attachmentStore, fetchImpl });
       jsonResponse(res, 200, assistantResponse);
     } catch (error) {
       jsonResponse(res, error.statusCode ?? 400, {
         error: error.message ?? "Assistant request failed."
+      });
+    }
+  };
+}
+
+export function createAssistantAttachmentsMiddleware(options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const apiKeyProvider = options.apiKeyProvider ?? (() => process.env.OPENAI_API_KEY);
+  const attachmentStore = options.attachmentStore ?? createAssistantAttachmentStore();
+
+  return async function assistantAttachments(req, res, next) {
+    if (req.method !== "POST" && req.method !== "DELETE") {
+      if (typeof next === "function") return next();
+      jsonResponse(res, 405, { error: "Method not allowed." });
+      return;
+    }
+
+    try {
+      if (req.method === "POST") {
+        const payload = await readJsonBody(req, MAX_ASSISTANT_UPLOAD_BODY_BYTES);
+        const files = decodeUploadFiles(payload);
+        const attachments = [];
+        for (const file of files) {
+          attachments.push(await attachmentStore.stageFile(file));
+        }
+        jsonResponse(res, 200, { attachments });
+        return;
+      }
+
+      const payload = await readJsonBody(req);
+      const attachmentIds = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
+      const apiKey = await apiKeyProvider();
+      const result = await attachmentStore.cleanupAttachmentIds(attachmentIds, { apiKey, fetchImpl });
+      jsonResponse(res, 200, { ok: true, ...result });
+    } catch (error) {
+      jsonResponse(res, error.statusCode ?? 400, {
+        error: error.message ?? "Assistant attachment request failed."
       });
     }
   };

@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Electronics Studio</title>
+    <meta
+      name="description"
+      content="Design ESP32-family starter circuits, inspect pins, run electronics design checks, and generate ESP-IDF firmware inside RoboStudio."
+    />
+    <link rel="icon" href="data:," />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=account_tree,bolt,cable,center_focus_strong,content_copy,data_object,delete,device_hub,folder_open,link,note_add,package_2,precision_manufacturing,redo,restart_alt,rule,save,smart_toy,undo,upload_file,view_in_ar"
+    />
+  </head>
+  <body>
+    <div id="electronics-app">
+      <header class="electronics-topbar shell-header shell-header--electronics" aria-label="Electronics Studio command bar">
+        <div class="electronics-brand shell-header__brand">
+          <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">device_hub</span>
+          <span class="shell-header__title">Electronics Studio</span>
+          <nav class="page-links shell-header__pages" aria-label="Workspace pages">
+            <a class="page-link shell-header__page-link" href="./" aria-label="Open Assembly Studio" title="Open Assembly Studio">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">view_in_ar</span>
+              Assembly Studio
+            </a>
+            <a class="page-link shell-header__page-link" href="./parts.html" aria-label="Open Component Builder" title="Open Component Builder">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">package_2</span>
+              Component Builder
+            </a>
+            <a class="page-link shell-header__page-link" href="./physics.html" aria-label="Open Robotics Design Workbench" title="Open Robotics Design Workbench">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">precision_manufacturing</span>
+              Workbench
+            </a>
+            <a class="page-link shell-header__page-link" href="./circuits.html" aria-label="Open Circuit Lab" title="Open Circuit Lab">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">device_hub</span>
+              Circuit Lab
+            </a>
+          </nav>
+          <strong id="electronics-status" class="shell-header__status">Loading electronics workspace</strong>
+        </div>
+        <div class="electronics-actions shell-header__actions shell-header__group" role="group" aria-label="Electronics project actions">
+          <button id="new-circuit" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="New circuit" title="New" data-tooltip="New">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">note_add</span>
+            <span class="shell-header__label shell-header__label--hint">New</span>
+          </button>
+          <button id="save-circuit" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Save circuit" title="Save" data-tooltip="Save">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">save</span>
+            <span class="shell-header__label shell-header__label--hint">Save</span>
+          </button>
+          <button id="open-circuit" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Open circuit JSON" title="Open" data-tooltip="Open">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">folder_open</span>
+            <span class="shell-header__label shell-header__label--hint">Open</span>
+          </button>
+          <input id="circuit-file-input" type="file" accept="application/json,.json" hidden />
+          <span class="shell-header__divider" aria-hidden="true"></span>
+          <button id="undo-circuit" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Undo" title="Undo" data-tooltip="Undo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">undo</span>
+            <span class="shell-header__label shell-header__label--hint">Undo</span>
+          </button>
+          <button id="redo-circuit" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Redo" title="Redo" data-tooltip="Redo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">redo</span>
+            <span class="shell-header__label shell-header__label--hint">Redo</span>
+          </button>
+          <span class="shell-header__divider" aria-hidden="true"></span>
+          <button id="export-circuit-json" class="shell-header__button" type="button" aria-label="Export CircuitDesign JSON" title="Export CircuitDesign JSON">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">data_object</span>
+            <span class="shell-header__label">JSON</span>
+          </button>
+          <button id="export-firmware" class="shell-header__button" type="button" aria-label="Export ESP-IDF firmware project" title="Export ESP-IDF firmware project">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">upload_file</span>
+            <span class="shell-header__label">Firmware</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="electronics-shell">
+        <aside class="electronics-panel electronics-panel--left" aria-label="Circuit structure">
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-project-card" aria-labelledby="electronics-project-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-project-card" aria-expanded="true" aria-controls="electronics-project-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-project-heading" class="collapsible-card__title">Project</span>
+                <output id="circuit-summary" class="collapsible-card__meta">0 nets</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-project-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <label class="electronics-field" for="circuit-name">
+                  <span>Name</span>
+                  <input id="circuit-name" type="text" autocomplete="off" />
+                </label>
+                <label class="electronics-field" for="board-select">
+                  <span>Board</span>
+                  <select id="board-select"></select>
+                </label>
+                <dl id="board-readout" class="electronics-readout"></dl>
+              </div>
+            </div>
+          </section>
+
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-catalog-card" aria-labelledby="electronics-catalog-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-catalog-card" aria-expanded="true" aria-controls="electronics-catalog-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-catalog-heading" class="collapsible-card__title">Catalog</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-catalog-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="catalog-list" class="catalog-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-components-card" aria-labelledby="electronics-components-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-components-card" aria-expanded="true" aria-controls="electronics-components-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-components-heading" class="collapsible-card__title">Components</span>
+                <output id="component-count" class="collapsible-card__meta">0</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-components-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="component-list" class="component-list" aria-live="polite"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-nets-card" aria-labelledby="electronics-nets-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-nets-card" aria-expanded="true" aria-controls="electronics-nets-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-nets-heading" class="collapsible-card__title">Nets</span>
+                <output id="net-count" class="collapsible-card__meta">0</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-nets-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div class="net-builder">
+                  <label class="electronics-field" for="board-pin-select">
+                    <span>Board pin</span>
+                    <select id="board-pin-select"></select>
+                  </label>
+                  <label class="electronics-field" for="endpoint-component-select">
+                    <span>Component</span>
+                    <select id="endpoint-component-select"></select>
+                  </label>
+                  <label class="electronics-field" for="component-pin-select">
+                    <span>Pin</span>
+                    <select id="component-pin-select"></select>
+                  </label>
+                  <button id="connect-net" class="electronics-primary-button" type="button">Connect</button>
+                  <output id="pending-pin-status" class="net-builder__pending">Click two pins in the scene to wire directly.</output>
+                </div>
+                <div id="net-list" class="net-list" aria-live="polite"></div>
+              </div>
+            </div>
+          </section>
+        </aside>
+
+        <section class="electronics-stage" aria-label="Electronics design viewport">
+          <div id="electronics-viewport" class="electronics-viewport"></div>
+          <div class="electronics-floating-panel electronics-floating-panel--status">
+            <span id="viewport-readout">Board origin in millimeters</span>
+            <button id="frame-circuit" type="button" aria-label="Frame circuit" title="Frame circuit">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
+            </button>
+          </div>
+        </section>
+
+        <aside class="electronics-panel electronics-panel--right" aria-label="Inspector and checks">
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-inspector-card" aria-labelledby="electronics-inspector-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-inspector-card" aria-expanded="true" aria-controls="electronics-inspector-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-inspector-heading" class="collapsible-card__title">Inspector</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-inspector-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <p id="selected-summary" class="selection-summary">No component selected.</p>
+                <label class="electronics-field" for="component-name">
+                  <span>Name</span>
+                  <input id="component-name" type="text" autocomplete="off" disabled />
+                </label>
+                <div class="electronics-axis-grid">
+                  <label class="electronics-field" for="component-x">
+                    <span>X mm</span>
+                    <input id="component-x" type="number" step="1" disabled />
+                  </label>
+                  <label class="electronics-field" for="component-y">
+                    <span>Y mm</span>
+                    <input id="component-y" type="number" step="1" disabled />
+                  </label>
+                  <label class="electronics-field" for="component-z">
+                    <span>Z mm</span>
+                    <input id="component-z" type="number" step="1" disabled />
+                  </label>
+                </div>
+                <div class="electronics-inline-actions">
+                  <button id="apply-component" class="electronics-primary-button" type="button" disabled>Apply</button>
+                  <button id="remove-component" class="electronics-danger-button" type="button" disabled>Remove</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-drc-card" aria-labelledby="electronics-drc-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-drc-card" aria-expanded="true" aria-controls="electronics-drc-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-drc-heading" class="collapsible-card__title">Design Rule Check</span>
+                <output id="drc-summary" class="collapsible-card__meta">Pending</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-drc-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div class="electronics-inline-actions">
+                  <button id="run-drc" class="electronics-primary-button" type="button">Run DRC</button>
+                  <button id="suggest-output-pin" class="electronics-secondary-button" type="button">Suggest Output Pin</button>
+                </div>
+                <div id="drc-list" class="drc-list" aria-live="polite"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="electronics-section collapsible-card shell-card" data-card-id="electronics-code-card" aria-labelledby="electronics-code-heading">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="electronics-code-card" aria-expanded="true" aria-controls="electronics-code-content">
+              <span class="collapsible-card__label">
+                <span id="electronics-code-heading" class="collapsible-card__title">Generated Firmware</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="electronics-code-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div class="electronics-inline-actions">
+                  <button id="generate-code" class="electronics-primary-button" type="button">Generate</button>
+                  <select id="code-file-select" aria-label="Generated firmware file"></select>
+                </div>
+                <pre id="code-preview" class="code-preview" tabindex="0"></pre>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/electronics.js"></script>
+  </body>
+</html>

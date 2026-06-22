@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "allowedThirdPartySources": [
+    {
+      "sourceProject": "wokwi/wokwi-elements",
+      "version": "v1.9.2",
+      "sourceRevision": "3c8178e",
+      "licenseSpdx": "MIT",
+      "approvalStatus": "approved"
+    }
+  ],
+  "blockedSources": [
+    {
+      "sourceProject": "Fritzing parts",
+      "licenseSpdx": "CC-BY-SA-3.0",
+      "approvalStatus": "blocked"
+    }
+  ],
+  "approvedRoboStudioSources": [
+    "robostudio-bb400-native-svg",
+    "robostudio-circuit-procedural-visuals",
+    "robostudio-standard-servo-original",
+    "robostudio-6v-supply-original",
+    "robostudio-electrolytic-capacitor-original",
+    "robostudio-130-dc-motor-original",
+    "robostudio-potentiometer-native-svg",
+    "robostudio-l298n-simplified-procedural",
+    "robostudio-legacy-breadboard-procedural",
+    "robostudio-photorealistic-component-wrappers"
+  ]
+}

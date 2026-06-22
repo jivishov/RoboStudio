@@ -11,7 +11,7 @@
     <link rel="icon" href="data:," />
     <link
       rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=account_tree,analytics,arrow_selector_tool,bolt,center_focus_strong,content_copy,data_object,delete,device_hub,drive_folder_upload,fact_check,folder_open,help,layers,layers_clear,menu,note_add,open_in_full,open_with,orbit,package_2,pause_circle,person,play_circle,precision_manufacturing,redo,restart_alt,rotate_right,rule,save,smart_toy,undo,upload_file,view_in_ar,zoom_in"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=account_tree,analytics,arrow_selector_tool,bolt,center_focus_strong,content_copy,data_object,delete,device_hub,drive_folder_upload,fact_check,folder_open,help,layers,layers_clear,menu,note_add,open_in_full,open_with,orbit,package_2,pause_circle,person,play_circle,precision_manufacturing,redo,restart_alt,rotate_right,rule,save,school,smart_toy,undo,upload_file,view_in_ar,zoom_in"
     />
   </head>
   <body>
@@ -29,6 +29,10 @@
               <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">package_2</span>
               Component Builder
             </a>
+            <a class="page-link shell-header__page-link" href="./circuits.html" aria-label="Open Circuit Lab" title="Open Circuit Lab">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">device_hub</span>
+              Circuit Lab
+            </a>
           </nav>
           <strong id="snapshot-status" class="shell-header__status">Loading current assembly</strong>
         </div>
@@ -40,6 +44,10 @@
           <button class="shell-header__button" type="button" data-mode="analyze">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">analytics</span>
             <span class="shell-header__label">Analyze</span>
+          </button>
+          <button class="shell-header__button" type="button" data-mode="lab">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">school</span>
+            <span class="shell-header__label">Lab</span>
           </button>
           <button class="shell-header__button" type="button" data-mode="actuators">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">bolt</span>
@@ -67,6 +75,16 @@
             <span class="material-symbols-rounded app-icon" aria-hidden="true">folder_open</span>
             <span class="shell-header__label shell-header__label--hint">Import</span>
           </button>
+          <span class="shell-header__divider" aria-hidden="true"></span>
+          <button id="undo-design" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Undo" title="Undo" data-tooltip="Undo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">undo</span>
+            <span class="shell-header__label shell-header__label--hint">Undo</span>
+          </button>
+          <button id="redo-design" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Redo" title="Redo" data-tooltip="Redo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">redo</span>
+            <span class="shell-header__label shell-header__label--hint">Redo</span>
+          </button>
+          <span class="shell-header__divider" aria-hidden="true"></span>
           <button id="export-design" class="shell-header__button" type="button" aria-label="Export robot design JSON" title="Export robot design JSON">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">data_object</span>
             <span class="shell-header__label">JSON</span>
@@ -232,6 +250,7 @@
               <ol>
                 <li><b>Model</b> - group parts into links, define joints, add collision proxies, and place the tool center.</li>
                 <li><b>Analyze</b> - move joint sliders or solve an inverse-kinematics target.</li>
+                <li><b>Lab</b> - run course checkpoints, capture experiment evidence, and export report/project deliverables.</li>
                 <li><b>Actuators</b> - assign drives and check torque and speed margins.</li>
                 <li><b>Simulate</b> - initialize Rapier proxy bodies, then step or run the simulation.</li>
                 <li><b>Audit</b> - review readiness findings before exporting or iterating.</li>
@@ -252,6 +271,10 @@
             <section>
               <h3>Actuators mode</h3>
               <p>Assign an actuator to each movable joint. Torque margin compares continuous torque to the recommended load. Speed margin compares actuator speed to the target speed assumption.</p>
+            </section>
+            <section>
+              <h3>Lab mode</h3>
+              <p>Use checkpoints, experiment runs, CSV export, and HTML reports to turn the current RobotDesign into undergraduate lab evidence.</p>
             </section>
             <section>
               <h3>Simulate mode</h3>

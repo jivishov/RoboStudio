@@ -8,13 +8,16 @@
     "build": "vite build",
     "test": "node --test tests/**/*.test.js",
     "preview": "vite preview --host 127.0.0.1",
-    "export:glb": "node scripts/export-glb.js"
+    "circuits:assets:extract": "python scripts/circuits/extract-photoreal-raster-sources.py",
+    "circuits:assets:build": "node scripts/circuits/build-visual-catalog.mjs",
+    "circuits:assets:validate": "node scripts/circuits/validate-visual-assets.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "latest",
     "@jscad/modeling": "latest",
     "@jscad/stl-serializer": "latest",
     "@supabase/supabase-js": "latest",
+    "jszip": "latest",
     "three": "latest",
     "vite": "latest"
   }

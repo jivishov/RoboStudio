@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Circuit Lab</title>
+    <meta
+      name="description"
+      content="Build robotics breadboard circuits, test wiring, and generate source-only controller code in RoboStudio."
+    />
+    <link rel="icon" href="data:," />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20,500,0,0&amp;display=block&amp;icon_names=bolt,cable,center_focus_strong,content_copy,data_object,delete,device_hub,fact_check,folder_open,link,note_add,package_2,precision_manufacturing,redo,restart_alt,rotate_left,rotate_right,rule,save,smart_toy,undo,upload_file,view_in_ar,zoom_in,zoom_out"
+    />
+  </head>
+  <body>
+    <div id="circuit-lab-app">
+      <header class="circuit-topbar shell-header shell-header--circuits" aria-label="Circuit Lab command bar">
+        <div class="circuit-brand shell-header__brand">
+          <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">cable</span>
+          <span class="shell-header__title">Circuit Lab</span>
+          <nav class="page-links shell-header__pages" aria-label="Workspace pages">
+            <a class="page-link shell-header__page-link" href="./" aria-label="Open Assembly Studio" title="Open Assembly Studio">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">view_in_ar</span>
+              Assembly Studio
+            </a>
+            <a class="page-link shell-header__page-link" href="./parts.html" aria-label="Open Component Builder" title="Open Component Builder">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">package_2</span>
+              Component Builder
+            </a>
+            <a class="page-link shell-header__page-link" href="./physics.html" aria-label="Open Robotics Design Workbench" title="Open Robotics Design Workbench">
+              <span class="material-symbols-rounded app-icon app-icon--page" aria-hidden="true">precision_manufacturing</span>
+              Workbench
+            </a>
+          </nav>
+          <strong id="circuit-status" class="shell-header__status">Loading Circuit Lab</strong>
+        </div>
+
+        <div class="circuit-actions shell-header__actions shell-header__group" role="group" aria-label="Circuit Lab project actions">
+          <button id="new-circuit-lab" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="New project" title="New" data-tooltip="New">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">note_add</span>
+            <span class="shell-header__label shell-header__label--hint">New</span>
+          </button>
+          <button id="save-circuit-lab" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Save project" title="Save" data-tooltip="Save">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">save</span>
+            <span class="shell-header__label shell-header__label--hint">Save</span>
+          </button>
+          <button id="open-circuit-lab" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Open project JSON" title="Open" data-tooltip="Open">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">folder_open</span>
+            <span class="shell-header__label shell-header__label--hint">Open</span>
+          </button>
+          <input id="circuit-lab-file-input" type="file" accept="application/json,.json" hidden />
+          <input id="fritzing-fzp-input" type="file" accept=".fzp,application/xml,text/xml" hidden />
+          <input id="fritzing-svg-input" type="file" accept=".svg,image/svg+xml" hidden />
+          <span class="shell-header__divider" aria-hidden="true"></span>
+          <button id="undo-circuit-lab" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Undo" title="Undo" data-tooltip="Undo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">undo</span>
+            <span class="shell-header__label shell-header__label--hint">Undo</span>
+          </button>
+          <button id="redo-circuit-lab" class="shell-header__button shell-header__button--icon-only" type="button" aria-label="Redo" title="Redo" data-tooltip="Redo" disabled>
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">redo</span>
+            <span class="shell-header__label shell-header__label--hint">Redo</span>
+          </button>
+          <span class="shell-header__divider" aria-hidden="true"></span>
+          <button id="export-circuit-lab-json" class="shell-header__button" type="button" aria-label="Export Circuit Lab JSON">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">data_object</span>
+            <span class="shell-header__label">JSON</span>
+          </button>
+          <button id="download-circuit-lab-source" class="shell-header__button" type="button" aria-label="Download selected source file">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">upload_file</span>
+            <span class="shell-header__label">Source</span>
+          </button>
+        </div>
+
+        <nav class="circuit-mode-tabs shell-header__modes shell-header__group" aria-label="Circuit Lab modes">
+          <button class="shell-header__button is-active" type="button" data-circuit-mode="select">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
+            <span class="shell-header__label">Select</span>
+          </button>
+          <button class="shell-header__button" type="button" data-circuit-mode="place">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">device_hub</span>
+            <span class="shell-header__label">Place</span>
+          </button>
+          <button class="shell-header__button" type="button" data-circuit-mode="wire">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">link</span>
+            <span class="shell-header__label">Wire</span>
+          </button>
+          <button class="shell-header__button" type="button" data-circuit-mode="test">
+            <span class="material-symbols-rounded app-icon" aria-hidden="true">fact_check</span>
+            <span class="shell-header__label">Test</span>
+          </button>
+        </nav>
+      </header>
+
+      <main class="circuit-shell">
+        <aside class="circuit-panel circuit-panel--left" aria-label="Circuit setup and hardware">
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-project-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-project-card" aria-expanded="true" aria-controls="circuit-project-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Project</span>
+                <output id="circuit-lab-summary" class="collapsible-card__meta">0 wires</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-project-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <label class="circuit-field" for="circuit-lab-name">
+                  <span>Name</span>
+                  <input id="circuit-lab-name" type="text" autocomplete="off" />
+                </label>
+                <dl id="circuit-lab-readout" class="circuit-readout"></dl>
+              </div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-starters-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-starters-card" aria-expanded="true" aria-controls="circuit-starters-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Starter Circuits</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-starters-card-content" class="collapsible-card__content">
+              <div id="starter-list" class="collapsible-card__inner starter-list"></div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-catalog-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-catalog-card" aria-expanded="true" aria-controls="circuit-catalog-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Hardware Library</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-catalog-card-content" class="collapsible-card__content">
+              <div id="hardware-list" class="collapsible-card__inner hardware-list"></div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-components-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-components-card" aria-expanded="true" aria-controls="circuit-components-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Placed Components</span>
+                <output id="circuit-component-count" class="collapsible-card__meta">0</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-components-card-content" class="collapsible-card__content">
+              <div id="circuit-component-list" class="collapsible-card__inner circuit-item-list"></div>
+            </div>
+          </section>
+        </aside>
+
+        <section class="circuit-stage" aria-label="Circuit Lab bench">
+          <svg id="circuit-bench" class="circuit-bench" viewBox="0 0 1050 650" role="img" aria-label="Top-down robotics circuit bench"></svg>
+          <div class="circuit-floating circuit-floating--view" role="group" aria-label="Bench zoom controls">
+            <button id="circuit-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">zoom_out</span>
+            </button>
+            <output id="circuit-zoom-level" aria-label="Current bench zoom">100%</output>
+            <button id="circuit-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">zoom_in</span>
+            </button>
+            <button id="circuit-zoom-reset" type="button" title="Reset zoom" aria-label="Reset zoom">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
+            </button>
+          </div>
+          <div class="circuit-floating circuit-floating--status">
+            <span id="wire-status">Select a component or switch to Wire mode.</span>
+            <button id="run-circuit-test" type="button" title="Run circuit test" aria-label="Run circuit test">
+              <span class="material-symbols-rounded app-icon" aria-hidden="true">fact_check</span>
+            </button>
+          </div>
+        </section>
+
+        <aside class="circuit-panel circuit-panel--right" aria-label="Inspector, test, and code">
+          <nav class="circuit-workflow-tabs" aria-label="Circuit Lab workflow tabs">
+            <button type="button" data-circuit-tab="inspect" class="is-active">Inspect</button>
+            <button type="button" data-circuit-tab="validate">Validate</button>
+            <button type="button" data-circuit-tab="bind">Bind</button>
+            <button type="button" data-circuit-tab="build">Build</button>
+          </nav>
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-inspector-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-inspector-card" aria-expanded="true" aria-controls="circuit-inspector-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Inspector</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-inspector-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <p id="circuit-selected-summary" class="circuit-selection-summary">No component selected.</p>
+                <label class="circuit-field" for="circuit-component-name">
+                  <span>Name</span>
+                  <input id="circuit-component-name" type="text" autocomplete="off" disabled />
+                </label>
+                <div class="circuit-axis-grid">
+                  <label class="circuit-field" for="circuit-component-x">
+                    <span>X mm</span>
+                    <input id="circuit-component-x" type="number" step="1" disabled />
+                  </label>
+                  <label class="circuit-field" for="circuit-component-y">
+                    <span>Y mm</span>
+                    <input id="circuit-component-y" type="number" step="1" disabled />
+                  </label>
+                  <label class="circuit-field" for="circuit-component-scale">
+                    <span>Size %</span>
+                    <input id="circuit-component-scale" type="number" min="55" max="190" step="5" disabled />
+                  </label>
+                  <label class="circuit-field" for="circuit-component-rotation">
+                    <span>Rotation deg</span>
+                    <input id="circuit-component-rotation" type="number" min="0" max="359" step="1" disabled />
+                  </label>
+                </div>
+                <div class="circuit-rotation-actions" aria-label="Rotation controls">
+                  <button id="rotate-circuit-component-reverse" type="button" disabled>
+                    <span class="material-symbols-rounded app-icon" aria-hidden="true">rotate_left</span>
+                    Reverse
+                  </button>
+                  <button id="rotate-circuit-component-clockwise" type="button" disabled>
+                    <span class="material-symbols-rounded app-icon" aria-hidden="true">rotate_right</span>
+                    Clockwise
+                  </button>
+                </div>
+                <details class="circuit-details">
+                  <summary>Engineering specifications</summary>
+                  <div class="circuit-axis-grid">
+                    <label class="circuit-field" for="circuit-engineering-min-v">
+                      <span>Min V</span>
+                      <input id="circuit-engineering-min-v" type="number" step="0.1" disabled />
+                    </label>
+                    <label class="circuit-field" for="circuit-engineering-nominal-v">
+                      <span>Nominal V</span>
+                      <input id="circuit-engineering-nominal-v" type="number" step="0.1" disabled />
+                    </label>
+                    <label class="circuit-field" for="circuit-engineering-max-v">
+                      <span>Max V</span>
+                      <input id="circuit-engineering-max-v" type="number" step="0.1" disabled />
+                    </label>
+                    <label class="circuit-field" for="circuit-engineering-typical-ma">
+                      <span>Typical mA</span>
+                      <input id="circuit-engineering-typical-ma" type="number" step="1" disabled />
+                    </label>
+                    <label class="circuit-field" for="circuit-engineering-peak-ma">
+                      <span>Peak mA</span>
+                      <input id="circuit-engineering-peak-ma" type="number" step="1" disabled />
+                    </label>
+                    <label class="circuit-field" for="circuit-engineering-stall-ma">
+                      <span>Stall mA</span>
+                      <input id="circuit-engineering-stall-ma" type="number" step="1" disabled />
+                    </label>
+                  </div>
+                </details>
+                <div id="circuit-control-panel" class="circuit-control-panel" aria-live="polite"></div>
+                <div class="circuit-inline-actions">
+                  <button id="apply-circuit-component" class="circuit-primary-button" type="button" disabled>Apply</button>
+                  <button id="remove-circuit-component" class="circuit-danger-button" type="button" disabled>Remove</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-binding-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-binding-card" aria-expanded="true" aria-controls="circuit-binding-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Binding</span>
+                <output id="circuit-binding-summary" class="collapsible-card__meta">Absent</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-binding-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <textarea id="circuit-binding-json" class="circuit-json-editor" spellcheck="false" aria-label="Mechatronics binding JSON"></textarea>
+                <div class="circuit-inline-actions">
+                  <button id="apply-circuit-binding" class="circuit-primary-button" type="button">Apply Binding</button>
+                  <button id="save-circuit-binding" type="button">Save Binding</button>
+                </div>
+                <div id="circuit-binding-status" class="circuit-status-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-wires-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-wires-card" aria-expanded="true" aria-controls="circuit-wires-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Wires</span>
+                <output id="circuit-wire-count" class="collapsible-card__meta">0</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-wires-card-content" class="collapsible-card__content">
+              <div id="circuit-wire-list" class="collapsible-card__inner circuit-item-list"></div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-test-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-test-card" aria-expanded="true" aria-controls="circuit-test-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Circuit Test</span>
+                <output id="circuit-test-summary" class="collapsible-card__meta">Pending</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-test-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="circuit-test-list" class="circuit-test-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-bringup-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-bringup-card" aria-expanded="true" aria-controls="circuit-bringup-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Bring-up Steps</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-bringup-card-content" class="collapsible-card__content">
+              <ol id="circuit-bringup-list" class="collapsible-card__inner bringup-list"></ol>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-source-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-source-card" aria-expanded="true" aria-controls="circuit-source-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Generated Source</span>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-source-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <select id="circuit-source-file" aria-label="Generated source file"></select>
+                <pre id="circuit-source-preview" class="circuit-source-preview" tabindex="0"></pre>
+              </div>
+            </div>
+          </section>
+
+          <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-build-card">
+            <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-build-card" aria-expanded="true" aria-controls="circuit-build-card-content">
+              <span class="collapsible-card__label">
+                <span class="collapsible-card__title">Build Guide</span>
+                <output id="circuit-readiness-summary" class="collapsible-card__meta">Pending</output>
+              </span>
+              <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            </button>
+            <div id="circuit-build-card-content" class="collapsible-card__content">
+              <div class="collapsible-card__inner">
+                <div id="circuit-readiness-list" class="circuit-status-list"></div>
+                <button id="export-circuit-build-guide" type="button">Export Build Guide</button>
+                <div class="circuit-table-stack">
+                  <h3>Pin map</h3>
+                  <div id="circuit-pin-map-table" class="circuit-table-scroll"></div>
+                  <h3>Harness</h3>
+                  <div id="circuit-harness-table" class="circuit-table-scroll"></div>
+                  <h3>BOM</h3>
+                  <div id="circuit-bom-table" class="circuit-table-scroll"></div>
+                  <h3>Checklist</h3>
+                  <div id="circuit-checklist-list" class="circuit-status-list"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/circuits.js"></script>
+  </body>
+</html>

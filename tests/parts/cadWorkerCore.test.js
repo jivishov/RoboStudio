@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileBodiesToMeshResults } from "../../src/parts/cadWorkerCore.js";
+import {
+  compileBodiesToMeshResults,
+  serializeWorkerError
+} from "../../src/parts/cadWorkerCore.js";
+import { AdvancedCadBackendRequiredError } from "../../src/parts/advancedCadRecipe.js";
+import { PartCadCompileError } from "../../src/parts/cadCompile.js";
 import { createCircularHole } from "../../src/parts/sketch.js";
 import { createBodyFromTemplate } from "../../src/parts/templates.js";
 
@@ -35,4 +40,18 @@ test("worker compile core serializes invalid body errors", () => {
   assert.equal(errors[0].bodyId, body.id);
   assert.equal(errors[0].code, "cad-compile-error");
   assert.ok(errors[0].issues.some((issue) => issue.code === "cut-outside-outer-profile"));
+});
+
+test("worker error serialization preserves wrapped advanced CAD backend codes", () => {
+  const wrapped = new PartCadCompileError("CAD compile failed for Backend mount.", {
+    bodyId: "backend_mount",
+    cause: new AdvancedCadBackendRequiredError()
+  });
+
+  assert.deepEqual(serializeWorkerError(wrapped), {
+    bodyId: "backend_mount",
+    code: "advanced-cad-backend-required",
+    message: "CAD compile failed for Backend mount.",
+    issues: []
+  });
 });
