@@ -5,7 +5,6 @@
 node_modules/
 dist/
 coverage/
-test-results/
 .playwright-mcp/
 
 STL_files/
@@ -13,8 +12,10 @@ STL_files/
 *.STL
 *.rar
 artifacts/
+backups/
 
 logs/
+test-results/
 *.png
 *.mp4
 !src/circuits/assets/photoreal/**/*.png

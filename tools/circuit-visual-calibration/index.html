@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Circuit Visual Calibration</title>
+  </head>
+  <body>
+    <main id="calibration-app">
+      <section class="panel">
+        <h1>Circuit Visual Calibration</h1>
+        <label>
+          Source PNG/SVG
+          <input id="asset-input" type="file" accept="image/png,image/svg+xml" />
+        </label>
+        <label>
+          Physical width (mm)
+          <input id="width-mm" type="number" min="0.1" step="0.01" value="40" />
+        </label>
+        <label>
+          Physical height (mm)
+          <input id="height-mm" type="number" min="0.1" step="0.01" value="24" />
+        </label>
+        <button id="export-manifest" type="button">Export Manifest Fragment</button>
+        <pre id="manifest-output"></pre>
+      </section>
+      <section class="stage">
+        <svg id="preview" viewBox="-20 -12 40 24" role="img" aria-label="Circuit asset calibration preview">
+          <rect x="-20" y="-12" width="40" height="24" fill="#f8fafc" stroke="#94a3b8" />
+          <text x="0" y="0" text-anchor="middle">Load PNG/SVG</text>
+        </svg>
+      </section>
+    </main>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
