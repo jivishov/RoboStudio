@@ -58,6 +58,7 @@ import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
 import { isAssistantEvalEnabled } from "./assistant/evalScenarios.js";
 import { evaluateMechatronicsReadiness } from "./mechatronics/readiness.js";
+import { isAssemblyHandoffRequested } from "./studio/partsHandoff.js";
 import { resolveFirmwareChannelCommand } from "./mechatronics/runtimeBridge.js";
 import { createWorkspaceStore } from "./workspaceStore.js";
 
@@ -3162,12 +3163,13 @@ async function loadAssembly() {
     const workspace = evalMode
       ? { currentAssemblySnapshot: null, currentRobotDesign: null, currentCircuitDesign: null, currentCircuitLabProject: null, currentMechatronicsBinding: null, partLibraryItems: [] }
       : await createWorkspaceStore().readWorkspace();
-    const snapshot = workspace.currentAssemblySnapshot;
+    const assemblyHandoffRequested = isAssemblyHandoffRequested(window.location.search);
+    const snapshot = assemblyHandoffRequested ? workspace.currentAssemblySnapshot : null;
     state.currentCircuitDesign = workspace.currentCircuitDesign ?? null;
     state.currentCircuitLabProject = workspace.currentCircuitLabProject ?? null;
     state.currentMechatronicsBinding = workspace.currentMechatronicsBinding ?? null;
     state.partLibraryItems = workspace.partLibraryItems ?? [];
-    const savedDesign = workspace.currentRobotDesign;
+    const savedDesign = assemblyHandoffRequested ? workspace.currentRobotDesign : null;
     if (savedDesign) {
       state.mechatronicsReadiness = evaluateMechatronicsReadiness({
         robotDesign: savedDesign,
@@ -3186,7 +3188,7 @@ async function loadAssembly() {
       state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, snapshot.parts ?? []);
     } else {
       let loadedSample = false;
-      if (import.meta.env.DEV) {
+      if (import.meta.env.DEV && (evalMode || assemblyHandoffRequested)) {
         try {
           state.assemblyRoot = await createRoboticArmAssembly(loadStlGeometry);
           state.assemblyRoot.name = "sample_robotic_arm";

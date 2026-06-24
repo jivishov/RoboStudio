@@ -1,3 +1,7 @@
+export function isAssemblyHandoffRequested(search = globalThis.location?.search ?? "") {
+  return new URLSearchParams(search).get("fromAssembly") === "1";
+}
+
 export function isPartsHandoffRequested(search = globalThis.location?.search ?? "") {
   return new URLSearchParams(search).get("fromParts") === "1";
 }

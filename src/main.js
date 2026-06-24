@@ -1798,7 +1798,7 @@ async function openPhysicsWorkbench() {
 
   try {
     await saveCurrentAssemblySnapshot(await createAssemblyGlb());
-    window.location.href = `${import.meta.env.BASE_URL}physics.html`;
+    window.location.href = `${import.meta.env.BASE_URL}physics.html?fromAssembly=1`;
   } catch (error) {
     console.error("Workbench handoff failed", error);
     openPhysicsButton.disabled = false;

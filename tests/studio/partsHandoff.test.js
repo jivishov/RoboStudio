@@ -3,9 +3,16 @@ import test from "node:test";
 
 import {
   generatedSnapshotParts,
+  isAssemblyHandoffRequested,
   isPartsHandoffRequested,
   isValidGeneratedAssemblySnapshot
 } from "../../src/studio/partsHandoff.js";
+
+test("gates Assembly Studio snapshot loading behind fromAssembly query", () => {
+  assert.equal(isAssemblyHandoffRequested("?fromAssembly=1"), true);
+  assert.equal(isAssemblyHandoffRequested("?fromAssembly=0"), false);
+  assert.equal(isAssemblyHandoffRequested(""), false);
+});
 
 test("gates generated snapshot loading behind fromParts query", () => {
   assert.equal(isPartsHandoffRequested("?fromParts=1"), true);
