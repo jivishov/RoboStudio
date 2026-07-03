@@ -1335,6 +1335,20 @@ strong {
   transform: translate(-50%, 0);
 }
 
+@media (min-width: 701px) {
+  #physics-app ~ .assistant-card {
+    bottom: 84px;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 980px) {
+  #physics-app ~ .assistant-card {
+    bottom: 212px;
+    width: min(430px, calc(100vw - 28px));
+    max-height: min(360px, calc(100vh - 228px));
+  }
+}
+
 .result-card[data-state="ok"],
 .audit-item[data-state="ok"] {
   border-left: 3px solid var(--green);
