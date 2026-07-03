@@ -42,6 +42,11 @@ import {
 } from "./physics/kinematics.js";
 import { baseStability, computeMassProperties, estimateJointLoads } from "./physics/mass.js";
 import {
+  applyLinkWorldTransforms,
+  createMeshPoseBindings,
+  snapshotsToLinkMatrices
+} from "./physics/meshPose.js";
+import {
   collectAssemblyPartRecords,
   createRobotDesign,
   finiteNumber,
@@ -193,6 +198,7 @@ let designHistoryCommitTimer = null;
 const state = {
   mode: "model",
   assemblyRoot: null,
+  meshBindings: new Map(),
   currentSnapshot: null,
   currentCircuitDesign: null,
   currentCircuitLabProject: null,
@@ -232,6 +238,7 @@ const state = {
     status: "not initialized",
     message: "Simulation has not been initialized.",
     gravityEnabled: true,
+    motorsEnabled: false,
     timestep: 1 / 60,
     lastError: null
   }
@@ -675,17 +682,42 @@ function invalidateSimulation(message = "Simulation has not been initialized.") 
   setSimulationStatus("not initialized", message);
 }
 
+function simulationDrivesPose() {
+  return dynamics.status().ready && ["running", "paused", "stepped"].includes(state.simulation.status);
+}
+
+function applyFkPoseToMeshes() {
+  applyLinkWorldTransforms(state.meshBindings, state.design, state.transforms);
+}
+
+function applySimulationPoseToMeshes(options = {}) {
+  if (!dynamics.status().ready) return null;
+  const matrices = snapshotsToLinkMatrices(dynamics.bodySnapshots());
+  applyLinkWorldTransforms(state.meshBindings, state.design, matrices);
+  if (options.updateOverlays) {
+    const collisions = checkCollisionProxies(state.design, matrices);
+    overlays.update(state.design, matrices, { collisions });
+    overlays.setTarget(state.ikTarget);
+  }
+  return matrices;
+}
+
 function readSimulationOptions() {
   const gravityField = modeControls.querySelector("#sim-gravity");
+  const motorsField = modeControls.querySelector("#sim-motors");
   const timestepField = modeControls.querySelector("#sim-timestep");
   if (gravityField instanceof HTMLSelectElement) {
     state.simulation.gravityEnabled = gravityField.value !== "off";
+  }
+  if (motorsField instanceof HTMLSelectElement) {
+    state.simulation.motorsEnabled = motorsField.value === "hold";
   }
   if (timestepField instanceof HTMLInputElement) {
     state.simulation.timestep = Math.min(1 / 15, Math.max(1 / 240, finiteNumber(timestepField.value, state.simulation.timestep)));
   }
   return {
     gravityEnabled: state.simulation.gravityEnabled,
+    motorsEnabled: state.simulation.motorsEnabled,
     timestep: state.simulation.timestep
   };
 }
@@ -781,7 +813,12 @@ function analyzeDesign() {
   const urdf = createUrdfExport(state.design, state.partRecords);
   state.analysis = { collisions, mass, loads, actuatorResults, stability, topology, audit, urdf };
   refreshMechatronicsReadiness();
-  overlays.update(state.design, state.transforms, { collisions });
+  if (simulationDrivesPose()) {
+    applySimulationPoseToMeshes({ updateOverlays: true });
+  } else {
+    applyFkPoseToMeshes();
+    overlays.update(state.design, state.transforms, { collisions });
+  }
   overlays.setTarget(state.ikTarget);
 }
 
@@ -1408,7 +1445,9 @@ function renderSimulateControls() {
       <div><span>Contact / collision</span><strong>${proxyConflicts ? `${proxyConflicts} proxy conflicts` : "No proxy conflicts"}</strong></div>
     </div>
     <label class="form-field"><span>Gravity</span><select id="sim-gravity"><option value="on" ${state.simulation.gravityEnabled ? "selected" : ""}>On</option><option value="off" ${state.simulation.gravityEnabled ? "" : "selected"}>Off</option></select></label>
+    <label class="form-field"><span>Motors</span><select id="sim-motors"><option value="off" ${state.simulation.motorsEnabled ? "" : "selected"}>Off</option><option value="hold" ${state.simulation.motorsEnabled ? "selected" : ""}>Hold pose</option></select></label>
     <label class="form-field"><span>Timestep seconds</span><input id="sim-timestep" type="number" step="0.001" min="0.004" max="0.067" value="${escapeHtml(state.simulation.timestep)}" /></label>
+    <p class="form-note">Motors are proxy-simulation controls for assigned actuators, not calibrated hardware torque output.</p>
     <p class="form-note">${escapeHtml(state.simulation.message)}</p>
     <div class="form-actions">
       <button class="compact-button" id="sim-reset-panel" type="button">Initialize / Reset</button>
@@ -2729,6 +2768,7 @@ async function resetSimulation() {
     dynamics.clear();
     setSimulationStatus("failed", error?.message ?? "Simulation failed to initialize.");
   }
+  // "initialized" is not a simulation-driven pose state; renderAll restores the editable FK pose.
   renderAll();
 }
 
@@ -2738,6 +2778,7 @@ async function stepSimulation() {
   if (!dynamics.status().ready) return;
   dynamics.step(1);
   setSimulationStatus("stepped", `Advanced one timestep to ${dynamics.status().steps} step(s).`);
+  applySimulationPoseToMeshes({ updateOverlays: true });
   renderAll();
 }
 
@@ -2756,6 +2797,7 @@ async function toggleSimulation() {
       if (state.simulation.status !== "running") return;
       dynamics.step(1);
       state.simulation.message = `Running at ${dynamics.status().steps} step(s).`;
+      applySimulationPoseToMeshes({ updateOverlays: dynamics.status().steps % 10 === 0 });
       renderViewportReadout();
       if (state.mode === "simulate" && dynamics.status().steps % 10 === 0) renderSimulateControls();
     }, 1000 / 30);
@@ -3049,7 +3091,7 @@ modeControls.addEventListener("change", (event) => {
   if (target.id === "proxy-select") state.selectedProxyId = target.value;
   else if (target.id === "effector-select") state.selectedEffectorId = target.value;
   else if (target.id === "actuator-joint") state.selectedJointId = target.value;
-  else if (target.id === "sim-gravity") {
+  else if (target.id === "sim-gravity" || target.id === "sim-motors") {
     const wasReady = dynamics.status().ready;
     readSimulationOptions();
     if (wasReady) invalidateSimulation("Simulation options changed; initialize again.");
@@ -3090,7 +3132,10 @@ for (const button of modeButtons) {
 }
 
 frameAssemblyButton.addEventListener("click", () => {
-  if (state.assemblyRoot) fitCameraToObject(state.assemblyRoot);
+  if (state.assemblyRoot) {
+    state.assemblyRoot.updateMatrixWorld(true);
+    fitCameraToObject(state.assemblyRoot);
+  }
 });
 saveDesignButton.addEventListener("click", saveCurrentDesign);
 loadDesignButton.addEventListener("click", () => designFileInput.click());
@@ -3178,6 +3223,7 @@ async function loadAssembly() {
       });
     }
     renderSummaryPlaceholder();
+    let snapshotParts = [];
     if (snapshot?.glb) {
       state.currentSnapshot = snapshot;
       state.assemblyRoot = await glbToObject(snapshot.glb);
@@ -3185,7 +3231,8 @@ async function loadAssembly() {
       assemblySource.textContent = "Current snapshot";
       assemblyName.textContent = `Saved ${new Date(snapshot.savedAt).toLocaleTimeString()}`;
       showStatus("Loaded from Assembly Studio");
-      state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, snapshot.parts ?? []);
+      snapshotParts = snapshot.parts ?? [];
+      state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, snapshotParts);
     } else {
       let loadedSample = false;
       if (import.meta.env.DEV && (evalMode || assemblyHandoffRequested)) {
@@ -3209,7 +3256,8 @@ async function loadAssembly() {
             : "No snapshot found; loaded sample arm"
           : "Open the Assembly Studio and import STL files to begin"
       );
-      state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, collectAssemblyParts(state.assemblyRoot));
+      snapshotParts = collectAssemblyParts(state.assemblyRoot);
+      state.partRecords = collectAssemblyPartRecords(state.assemblyRoot, snapshotParts);
       state.currentSnapshot = {
         savedAt: new Date().toISOString(),
         glb: null,
@@ -3224,7 +3272,7 @@ async function loadAssembly() {
       child.receiveShadow = true;
     });
     scene.add(state.assemblyRoot);
-    fitCameraToObject(state.assemblyRoot);
+    state.meshBindings = createMeshPoseBindings(state.assemblyRoot, snapshotParts);
 
     const reuseSavedDesign = designMatchesParts(savedDesign, state.partRecords);
     state.design = reuseSavedDesign
@@ -3238,6 +3286,8 @@ async function loadAssembly() {
     invalidateSimulation("Simulation has not been initialized.");
     resetDesignHistory();
     renderAll();
+    state.assemblyRoot.updateMatrixWorld(true);
+    fitCameraToObject(state.assemblyRoot);
     if (reuseSavedDesign && snapshotNewerThanDesign(snapshot, savedDesign)) {
       showStatus("Assembly geometry changed after the saved RobotDesign; refresh mass and proxies from bounds if needed.", 7200);
     }

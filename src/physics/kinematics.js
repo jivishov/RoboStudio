@@ -235,8 +235,11 @@ export function solveIKCCD(design, endEffectorId, targetPosition, options = {}) 
       if (toEnd.lengthSq() < 1e-6 || toTarget.lengthSq() < 1e-6) continue;
 
       const axis = frame.axis.normalize();
-      const endProjected = toEnd.clone().sub(axis.clone().multiplyScalar(toEnd.dot(axis))).normalize();
-      const targetProjected = toTarget.clone().sub(axis.clone().multiplyScalar(toTarget.dot(axis))).normalize();
+      const endProjected = toEnd.clone().sub(axis.clone().multiplyScalar(toEnd.dot(axis)));
+      const targetProjected = toTarget.clone().sub(axis.clone().multiplyScalar(toTarget.dot(axis)));
+      if (endProjected.lengthSq() < 1e-8 || targetProjected.lengthSq() < 1e-8) continue;
+      endProjected.normalize();
+      targetProjected.normalize();
       const cross = new THREE.Vector3().crossVectors(endProjected, targetProjected);
       const signed = Math.atan2(cross.dot(axis), endProjected.dot(targetProjected));
       const next = jointAngles[joint.id] + radToDeg(signed) * stepScale;

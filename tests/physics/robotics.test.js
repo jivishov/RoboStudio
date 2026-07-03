@@ -1,13 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as THREE from "three";
 import { deleteActuator, evaluateActuators, upsertActuator } from "../../src/physics/actuators.js";
 import { runDesignAudit } from "../../src/physics/audit.js";
-import { checkCollisionProxies, collisionPairKey } from "../../src/physics/collision.js";
+import { checkCollisionProxies, collisionPairKey, proxyAabb } from "../../src/physics/collision.js";
 import { DynamicsRunner } from "../../src/physics/dynamics.js";
 import { createUrdfExport, preflightUrdfExport, serializeRobotDesign, serializeUrdf } from "../../src/physics/exporters.js";
-import { analyzeTopology, computeForwardKinematics, getEndEffectorPosition, getJointAngle, solveIKCCD } from "../../src/physics/kinematics.js";
+import { analyzeTopology, computeForwardKinematics, getEndEffectorPosition, getJointAngle, getJointWorldFrame, solveIKCCD, transformPoint } from "../../src/physics/kinematics.js";
 import { baseStability, computeMassProperties, estimateJointLoads } from "../../src/physics/mass.js";
 import { createRobotDesign, normalizeRobotDesign, validateRobotDesign } from "../../src/physics/model.js";
+import { JOINT_DEFINITIONS } from "../../src/studio/jointRig.js";
+
+function closeTo(actual, expected, tolerance = 1e-5) {
+  assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} not within ${tolerance} of ${expected}`);
+}
+
+function closeVector(actual, expected, tolerance = 1e-5) {
+  assert.equal(actual.length, expected.length);
+  actual.forEach((value, index) => closeTo(value, expected[index], tolerance));
+}
 
 function twoLinkDesign() {
   return {
@@ -145,6 +156,15 @@ test("reports clamped joints during constrained IK", () => {
   assert.ok(result.clampedJoints.includes("shoulder"));
 });
 
+test("IK leaves finite joint values for targets aligned with a joint axis", () => {
+  const design = twoLinkDesign();
+  const result = solveIKCCD(design, "tool0", [0, 0, 200], { toleranceMm: 5, maxIterations: 8 });
+
+  for (const value of Object.values(result.jointAngles)) {
+    assert.equal(Number.isFinite(value), true);
+  }
+});
+
 test("detects proxy collisions outside allowed pairs", () => {
   const design = twoLinkDesign();
   design.allowedCollisions = [];
@@ -154,6 +174,66 @@ test("detects proxy collisions outside allowed pairs", () => {
   design.allowedCollisions = [collisionPairKey("base", "upper")];
   const allowed = checkCollisionProxies(design, computeForwardKinematics(design));
   assert.equal(allowed.some((item) => collisionPairKey(item.linkA, item.linkB) === "base|upper"), false);
+});
+
+test("computes rotation-aware proxy AABBs", () => {
+  const rotated = new THREE.Matrix4().makeRotationZ(Math.PI / 2);
+  const box = proxyAabb({ type: "box", origin: [50, 0, 0], dimensions: [100, 20, 20] }, rotated);
+  assert.deepEqual(box.min.toArray().map(Math.round), [-10, 0, -10]);
+  assert.deepEqual(box.max.toArray().map(Math.round), [10, 100, 10]);
+
+  const sphere = proxyAabb({ type: "sphere", origin: [10, 0, 0], dimensions: [5, 5, 5] }, rotated);
+  assert.deepEqual(sphere.min.toArray().map(Math.round), [-5, 5, -5]);
+  assert.deepEqual(sphere.max.toArray().map(Math.round), [5, 15, 5]);
+
+  const capsule = proxyAabb({ type: "capsule", origin: [0, 0, 0], dimensions: [5, 40, 5] }, rotated);
+  assert.deepEqual(capsule.min.toArray().map(Math.round), [-25, -5, -5]);
+  assert.deepEqual(capsule.max.toArray().map(Math.round), [25, 5, 5]);
+});
+
+test("Rapier simulation preserves authored link mass after stepping", async () => {
+  const design = twoLinkDesign();
+  const runner = new DynamicsRunner();
+  await runner.reset(design, computeForwardKinematics(design), { gravityEnabled: false });
+
+  closeTo(runner.bodies.get("upper").mass(), 0.4);
+  runner.step(1);
+  closeTo(runner.bodies.get("upper").mass(), 0.4);
+});
+
+test("Rapier simulation enables revolute and prismatic limits on created joints", async () => {
+  const revoluteDesign = twoLinkDesign();
+  const revoluteRunner = new DynamicsRunner();
+  await revoluteRunner.reset(revoluteDesign, computeForwardKinematics(revoluteDesign), { gravityEnabled: false });
+  assert.equal(revoluteRunner.joints[0].limitsEnabled(), true);
+  closeTo(revoluteRunner.joints[0].limitsMin(), -Math.PI);
+  closeTo(revoluteRunner.joints[0].limitsMax(), Math.PI);
+
+  const prismaticDesign = {
+    ...twoLinkDesign(),
+    joints: [
+      {
+        id: "slide",
+        name: "Slide",
+        type: "prismatic",
+        parentLinkId: "base",
+        childLinkId: "upper",
+        origin: [0, 0, 0],
+        axis: [1, 0, 0],
+        min: -10,
+        max: 20,
+        damping: 0.1,
+        friction: 0,
+        actuatorId: null
+      }
+    ],
+    pose: { jointAngles: { slide: 0 } }
+  };
+  const prismaticRunner = new DynamicsRunner();
+  await prismaticRunner.reset(prismaticDesign, computeForwardKinematics(prismaticDesign), { gravityEnabled: false });
+  assert.equal(prismaticRunner.joints[0].limitsEnabled(), true);
+  closeTo(prismaticRunner.joints[0].limitsMin(), -0.01);
+  closeTo(prismaticRunner.joints[0].limitsMax(), 0.02);
 });
 
 test("aggregates mass and evaluates actuator margins", () => {
@@ -255,6 +335,39 @@ test("creates a valid sample model with wrist roll", () => {
     "inferred_gripper_mount_axle"
   ]);
   assert.deepEqual(validateRobotDesign(design), []);
+});
+
+test("creates sample model inertial and proxy coordinates in link frames", () => {
+  const partRecords = samplePartRecords();
+  const design = createRobotDesign(partRecords, { sample: true });
+  const transforms = computeForwardKinematics(design);
+  const jointDefinitions = new Map(JOINT_DEFINITIONS.map((joint) => [joint.id, joint]));
+
+  for (const joint of design.joints) {
+    const expected = jointDefinitions.get(joint.id)?.pivot;
+    assert.ok(expected, `Missing sample joint definition for ${joint.id}`);
+    closeVector(getJointWorldFrame(design, joint, transforms).origin.toArray(), expected);
+  }
+
+  for (const link of design.links) {
+    const selected = partRecords.filter((part) => link.partIds.includes(part.id));
+    assert.ok(selected.length > 0, `Expected sample parts for ${link.id}`);
+    const min = [
+      Math.min(...selected.map((part) => part.bounds.min[0])),
+      Math.min(...selected.map((part) => part.bounds.min[1])),
+      Math.min(...selected.map((part) => part.bounds.min[2]))
+    ];
+    const max = [
+      Math.max(...selected.map((part) => part.bounds.max[0])),
+      Math.max(...selected.map((part) => part.bounds.max[1])),
+      Math.max(...selected.map((part) => part.bounds.max[2]))
+    ];
+    const expectedCenter = min.map((value, index) => (value + max[index]) / 2);
+    const linkMatrix = transforms.get(link.id);
+
+    closeVector(transformPoint(linkMatrix, link.com).toArray(), expectedCenter);
+    closeVector(transformPoint(linkMatrix, link.collisionProxies[0].origin).toArray(), expectedCenter);
+  }
 });
 
 test("normalizes proxy shapes and unique part assignments", () => {

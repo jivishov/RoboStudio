@@ -2,6 +2,8 @@ export const ROBOT_DESIGN_VERSION = 1;
 export const GRAVITY = 9.80665;
 export const MM_TO_M = 0.001;
 export const M_TO_MM = 1000;
+export const SIM_BODY_LINEAR_DAMPING_FLOOR = 0.05;
+export const SIM_BODY_ANGULAR_DAMPING_FLOOR = 0.05;
 
 export const DEFAULT_ASSUMPTIONS = Object.freeze({
   payloadKg: 0.25,

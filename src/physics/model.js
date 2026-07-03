@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { JOINT_DEFINITIONS } from "../studio/jointRig.js";
 import { normalizeActuator } from "./actuators.js";
 import { DEFAULT_ACTUATORS, DEFAULT_ASSUMPTIONS, ROBOT_DESIGN_VERSION } from "./constants.js";
-import { analyzeTopology } from "./kinematics.js";
+import { analyzeTopology, computeForwardKinematics } from "./kinematics.js";
 
 const SAMPLE_LINK_GROUPS = [
   {
@@ -146,6 +146,11 @@ function inertiaFromBounds(massKg, bounds) {
   ];
 }
 
+function localBounds(bounds, frameMatrix = new THREE.Matrix4()) {
+  const box = recordToBox(bounds) ?? new THREE.Box3().setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(40, 40, 40));
+  return box.applyMatrix4(frameMatrix.clone().invert());
+}
+
 function createDefaultProxy(linkId, bounds) {
   const size = normalizeVector3(bounds?.size, [40, 40, 40]).map((value) => Math.max(6, value));
   return {
@@ -157,9 +162,9 @@ function createDefaultProxy(linkId, bounds) {
   };
 }
 
-function createLink(id, name, partIds, partRecords) {
+function createLink(id, name, partIds, partRecords, frameMatrix = new THREE.Matrix4()) {
   const selectedRecords = partRecords.filter((part) => partIds.includes(part.id));
-  const bounds = unionBounds(selectedRecords);
+  const bounds = boxToRecord(localBounds(unionBounds(selectedRecords), frameMatrix));
   const massKg = estimateMassKg(bounds);
   return {
     id,
@@ -173,15 +178,19 @@ function createLink(id, name, partIds, partRecords) {
 }
 
 function createSampleJoints() {
+  const zeroFramePositions = new Map([["base", new THREE.Vector3()]]);
   return JOINT_DEFINITIONS.filter((joint) => SAMPLE_JOINT_LINKS[joint.id]).map((joint) => {
     const [parentLinkId, childLinkId] = SAMPLE_JOINT_LINKS[joint.id];
+    const parentPosition = zeroFramePositions.get(parentLinkId) ?? new THREE.Vector3();
+    const pivot = new THREE.Vector3().fromArray(joint.pivot);
+    zeroFramePositions.set(childLinkId, pivot.clone());
     return {
       id: joint.id,
       name: joint.label,
       type: "revolute",
       parentLinkId,
       childLinkId,
-      origin: roundVector(joint.pivot),
+      origin: roundVector(pivot.sub(parentPosition).toArray()),
       axis: roundVector(joint.axis),
       min: joint.minDeg,
       max: joint.maxDeg,
@@ -192,9 +201,9 @@ function createSampleJoints() {
   });
 }
 
-export function collectAssemblyPartRecords(assemblyRoot, snapshotParts = []) {
+function collectAssemblyMeshEntries(assemblyRoot, snapshotParts = []) {
   const byId = new Map((snapshotParts ?? []).filter((part) => part?.id).map((part) => [part.id, part]));
-  const records = [];
+  const entries = [];
   const usedIds = new Set();
 
   assemblyRoot?.updateMatrixWorld(true);
@@ -205,16 +214,28 @@ export function collectAssemblyPartRecords(assemblyRoot, snapshotParts = []) {
     const metadata = byId.get(object.userData?.id) ?? byId.get(object.name);
     const id = uniqueId(object.userData?.id ?? metadata?.id ?? fallback, usedIds);
     const box = new THREE.Box3().setFromObject(object);
-    records.push({
+    entries.push({
+      object,
       id,
-      name: metadata?.label ?? object.userData?.label ?? object.name ?? id,
-      type: metadata?.type ?? object.userData?.type ?? "assembly",
-      file: metadata?.file ?? object.userData?.file ?? null,
-      visible: object.visible,
-      triangles: metadata?.triangles ?? triangleCount(object),
-      bounds: boxToRecord(box)
+      metadata,
+      box
     });
   });
+
+  return entries;
+}
+
+export function collectAssemblyPartRecords(assemblyRoot, snapshotParts = []) {
+  const records = collectAssemblyMeshEntries(assemblyRoot, snapshotParts).map(({ object, id, metadata, box }) => ({
+    id,
+    name: metadata?.label ?? object.userData?.label ?? object.name ?? id,
+    type: metadata?.type ?? object.userData?.type ?? "assembly",
+    file: metadata?.file ?? object.userData?.file ?? null,
+    visible: object.visible,
+    triangles: metadata?.triangles ?? triangleCount(object),
+    bounds: boxToRecord(box)
+  }));
+  const usedIds = new Set(records.map((record) => record.id));
 
   for (const metadata of snapshotParts ?? []) {
     if (!metadata?.id || records.some((record) => record.id === metadata.id)) continue;
@@ -233,6 +254,10 @@ export function collectAssemblyPartRecords(assemblyRoot, snapshotParts = []) {
   return records;
 }
 
+export function collectAssemblyPartMeshes(assemblyRoot, snapshotParts = []) {
+  return new Map(collectAssemblyMeshEntries(assemblyRoot, snapshotParts).map((entry) => [entry.id, entry.object]));
+}
+
 export function isSampleAssembly(partRecords) {
   const ids = new Set(partRecords.map((part) => part.id));
   return ["base", "waist", "lower_arm", "upper_arm", "wrist_yoke", "gripper_base"].every((id) =>
@@ -242,18 +267,26 @@ export function isSampleAssembly(partRecords) {
 
 export function createRobotDesign(partRecords, options = {}) {
   const sample = options.sample ?? isSampleAssembly(partRecords);
+  const joints = sample ? createSampleJoints() : [];
+  const sampleLinkFrames = sample
+    ? computeForwardKinematics({
+        links: SAMPLE_LINK_GROUPS.map((group) => ({ id: group.id })),
+        joints,
+        pose: { jointAngles: Object.fromEntries(joints.map((joint) => [joint.id, 0])) }
+      })
+    : new Map();
   const links = sample
     ? SAMPLE_LINK_GROUPS.map((group) =>
         createLink(
           group.id,
           group.name,
           group.partIds.filter((partId) => partRecords.some((part) => part.id === partId)),
-          partRecords
+          partRecords,
+          sampleLinkFrames.get(group.id)
         )
       )
     : partRecords.map((part) => createLink(part.id, part.name, [part.id], partRecords));
 
-  const joints = sample ? createSampleJoints() : [];
   const pose = {
     jointAngles: Object.fromEntries(joints.map((joint) => [joint.id, 0]))
   };

@@ -1,12 +1,13 @@
 import * as THREE from "three";
-import { transformPoint } from "./kinematics.js";
 
-function proxyHalfExtents(proxy) {
+function proxyDimensions(proxy) {
   const [a = 10, b = a, c = a] = proxy.dimensions ?? [10, 10, 10];
-  if (proxy.type === "sphere") return [a, a, a];
-  if (proxy.type === "capsule") return [a, Math.max(a, b / 2 + a), a];
-  if (proxy.type === "cylinder") return [a, b / 2, a];
-  return [a / 2, b / 2, c / 2];
+  return [a, b, c].map((value) => Math.max(0.001, Number(value) || 0.001));
+}
+
+export function proxyWorldMatrix(proxy, linkMatrix = new THREE.Matrix4()) {
+  const [x = 0, y = 0, z = 0] = proxy.origin ?? [0, 0, 0];
+  return linkMatrix.clone().multiply(new THREE.Matrix4().makeTranslation(x, y, z));
 }
 
 export function collisionPairKey(a, b) {
@@ -14,12 +15,31 @@ export function collisionPairKey(a, b) {
 }
 
 export function proxyAabb(proxy, linkMatrix = new THREE.Matrix4()) {
-  const center = transformPoint(linkMatrix, proxy.origin ?? [0, 0, 0]);
-  const [hx, hy, hz] = proxyHalfExtents(proxy).map((value) => Math.max(0.001, Number(value) || 0.001));
+  const [a, b, c] = proxyDimensions(proxy);
+  const matrix = proxyWorldMatrix(proxy, linkMatrix);
+
+  if (proxy.type === "sphere") {
+    const center = new THREE.Vector3().setFromMatrixPosition(matrix);
+    return new THREE.Box3(
+      new THREE.Vector3(center.x - a, center.y - a, center.z - a),
+      new THREE.Vector3(center.x + a, center.y + a, center.z + a)
+    );
+  }
+
+  if (proxy.type === "capsule" || proxy.type === "cylinder") {
+    const radius = a;
+    const halfLength = b / 2;
+    const box = new THREE.Box3().setFromPoints([
+      new THREE.Vector3(0, -halfLength, 0).applyMatrix4(matrix),
+      new THREE.Vector3(0, halfLength, 0).applyMatrix4(matrix)
+    ]);
+    return box.expandByScalar(radius);
+  }
+
   return new THREE.Box3(
-    new THREE.Vector3(center.x - hx, center.y - hy, center.z - hz),
-    new THREE.Vector3(center.x + hx, center.y + hy, center.z + hz)
-  );
+    new THREE.Vector3(-a / 2, -b / 2, -c / 2),
+    new THREE.Vector3(a / 2, b / 2, c / 2)
+  ).applyMatrix4(matrix);
 }
 
 export function checkCollisionProxies(design, transforms) {

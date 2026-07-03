@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { proxyWorldMatrix } from "./collision.js";
 import { getJointWorldFrame, transformPoint } from "./kinematics.js";
 
 function disposeObject(object) {
@@ -74,9 +75,11 @@ export class WorkbenchOverlays {
 
         const isConflict = conflictKeys.has(`${link.id}:${proxy.id}`);
         const mesh = new THREE.Mesh(geometry, (isConflict ? conflictMaterial : material).clone());
-        mesh.position.copy(transformPoint(matrix, proxy.origin));
+        mesh.matrixAutoUpdate = false;
+        mesh.matrix.copy(proxyWorldMatrix(proxy, matrix));
         const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), (isConflict ? conflictEdgeMaterial : edgeMaterial).clone());
-        edges.position.copy(mesh.position);
+        edges.matrixAutoUpdate = false;
+        edges.matrix.copy(mesh.matrix);
         this.group.add(mesh, edges);
       }
     }
