@@ -21,6 +21,66 @@ import {
 } from "./electricalAnalysis.js";
 import { normalizeProject, setComponentControl } from "./model.js";
 import { derivePhysicalOccupancy } from "./occupancy.js";
+import { inspectDirectInsertionState, manualWireAdapterReview } from "./insertion.js";
+import { canonicalDrcIssueIdentity } from "./drcFingerprint.js";
+
+const ELECTRICAL_HAZARD_CODES = new Set([
+  "power-ground-short",
+  "voltage-mismatch",
+  "control-state-short",
+  "voltage-out-of-range",
+  "polarity-reversed",
+  "capacitor-polarity-reversed",
+  "logic-level-mismatch",
+  "servo-controller-power",
+  "led-missing-resistor",
+  "supply-current-budget",
+  "supply-peak-current-budget",
+  "breadboard-actuator-current"
+]);
+
+const ELECTRICAL_CODES = new Set([
+  ...ELECTRICAL_HAZARD_CODES,
+  "servo-non-pwm-signal",
+  "breadboard-current-recommendation",
+  "inductive-load-without-driver"
+]);
+
+const MECHANICAL_CODES = new Set([
+  "physical-terminal-occupied",
+  "stale-direct-insertion",
+  "adapter-harness-review"
+]);
+
+const COMPLETENESS_CODES = new Set([
+  "dangling-wire",
+  "controller-missing",
+  "required-connection-missing",
+  "required-controller-output-missing",
+  "required-controller-input-missing",
+  "required-ground-missing",
+  "required-power-missing",
+  "servo-missing-signal",
+  "servo-pulse-unsupported",
+  "servo-no-external-power",
+  "servo-missing-ground",
+  "missing-common-ground",
+  "led-no-output",
+  "led-no-ground-return",
+  "button-floating-input",
+  "button-no-return",
+  "driver-incomplete",
+  "driver-no-motor-power",
+  "driver-control-missing"
+]);
+
+function issueDomain(code, details) {
+  if (details.domain) return details.domain;
+  if (MECHANICAL_CODES.has(code)) return "mechanical";
+  if (ELECTRICAL_CODES.has(code)) return "electrical";
+  if (COMPLETENESS_CODES.has(code)) return "completeness";
+  return "metadata";
+}
 
 function issue(severity, code, message, details = {}) {
   const componentIds = details.targets?.componentIds
@@ -36,6 +96,10 @@ function issue(severity, code, message, details = {}) {
     id: `${code}_${targetSuffix || "project"}`,
     severity,
     code,
+    domain: issueDomain(code, details),
+    placementRisk: Object.prototype.hasOwnProperty.call(details, "placementRisk")
+      ? details.placementRisk
+      : (severity === "error" && ELECTRICAL_HAZARD_CODES.has(code) ? "electrical-hazard" : null),
     message,
     fix: details.fix ?? "",
     blocks: {
@@ -148,6 +212,16 @@ function checkConnections(project, issues) {
         }));
       }
     }
+    const adapterReview = manualWireAdapterReview(normalized, connection);
+    if (adapterReview) {
+      issues.push(issue("warning", "adapter-harness-review", adapterReview.message, {
+        domain: "mechanical",
+        connectionId: connection.id,
+        connectionIds: [connection.id],
+        endpoints: adapterReview.endpoints,
+        fix: "Confirm the real cable ends, adapter, or terminal hardware before physical assembly."
+      }));
+    }
   }
 }
 
@@ -158,6 +232,18 @@ function checkOccupancy(project, issues) {
       endpoints: [conflict.endpoint],
       connectionIds: conflict.attachments.map((item) => item.connectionId),
       fix: "Move one wire or direct insertion to a separate physical socket or terminal."
+    }));
+  }
+}
+
+function checkDirectInsertionAlignment(project, issues) {
+  for (const state of inspectDirectInsertionState(project).filter((item) => item.stale)) {
+    issues.push(issue("error", "stale-direct-insertion", state.message, {
+      domain: "mechanical",
+      componentId: state.componentId,
+      endpoints: state.endpoints,
+      connectionIds: state.connectionIds,
+      fix: "Use Re-seat to rematch every contact atomically, or Disconnect to remove the stale insertion records."
     }));
   }
 }
@@ -638,6 +724,7 @@ function checkInductiveLoads(project, issues) {
       issues.push(issue("error", "inductive-load-without-driver", `${component.name} needs a suitable driver and flyback path.`, {
         componentId: component.id,
         endpoints: loadTerminals.map((terminal) => componentEndpoint(component, terminal.id)),
+        placementRisk: hasControllerDirect ? "electrical-hazard" : null,
         fix: "Drive motors, relays, and solenoids through a cataloged driver with integrated or external flyback protection."
       }));
     }
@@ -647,9 +734,15 @@ function checkInductiveLoads(project, issues) {
 function dedupeIssues(issues) {
   const byKey = new Map();
   for (const item of issues) {
-    const key = `${item.code}:${item.componentId ?? ""}:${item.message}`;
+    const key = canonicalDrcIssueIdentity(item);
     const existing = byKey.get(key);
-    if (!existing || severityRank(item.severity) > severityRank(existing.severity)) byKey.set(key, item);
+    const itemRiskRank = item.placementRisk === "electrical-hazard" ? 1 : 0;
+    const existingRiskRank = existing?.placementRisk === "electrical-hazard" ? 1 : 0;
+    if (!existing
+      || severityRank(item.severity) > severityRank(existing.severity)
+      || (severityRank(item.severity) === severityRank(existing.severity) && itemRiskRank > existingRiskRank)) {
+      byKey.set(key, item);
+    }
   }
   return [...byKey.values()].sort((left, right) => {
     const severityDelta = severityRank(right.severity) - severityRank(left.severity);
@@ -684,6 +777,7 @@ export function runCircuitLabTest(project, options = {}) {
   checkControllerSelection(normalized, issues);
   checkConnections(normalized, issues);
   checkOccupancy(normalized, issues);
+  checkDirectInsertionAlignment(normalized, issues);
   checkDirectGroups(normalized, issues, analysis);
   checkRequiredConnections(normalized, issues);
   checkVoltageCompatibility(normalized, issues, analysis);

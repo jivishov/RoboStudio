@@ -138,11 +138,14 @@ test("BB400, Arduino, ESP32, and legacy breadboard expose expected physical coun
   assert.equal(bb400.internalBuses.filter((bus) => /^top_|^bottom_/.test(bus.id)).every((bus) => bus.terminalIds.length === 25), true);
   assert.equal(legacy.terminals.length, 420);
   assert.equal(catalog.listComponents().some((item) => item.id === "breadboard-400"), false);
-  assert.equal(arduino.terminals.length, 31);
-  assert.equal(esp32.terminals.length, 30);
+  assert.equal(arduino.terminals.length, 32);
+  assert.equal(esp32.terminals.length, 38);
   assert.deepEqual(
-    esp32.engineering.connectors[0].terminalIds,
-    ["VIN", "GND2", "GPIO13", "GPIO12", "GPIO14", "GPIO27", "GPIO26", "GPIO25", "GPIO33", "GPIO32", "GPIO35", "GPIO34", "GPIO39", "GPIO36", "EN", "3V3", "GND", "GPIO15", "GPIO2", "GPIO4", "GPIO16", "GPIO17", "GPIO5", "GPIO18", "GPIO19", "GPIO21", "GPIO3", "GPIO1", "GPIO22", "GPIO23"]
+    esp32.engineering.connectors.map((connector) => connector.terminalIds),
+    [
+      ["3V3", "EN", "GPIO36", "GPIO39", "GPIO34", "GPIO35", "GPIO32", "GPIO33", "GPIO25", "GPIO26", "GPIO27", "GPIO14", "GPIO12", "GND2", "GPIO13", "D2", "D3", "CMD", "VIN"],
+      ["GND", "GPIO23", "GPIO22", "GPIO1", "GPIO3", "GPIO21", "GND3", "GPIO19", "GPIO18", "GPIO5", "GPIO17", "GPIO16", "GPIO4", "GPIO0", "GPIO2", "GPIO15", "D1", "D0", "CLK"]
+    ]
   );
 });
 
@@ -161,7 +164,7 @@ test("visual provenance approves Wokwi records and blocks Fritzing graphics", ()
 test("direct insertion uses connection kind and is suppressed from external wire rendering", () => {
   let project = createCircuitLabProject();
   project = addComponent(project, "capacitor-electrolytic-470uf", { id: "cap" });
-  project = updateComponent(project, "cap", { position: [487.78, 417.05] });
+  project = updateComponent(project, "cap", { position: [470, 388.57] });
   const insertion = insertComponentIntoNearestTerminals(project, "cap");
   const inserted = insertion.project.connections.filter((connection) => connection.id.startsWith("insert_cap_"));
 
@@ -180,11 +183,13 @@ test("connection fitting descriptors classify realistic wire and inserted endpoi
 
   let project = createCircuitLabProject();
   project = addComponent(project, "capacitor-electrolytic-470uf", { id: "cap" });
-  project = updateComponent(project, "cap", { position: [487.78, 417.05] });
+  project = updateComponent(project, "cap", { position: [470, 388.57] });
   const insertedProject = insertComponentIntoNearestTerminals(project, "cap").project;
   const insertedFittings = connectionFittingDescriptors(insertedProject);
-  assert.equal(insertedFittings.some((item) => item.type === "inserted-breadboard-lead" && item.endpoint.componentId === "breadboard"), true);
-  assert.equal(insertedFittings.some((item) => item.type === "inserted-lead" && item.endpoint.componentId === "cap"), true);
+  const directInsertionFittings = insertedFittings.filter((item) => item.kind === "direct-insertion");
+  assert.equal(directInsertionFittings.length, 2);
+  assert.equal(directInsertionFittings.every((item) => item.type === "inserted-lead" && item.endpoint.componentId === "cap" && item.combined), true);
+  assert.equal(new Set(directInsertionFittings.map((item) => item.connectionId)).size, 2);
 });
 
 test("CircuitLabProject serialization strips visual/provenance asset fields", () => {

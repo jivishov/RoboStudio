@@ -339,6 +339,19 @@ test("action argument validation rejects unknown, unsafe, and malformed input", 
     true
   );
   assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.CIRCUITS, "circuits_connect_terminals", {
+      endpointA: { type: "component", instanceId: "arduino", pinId: "D9" },
+      endpointB: { componentId: "servo", terminalId: "signal" }
+    }).ok,
+    false
+  );
+  assert.equal(
+    validateActionArguments(ASSISTANT_PAGES.CIRCUITS, "circuits_focus_terminal", {
+      endpoint: { componentId: "arduino", terminalId: "D9", x: 12 }
+    }).ok,
+    false
+  );
+  assert.equal(
     validateActionArguments(ASSISTANT_PAGES.CIRCUITS, "circuits_resize_component", { componentId: "servo", scale: 1.25 }).ok,
     true
   );

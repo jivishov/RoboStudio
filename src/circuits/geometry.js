@@ -41,16 +41,24 @@ function rotatedLocalPoint(component, localPoint, scale = componentScale(compone
   ];
 }
 
+export function componentWorldVector(component, localVector) {
+  return rotatedLocalPoint(component, localVector, 1);
+}
+
 export function componentBounds(component, componentDefinition) {
   const scale = componentScale(component);
   const [baseWidth, baseHeight] = componentDefinition?.dimensions ?? [40, 24];
-  const halfWidth = baseWidth / 2;
-  const halfHeight = baseHeight / 2;
+  const localBounds = componentDefinition?.clampBoundsMm ?? {
+    x: -baseWidth / 2,
+    y: -baseHeight / 2,
+    width: baseWidth,
+    height: baseHeight
+  };
   const corners = [
-    [-halfWidth, -halfHeight],
-    [halfWidth, -halfHeight],
-    [halfWidth, halfHeight],
-    [-halfWidth, halfHeight]
+    [localBounds.x, localBounds.y],
+    [localBounds.x + localBounds.width, localBounds.y],
+    [localBounds.x + localBounds.width, localBounds.y + localBounds.height],
+    [localBounds.x, localBounds.y + localBounds.height]
   ].map((point) => {
     const rotated = rotatedLocalPoint(component, point, scale);
     return [

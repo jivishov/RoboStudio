@@ -74,19 +74,19 @@
         </div>
 
         <nav class="circuit-mode-tabs shell-header__modes shell-header__group" aria-label="Circuit Lab modes">
-          <button class="shell-header__button is-active" type="button" data-circuit-mode="select">
+          <button class="shell-header__button is-active" type="button" data-circuit-mode="select" aria-pressed="true">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
             <span class="shell-header__label">Select</span>
           </button>
-          <button class="shell-header__button" type="button" data-circuit-mode="place">
+          <button class="shell-header__button" type="button" data-circuit-mode="place" aria-pressed="false">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">device_hub</span>
             <span class="shell-header__label">Place</span>
           </button>
-          <button class="shell-header__button" type="button" data-circuit-mode="wire">
+          <button class="shell-header__button" type="button" data-circuit-mode="wire" aria-pressed="false">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">link</span>
             <span class="shell-header__label">Wire</span>
           </button>
-          <button class="shell-header__button" type="button" data-circuit-mode="test">
+          <button class="shell-header__button" type="button" data-circuit-mode="test" aria-pressed="false">
             <span class="material-symbols-rounded app-icon" aria-hidden="true">fact_check</span>
             <span class="shell-header__label">Test</span>
           </button>
@@ -94,7 +94,14 @@
       </header>
 
       <main class="circuit-shell">
-        <aside class="circuit-panel circuit-panel--left" aria-label="Circuit setup and hardware">
+        <button id="open-circuit-hardware-drawer" class="circuit-drawer-trigger circuit-drawer-trigger--hardware" type="button" aria-expanded="false" aria-controls="circuit-hardware-drawer">Hardware</button>
+        <button id="open-circuit-workflow-drawer" class="circuit-drawer-trigger circuit-drawer-trigger--workflow" type="button" aria-expanded="false" aria-controls="circuit-workflow-drawer">Inspector / Workflow</button>
+
+        <aside id="circuit-hardware-drawer" class="circuit-panel circuit-panel--left" aria-labelledby="circuit-hardware-drawer-title" data-circuit-drawer="hardware">
+          <div class="circuit-drawer-header">
+            <strong id="circuit-hardware-drawer-title">Hardware</strong>
+            <button type="button" data-close-circuit-drawer="hardware" aria-label="Close Hardware drawer">Close</button>
+          </div>
           <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-project-card">
             <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-project-card" aria-expanded="true" aria-controls="circuit-project-card-content">
               <span class="collapsible-card__label">
@@ -153,18 +160,41 @@
         </aside>
 
         <section class="circuit-stage" aria-label="Circuit Lab bench">
-          <svg id="circuit-bench" class="circuit-bench" viewBox="0 0 1050 650" role="img" aria-label="Top-down robotics circuit bench"></svg>
+          <svg id="circuit-bench" class="circuit-bench" viewBox="175 108.333 700 433.333" role="application" tabindex="0" aria-label="Top-down robotics circuit bench" aria-describedby="circuit-bench-instructions" aria-owns="circuit-active-terminal-proxy" aria-activedescendant="circuit-active-terminal-proxy"></svg>
+          <p id="circuit-bench-instructions" class="circuit-sr-only">Use arrow keys to move among visible terminals. Press Enter or Space to start or finish a wire. Press Tab to leave the bench.</p>
+          <span id="circuit-active-terminal-proxy" class="circuit-sr-only" role="option" aria-label="No terminal focused">No terminal focused</span>
+          <aside id="circuit-mutation-confirmation" class="circuit-mutation-confirmation" hidden>
+            <strong id="circuit-mutation-confirmation-title">Electrical hazard confirmation</strong>
+            <p id="circuit-mutation-confirmation-summary"></p>
+            <div class="circuit-mutation-confirmation__scroll" tabindex="0" aria-label="Electrical hazard details">
+              <div id="circuit-mutation-confirmation-endpoints" class="circuit-mutation-confirmation__endpoints"></div>
+              <ul id="circuit-mutation-confirmation-hazards"></ul>
+            </div>
+            <div class="circuit-mutation-confirmation__actions">
+              <button id="confirm-circuit-mutation" class="circuit-danger-button" type="button">Place anyway</button>
+              <button id="cancel-circuit-mutation" type="button">Cancel</button>
+            </div>
+          </aside>
+          <aside id="circuit-precision-hud" class="circuit-precision-hud" aria-label="Terminal precision target" hidden></aside>
           <div class="circuit-floating circuit-floating--view" role="group" aria-label="Bench zoom controls">
             <button id="circuit-zoom-out" type="button" title="Zoom out" aria-label="Zoom out">
               <span class="material-symbols-rounded app-icon" aria-hidden="true">zoom_out</span>
             </button>
-            <output id="circuit-zoom-level" aria-label="Current bench zoom">100%</output>
+            <output id="circuit-zoom-level" aria-label="Current bench zoom">View 150%</output>
             <button id="circuit-zoom-in" type="button" title="Zoom in" aria-label="Zoom in">
               <span class="material-symbols-rounded app-icon" aria-hidden="true">zoom_in</span>
             </button>
             <button id="circuit-zoom-reset" type="button" title="Reset zoom" aria-label="Reset zoom">
               <span class="material-symbols-rounded app-icon" aria-hidden="true">center_focus_strong</span>
             </button>
+            <button id="circuit-view-overview" class="circuit-view-text-action" type="button">Overview</button>
+            <button id="circuit-view-frame" class="circuit-view-text-action" type="button">Frame selection / port</button>
+          </div>
+          <div id="circuit-edge-cues" class="circuit-edge-cues" aria-label="Hardware outside the current view" hidden>
+            <span data-edge-direction="top"></span>
+            <span data-edge-direction="right"></span>
+            <span data-edge-direction="bottom"></span>
+            <span data-edge-direction="left"></span>
           </div>
           <div class="circuit-floating circuit-floating--status">
             <span id="wire-status">Select a component or switch to Wire mode.</span>
@@ -172,15 +202,21 @@
               <span class="material-symbols-rounded app-icon" aria-hidden="true">fact_check</span>
             </button>
           </div>
+          <div id="circuit-live-region" class="circuit-sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         </section>
 
-        <aside class="circuit-panel circuit-panel--right" aria-label="Inspector, test, and code">
-          <nav class="circuit-workflow-tabs" aria-label="Circuit Lab workflow tabs">
-            <button type="button" data-circuit-tab="inspect" class="is-active">Inspect</button>
-            <button type="button" data-circuit-tab="validate">Validate</button>
-            <button type="button" data-circuit-tab="bind">Bind</button>
-            <button type="button" data-circuit-tab="build">Build</button>
+        <aside id="circuit-workflow-drawer" class="circuit-panel circuit-panel--right" aria-labelledby="circuit-workflow-drawer-title" data-circuit-drawer="workflow">
+          <div class="circuit-drawer-header">
+            <strong id="circuit-workflow-drawer-title">Inspector / Workflow</strong>
+            <button type="button" data-close-circuit-drawer="workflow" aria-label="Close Inspector and Workflow drawer">Close</button>
+          </div>
+          <nav class="circuit-workflow-tabs" role="tablist" aria-label="Circuit Lab workflow tabs">
+            <button id="circuit-tab-inspect" type="button" role="tab" aria-selected="true" aria-controls="circuit-workflow-panel" tabindex="0" data-circuit-tab="inspect" class="is-active">Inspect</button>
+            <button id="circuit-tab-test-results" type="button" role="tab" aria-selected="false" aria-controls="circuit-workflow-panel" tabindex="-1" data-circuit-tab="test-results">Test Results</button>
+            <button id="circuit-tab-bind" type="button" role="tab" aria-selected="false" aria-controls="circuit-workflow-panel" tabindex="-1" data-circuit-tab="bind">Bind</button>
+            <button id="circuit-tab-build" type="button" role="tab" aria-selected="false" aria-controls="circuit-workflow-panel" tabindex="-1" data-circuit-tab="build">Build</button>
           </nav>
+          <div id="circuit-workflow-panel" class="circuit-workflow-panel" role="tabpanel" aria-labelledby="circuit-tab-inspect" tabindex="0">
           <section class="circuit-section collapsible-card shell-card" data-card-id="circuit-inspector-card">
             <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="circuit-inspector-card" aria-expanded="true" aria-controls="circuit-inspector-card-content">
               <span class="collapsible-card__label">
@@ -205,8 +241,9 @@
                     <input id="circuit-component-y" type="number" step="1" disabled />
                   </label>
                   <label class="circuit-field" for="circuit-component-scale">
-                    <span>Size %</span>
+                    <span>Physical size %</span>
                     <input id="circuit-component-scale" type="number" min="55" max="190" step="5" disabled />
+                    <small>Changes millimeter geometry and may detach direct insertion.</small>
                   </label>
                   <label class="circuit-field" for="circuit-component-rotation">
                     <span>Rotation deg</span>
@@ -252,7 +289,7 @@
                     </label>
                   </div>
                 </details>
-                <div id="circuit-control-panel" class="circuit-control-panel" aria-live="polite"></div>
+                <div id="circuit-control-panel" class="circuit-control-panel"></div>
                 <div class="circuit-inline-actions">
                   <button id="apply-circuit-component" class="circuit-primary-button" type="button" disabled>Apply</button>
                   <button id="remove-circuit-component" class="circuit-danger-button" type="button" disabled>Remove</button>
@@ -361,6 +398,7 @@
               </div>
             </div>
           </section>
+          </div>
         </aside>
       </main>
     </div>

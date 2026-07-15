@@ -1,4 +1,5 @@
 import { roboticsPhysicalCatalog } from "./roboticsPhysicalCatalog.js";
+import { geometryEvidenceId } from "./geometryEvidence.js";
 
 export const CONNECTOR_INTERFACES = Object.freeze({
   FEMALE_BREADBOARD_SOCKET: "female-breadboard-socket",
@@ -19,6 +20,7 @@ export const CONNECTOR_INTERFACES = Object.freeze({
 export const DIRECT_INSERT_COMPATIBILITY = Object.freeze({
   "component-lead": Object.freeze(["female-breadboard-socket"]),
   "male-header-pin": Object.freeze(["female-breadboard-socket", "female-controller-header"]),
+  "servo-female-plug": Object.freeze(["servo-male-header"]),
   "jumper-wire-end": Object.freeze([
     "female-breadboard-socket",
     "female-controller-header",
@@ -53,10 +55,38 @@ function terminal(positionMm, connectorInterface, options = {}) {
     positionMm: [Number(x), Number(y)],
     visibleBoundsMm: options.visibleBoundsMm ?? bounds(visibleSize, visibleSize, Number(x) - visibleSize / 2, Number(y) - visibleSize / 2),
     connectorInterface,
+    connectorId: options.connectorId ?? null,
+    anchorKind: options.anchorKind ?? "on-body",
     attachmentCapacity: options.attachmentCapacity ?? 1,
     sourceMappingId: options.sourceMappingId ?? null,
     physicalLabel: options.physicalLabel ?? null
   };
+}
+
+function physicalPort(id, engineeringConnectorId, terminalIds, housingBoundsMm, contactPitchMm, contactAxisLocal, outwardNormalLocal, keyed = false, componentTypeId = null) {
+  return {
+    id,
+    engineeringConnectorId,
+    terminalIds,
+    housingBoundsMm,
+    contactPitchMm,
+    contactAxisLocal,
+    outwardNormalLocal,
+    keyed,
+    geometryEvidenceId: geometryEvidenceId(componentTypeId)
+  };
+}
+
+function horizontalPortBounds(startX, endX, y, thickness = 3.2) {
+  const half = thickness / 2;
+  const left = Math.min(startX, endX) - half;
+  return bounds(Math.abs(endX - startX) + thickness, thickness, left, y - half);
+}
+
+function verticalPortBounds(x, startY, endY, thickness = 3.2) {
+  const half = thickness / 2;
+  const top = Math.min(startY, endY) - half;
+  return bounds(thickness, Math.abs(endY - startY) + thickness, x - half, top);
 }
 
 function controls(controlsById = {}) {
@@ -70,9 +100,12 @@ function definePhysical(id, definition) {
     version: 1,
     physicalSizeMm: [width, height],
     bodyBoundsMm: definition.bodyBoundsMm ?? bounds(width, height),
-    visualBoundsMm: definition.visualBoundsMm ?? definition.bodyBoundsMm ?? bounds(width, height),
-    clampBoundsMm: definition.clampBoundsMm ?? definition.visualBoundsMm ?? definition.bodyBoundsMm ?? bounds(width, height),
+    visualBoundsMm: definition.visualBoundsMm ?? bounds(width, height),
+    clampBoundsMm: definition.clampBoundsMm ?? definition.visualBoundsMm ?? bounds(width, height),
+    geometryEvidenceId: definition.geometryEvidenceId ?? geometryEvidenceId(id),
     terminals: definition.terminals ?? {},
+    physicalPorts: definition.physicalPorts ?? [],
+    formedLeadGeometry: definition.formedLeadGeometry ?? null,
     insertionPatterns: definition.insertionPatterns ?? [],
     controls: definition.controls ?? {}
   });
@@ -105,42 +138,57 @@ function makeBb400Terminals({ railHoles = 25, railPitch = 2.54, centralColumns =
   return terminals;
 }
 
-const UNO_DIGITAL_TOP = ["D13", "D12", "D11", "D10", "D9", "D8"];
-const UNO_DIGITAL_RIGHT = ["D7", "D6", "D5", "D4", "D3", "D2", "D1", "D0"];
-const UNO_POWER = ["IOREF", "RESET", "3V3", "5V", "GND", "GND2", "VIN"];
+const UNO_DIGITAL_8 = ["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"];
+const UNO_DIGITAL_10 = ["D8", "D9", "D10", "D11", "D12", "D13", "GND3", "AREF", "SDA", "SCL"];
+const UNO_POWER = ["NC", "IOREF", "RESET", "3V3", "5V", "GND", "GND2", "VIN"];
 const UNO_ANALOG = ["A0", "A1", "A2", "A3", "A4", "A5"];
+const UNO_VISUAL_CENTER_FROM_BOARD_CENTER_X = 2;
 
 function makeUnoTerminals() {
   const terminals = {};
-  UNO_DIGITAL_TOP.forEach((id, index) => {
-    terminals[id] = terminal([14.5 + index * 2.54, -23.5], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: id });
+  UNO_DIGITAL_8.forEach((id, index) => {
+    terminals[id] = terminal([31.21 - index * 2.54, -24.13], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, {
+      connectorId: "digital-header-8",
+      sourceMappingId: id
+    });
   });
-  UNO_DIGITAL_RIGHT.forEach((id, index) => {
-    terminals[id] = terminal([33.3, -17.78 + index * 2.54], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: id });
+  UNO_DIGITAL_10.forEach((id, index) => {
+    terminals[id] = terminal([9.366 - index * 2.54, -24.13], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, {
+      connectorId: "digital-header-10",
+      sourceMappingId: id
+    });
   });
   UNO_POWER.forEach((id, index) => {
-    terminals[id] = terminal([-26.7 + index * 2.54, 22.2], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: id });
+    terminals[id] = terminal([-6.35 + UNO_VISUAL_CENTER_FROM_BOARD_CENTER_X + index * 2.54, 24.13], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, {
+      connectorId: "power-header",
+      sourceMappingId: id
+    });
   });
   UNO_ANALOG.forEach((id, index) => {
-    terminals[id] = terminal([11.4 + index * 2.54, 22.2], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: id });
+    terminals[id] = terminal([16.51 + UNO_VISUAL_CENTER_FROM_BOARD_CENTER_X + index * 2.54, 24.13], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, {
+      connectorId: "analog-header",
+      sourceMappingId: id
+    });
   });
-  terminals.AREF = terminal([9.42, -23.5], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: "AREF" });
-  terminals.GND3 = terminal([11.96, -23.5], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: "GND3" });
-  terminals.SDA = terminal([29.74, -23.5], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: "SDA" });
-  terminals.SCL = terminal([32.28, -23.5], CONNECTOR_INTERFACES.FEMALE_CONTROLLER_HEADER, { sourceMappingId: "SCL" });
   return terminals;
 }
 
-const ESP32_LEFT = ["VIN", "GND2", "GPIO13", "GPIO12", "GPIO14", "GPIO27", "GPIO26", "GPIO25", "GPIO33", "GPIO32", "GPIO35", "GPIO34", "GPIO39", "GPIO36", "EN"];
-const ESP32_RIGHT = ["3V3", "GND", "GPIO15", "GPIO2", "GPIO4", "GPIO16", "GPIO17", "GPIO5", "GPIO18", "GPIO19", "GPIO21", "GPIO3", "GPIO1", "GPIO22", "GPIO23"];
+const ESP32_LEFT = ["3V3", "EN", "GPIO36", "GPIO39", "GPIO34", "GPIO35", "GPIO32", "GPIO33", "GPIO25", "GPIO26", "GPIO27", "GPIO14", "GPIO12", "GND2", "GPIO13", "D2", "D3", "CMD", "VIN"];
+const ESP32_RIGHT = ["GND", "GPIO23", "GPIO22", "GPIO1", "GPIO3", "GPIO21", "GND3", "GPIO19", "GPIO18", "GPIO5", "GPIO17", "GPIO16", "GPIO4", "GPIO0", "GPIO2", "GPIO15", "D1", "D0", "CLK"];
 
 function makeEsp32Terminals() {
   const terminals = {};
   ESP32_LEFT.forEach((id, index) => {
-    terminals[id] = terminal([-12.7, -17.78 + index * 2.54], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { sourceMappingId: id });
+    terminals[id] = terminal([-12.7, -22.86 + index * 2.54], CONNECTOR_INTERFACES.MALE_HEADER_PIN, {
+      connectorId: "j2-header",
+      sourceMappingId: id
+    });
   });
   ESP32_RIGHT.forEach((id, index) => {
-    terminals[id] = terminal([12.7, -17.78 + index * 2.54], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { sourceMappingId: id });
+    terminals[id] = terminal([12.7, -22.86 + index * 2.54], CONNECTOR_INTERFACES.MALE_HEADER_PIN, {
+      connectorId: "j3-header",
+      sourceMappingId: id
+    });
   });
   return terminals;
 }
@@ -158,15 +206,28 @@ export const physicalCatalog = freezeDeep({
   }),
   "controller-arduino-uno-r3": definePhysical("controller-arduino-uno-r3", {
     physicalSizeMm: [72.58, 53.34],
+    bodyBoundsMm: bounds(68.58, 53.34, -32.29, -26.67),
+    visualBoundsMm: bounds(72.58, 53.34),
+    clampBoundsMm: bounds(72.58, 53.34),
     terminals: makeUnoTerminals(),
+    physicalPorts: [
+      physicalPort("digital-header-8", "digital-header-8", UNO_DIGITAL_8, horizontalPortBounds(31.21, 13.43, -24.13), 2.54, [-1, 0], [0, -1], false, "controller-arduino-uno-r3"),
+      physicalPort("digital-header-10", "digital-header-10", UNO_DIGITAL_10, horizontalPortBounds(9.366, -13.494, -24.13), 2.54, [-1, 0], [0, -1], false, "controller-arduino-uno-r3"),
+      physicalPort("power-header", "power-header", UNO_POWER, horizontalPortBounds(-4.35, 13.43, 24.13), 2.54, [1, 0], [0, 1], false, "controller-arduino-uno-r3"),
+      physicalPort("analog-header", "analog-header", UNO_ANALOG, horizontalPortBounds(18.51, 31.21, 24.13), 2.54, [1, 0], [0, 1], false, "controller-arduino-uno-r3")
+    ],
     insertionPatterns: []
   }),
   "controller-esp32-devkit": definePhysical("controller-esp32-devkit", {
-    physicalSizeMm: [30, 55],
+    physicalSizeMm: [27.94, 48.26],
     terminals: makeEsp32Terminals(),
+    physicalPorts: [
+      physicalPort("j2-header", "j2-header", ESP32_LEFT, verticalPortBounds(-12.7, -22.86, 22.86, 2.54), 2.54, [0, 1], [-1, 0], false, "controller-esp32-devkit"),
+      physicalPort("j3-header", "j3-header", ESP32_RIGHT, verticalPortBounds(12.7, -22.86, 22.86, 2.54), 2.54, [0, 1], [1, 0], false, "controller-esp32-devkit")
+    ],
     insertionPatterns: [
       {
-        id: "esp32-devkit-v1-30-pin-headers",
+        id: "esp32-devkitc-v4-38-pin-headers",
         terminalIds: [...ESP32_LEFT, ...ESP32_RIGHT],
         rigidity: "rigid",
         allowedRotationsDeg: [0, 180],
@@ -178,9 +239,12 @@ export const physicalCatalog = freezeDeep({
   "supply-servo-6v": definePhysical("supply-servo-6v", {
     physicalSizeMm: [62, 34],
     terminals: {
-      VPLUS: terminal([-25, -8], CONNECTOR_INTERFACES.SCREW_TERMINAL),
-      GND: terminal([-25, 8], CONNECTOR_INTERFACES.SCREW_TERMINAL)
+      VPLUS: terminal([-25, -2.54], CONNECTOR_INTERFACES.SCREW_TERMINAL, { connectorId: "supply-output" }),
+      GND: terminal([-25, 2.54], CONNECTOR_INTERFACES.SCREW_TERMINAL, { connectorId: "supply-output" })
     },
+    physicalPorts: [
+      physicalPort("supply-output", "supply-output", ["VPLUS", "GND"], verticalPortBounds(-25, -2.54, 2.54, 5), 5.08, [0, 1], [-1, 0], true, "supply-servo-6v")
+    ],
     controls: controls({
       power: {
         type: "toggle",
@@ -197,10 +261,21 @@ export const physicalCatalog = freezeDeep({
     physicalSizeMm: [52, 28],
     visualBoundsMm: bounds(72, 32, -34, -16),
     terminals: {
-      signal: terminal([26, -8], CONNECTOR_INTERFACES.SERVO_FEMALE_PLUG),
-      vplus: terminal([26, 0], CONNECTOR_INTERFACES.SERVO_FEMALE_PLUG),
-      gnd: terminal([26, 8], CONNECTOR_INTERFACES.SERVO_FEMALE_PLUG)
+      signal: terminal([34, -2.54], CONNECTOR_INTERFACES.SERVO_FEMALE_PLUG, { connectorId: "servo-lead", anchorKind: "external-port" }),
+      vplus: terminal([34, 0], CONNECTOR_INTERFACES.SERVO_FEMALE_PLUG, { connectorId: "servo-lead", anchorKind: "external-port" }),
+      gnd: terminal([34, 2.54], CONNECTOR_INTERFACES.SERVO_FEMALE_PLUG, { connectorId: "servo-lead", anchorKind: "external-port" })
     },
+    physicalPorts: [
+      physicalPort("servo-plug", "servo-lead", ["signal", "vplus", "gnd"], verticalPortBounds(34, -2.54, 2.54, 5), 2.54, [0, 1], [1, 0], true, "servo-standard")
+    ],
+    insertionPatterns: [{
+      id: "standard-servo-three-contact-plug",
+      terminalIds: ["signal", "vplus", "gnd"],
+      rigidity: "rigid",
+      allowedRotationsDeg: [0, 90, 180, 270],
+      positionToleranceMm: 0.25,
+      angularToleranceDeg: 1
+    }],
     controls: controls({
       previewAngleDeg: {
         type: "angle",
@@ -215,9 +290,17 @@ export const physicalCatalog = freezeDeep({
   }),
   "led-red": definePhysical("led-red", {
     physicalSizeMm: [18, 18],
+    bodyBoundsMm: bounds(8, 10, -4, -6),
     terminals: {
-      anode: terminal([-5.08, 0], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      cathode: terminal([5.08, 0], CONNECTOR_INTERFACES.COMPONENT_LEAD)
+      anode: terminal([-1.27, 8], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "led-legs", anchorKind: "external-lead" }),
+      cathode: terminal([1.27, 8], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "led-legs", anchorKind: "external-lead" })
+    },
+    formedLeadGeometry: {
+      version: 1,
+      leadPathsMm: {
+        anode: [[-1.27, 2], [-1.27, 8]],
+        cathode: [[1.27, 2], [1.27, 8]]
+      }
     },
     insertionPatterns: [{
       id: "fixed-led-leads",
@@ -230,9 +313,18 @@ export const physicalCatalog = freezeDeep({
   }),
   "resistor-220": definePhysical("resistor-220", {
     physicalSizeMm: [30, 10],
+    bodyBoundsMm: bounds(18, 7, -9, -3.5),
+    visualBoundsMm: bounds(30, 18, -15, -5),
     terminals: {
-      a: terminal([-5.08, 0], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      b: terminal([5.08, 0], CONNECTOR_INTERFACES.COMPONENT_LEAD)
+      a: terminal([-5.08, 8], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "resistor-leads", anchorKind: "external-lead" }),
+      b: terminal([5.08, 8], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "resistor-leads", anchorKind: "external-lead" })
+    },
+    formedLeadGeometry: {
+      version: 1,
+      leadPathsMm: {
+        a: [[-9, 0], [-12, 0], [-12, 8], [-5.08, 8]],
+        b: [[9, 0], [12, 0], [12, 8], [5.08, 8]]
+      }
     },
     insertionPatterns: [{
       id: "fixed-resistor-10-16mm-span",
@@ -245,12 +337,20 @@ export const physicalCatalog = freezeDeep({
   }),
   "capacitor-electrolytic-470uf": definePhysical("capacitor-electrolytic-470uf", {
     physicalSizeMm: [24, 22],
+    bodyBoundsMm: bounds(14, 17, -7, -9),
     terminals: {
-      pos: terminal([0, 12], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      neg: terminal([0, 17.08], CONNECTOR_INTERFACES.COMPONENT_LEAD)
+      pos: terminal([-1.27, 10], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "capacitor-legs", anchorKind: "external-lead" }),
+      neg: terminal([1.27, 10], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "capacitor-legs", anchorKind: "external-lead" })
+    },
+    formedLeadGeometry: {
+      version: 1,
+      leadPathsMm: {
+        pos: [[-1.27, 5], [-1.27, 10]],
+        neg: [[1.27, 5], [1.27, 10]]
+      }
     },
     insertionPatterns: [{
-      id: "radial-capacitor-5-08mm-span",
+      id: "radial-capacitor-2-54mm-span",
       terminalIds: ["pos", "neg"],
       rigidity: "fixed-lead-span",
       allowedRotationsDeg: [0, 90, 180, 270],
@@ -261,10 +361,10 @@ export const physicalCatalog = freezeDeep({
   "button-tactile": definePhysical("button-tactile", {
     physicalSizeMm: [12, 12],
     terminals: {
-      sense: terminal([-3.81, -3.81], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      sense2: terminal([3.81, -3.81], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      return: terminal([-3.81, 3.81], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      return2: terminal([3.81, 3.81], CONNECTOR_INTERFACES.COMPONENT_LEAD)
+      sense: terminal([-3.81, -2.54], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "button-pins" }),
+      sense2: terminal([3.81, -2.54], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "button-pins" }),
+      return: terminal([-3.81, 2.54], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "button-pins" }),
+      return2: terminal([3.81, 2.54], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "button-pins" })
     },
     insertionPatterns: [{
       id: "tactile-switch-four-legs",
@@ -288,38 +388,47 @@ export const physicalCatalog = freezeDeep({
   }),
   "ultrasonic-hcsr04": definePhysical("ultrasonic-hcsr04", {
     physicalSizeMm: [45, 24],
+    visualBoundsMm: bounds(45, 28, -22.5, -12),
     terminals: {
-      VCC: terminal([-3.81, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN),
-      TRIG: terminal([-1.27, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN),
-      ECHO: terminal([1.27, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN),
-      GND: terminal([3.81, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN)
+      VCC: terminal([-3.81, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { connectorId: "hcsr04-header", anchorKind: "external-port" }),
+      TRIG: terminal([-1.27, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { connectorId: "hcsr04-header", anchorKind: "external-port" }),
+      ECHO: terminal([1.27, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { connectorId: "hcsr04-header", anchorKind: "external-port" }),
+      GND: terminal([3.81, 13], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { connectorId: "hcsr04-header", anchorKind: "external-port" })
     },
+    physicalPorts: [
+      physicalPort("hcsr04-header", "hcsr04-header", ["VCC", "TRIG", "ECHO", "GND"], horizontalPortBounds(-3.81, 3.81, 13), 2.54, [1, 0], [0, 1], false, "ultrasonic-hcsr04")
+    ],
     insertionPatterns: []
   }),
   "driver-l298n": definePhysical("driver-l298n", {
     physicalSizeMm: [58, 42],
     terminals: {
-      VMOTOR: terminal([-24, -16], CONNECTOR_INTERFACES.SCREW_TERMINAL),
-      GND: terminal([-24, -6], CONNECTOR_INTERFACES.SCREW_TERMINAL),
-      IN1: terminal([-24, 8], CONNECTOR_INTERFACES.MALE_HEADER_PIN),
-      IN2: terminal([-24, 16], CONNECTOR_INTERFACES.MALE_HEADER_PIN),
-      OUT1: terminal([24, -8], CONNECTOR_INTERFACES.SCREW_TERMINAL),
-      OUT2: terminal([24, 8], CONNECTOR_INTERFACES.SCREW_TERMINAL)
-    }
+      VMOTOR: terminal([-24, -12.54], CONNECTOR_INTERFACES.SCREW_TERMINAL, { connectorId: "l298n-power" }),
+      GND: terminal([-24, -7.46], CONNECTOR_INTERFACES.SCREW_TERMINAL, { connectorId: "l298n-power" }),
+      IN1: terminal([-24, 8], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { connectorId: "l298n-logic" }),
+      IN2: terminal([-24, 10.54], CONNECTOR_INTERFACES.MALE_HEADER_PIN, { connectorId: "l298n-logic" }),
+      OUT1: terminal([24, -2.54], CONNECTOR_INTERFACES.SCREW_TERMINAL, { connectorId: "l298n-motor" }),
+      OUT2: terminal([24, 2.54], CONNECTOR_INTERFACES.SCREW_TERMINAL, { connectorId: "l298n-motor" })
+    },
+    physicalPorts: [
+      physicalPort("l298n-power", "l298n-power", ["VMOTOR", "GND"], verticalPortBounds(-24, -12.54, -7.46, 5), 5.08, [0, 1], [-1, 0], true, "driver-l298n"),
+      physicalPort("l298n-logic", "l298n-logic", ["IN1", "IN2"], verticalPortBounds(-24, 8, 10.54), 2.54, [0, 1], [-1, 0], false, "driver-l298n"),
+      physicalPort("l298n-motor", "l298n-motor", ["OUT1", "OUT2"], verticalPortBounds(24, -2.54, 2.54, 5), 5.08, [0, 1], [1, 0], true, "driver-l298n")
+    ]
   }),
   "motor-dc": definePhysical("motor-dc", {
     physicalSizeMm: [42, 28],
     terminals: {
-      a: terminal([-18, 0], CONNECTOR_INTERFACES.MOTOR_TAB),
-      b: terminal([18, 0], CONNECTOR_INTERFACES.MOTOR_TAB)
+      a: terminal([-18, 0], CONNECTOR_INTERFACES.MOTOR_TAB, { connectorId: "motor-leads" }),
+      b: terminal([18, 0], CONNECTOR_INTERFACES.MOTOR_TAB, { connectorId: "motor-leads" })
     }
   }),
   "potentiometer-10k": definePhysical("potentiometer-10k", {
     physicalSizeMm: [26, 30],
     terminals: {
-      A: terminal([-5.08, 15], CONNECTOR_INTERFACES.SOLDER_LUG),
-      W: terminal([0, 15], CONNECTOR_INTERFACES.SOLDER_LUG),
-      B: terminal([5.08, 15], CONNECTOR_INTERFACES.SOLDER_LUG)
+      A: terminal([-5.08, 15], CONNECTOR_INTERFACES.SOLDER_LUG, { connectorId: "pot-lugs" }),
+      W: terminal([0, 15], CONNECTOR_INTERFACES.SOLDER_LUG, { connectorId: "pot-lugs" }),
+      B: terminal([5.08, 15], CONNECTOR_INTERFACES.SOLDER_LUG, { connectorId: "pot-lugs" })
     },
     controls: controls({
       wiper: {
@@ -335,10 +444,11 @@ export const physicalCatalog = freezeDeep({
   }),
   "switch-spdt-slide": definePhysical("switch-spdt-slide", {
     physicalSizeMm: [18, 10],
+    visualBoundsMm: bounds(18, 14, -9, -5),
     terminals: {
-      A: terminal([-5.08, 6], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      COM: terminal([0, 6], CONNECTOR_INTERFACES.COMPONENT_LEAD),
-      B: terminal([5.08, 6], CONNECTOR_INTERFACES.COMPONENT_LEAD)
+      A: terminal([-5.08, 6], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "switch-pins", anchorKind: "external-lead" }),
+      COM: terminal([0, 6], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "switch-pins", anchorKind: "external-lead" }),
+      B: terminal([5.08, 6], CONNECTOR_INTERFACES.COMPONENT_LEAD, { connectorId: "switch-pins", anchorKind: "external-lead" })
     },
     controls: controls({
       throw: {
@@ -369,7 +479,6 @@ export function physicalTerminalIds(componentTypeId) {
 
 export function directConnectorInterfacesCompatible(sourceInterface, targetInterface) {
   if (!sourceInterface || !targetInterface) return false;
-  if (sourceInterface === targetInterface) return true;
   return DIRECT_INSERT_COMPATIBILITY[sourceInterface]?.includes(targetInterface) ?? false;
 }
 

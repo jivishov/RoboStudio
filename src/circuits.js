@@ -2,7 +2,6 @@ import "./circuits.css";
 import "./shellHeader.css";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import {
-  commitHistoryFrom,
   commitHistory,
   createHistory,
   currentHistoryValue,
@@ -49,12 +48,32 @@ import {
   componentBounds,
   componentScale,
   normalizeComponentRotation,
-  normalizeComponentScale
+  normalizeComponentScale,
+  terminalWorldPosition
 } from "./circuits/geometry.js";
-import { insertComponentIntoNearestTerminals, rematchDirectInsertionConnections } from "./circuits/insertion.js";
+import { inspectDirectInsertionState } from "./circuits/insertion.js";
+import { installMaterialSymbolsFallback } from "./circuits/materialSymbols.js";
 import { derivePhysicalOccupancy } from "./circuits/occupancy.js";
 import { fallbackVisualNotice } from "./circuits/proceduralVisuals.js";
-import { terminalAriaLabel, terminalRadius, terminalTooltip } from "./circuits/terminalRenderer.js";
+import { terminalAriaLabel, terminalTooltip } from "./circuits/terminalRenderer.js";
+import {
+  createProjectedTerminalResolver,
+  terminalEndpointKey,
+  terminalPointerProfile
+} from "./circuits/screenSpaceResolver.js";
+import { nearestVisibleTerminalInDirection } from "./circuits/spatialNavigation.js";
+import {
+  DEFAULT_VIEW_ZOOM,
+  MAX_VIEW_ZOOM,
+  MIN_VIEW_ZOOM,
+  clampViewCenter,
+  clippedComponentCounts,
+  componentCamera,
+  defaultCameraForProject,
+  overviewCameraForProject,
+  portCamera,
+  viewBoxForCamera
+} from "./circuits/workbenchView.js";
 import { getVisualDefinition } from "./circuits/visualCatalog.js";
 import { componentVisualStatus } from "./circuits/visualRenderer.js";
 import { endpointFittingClass, shouldRenderExternalWire, wirePath } from "./circuits/wireRenderer.js";
@@ -62,7 +81,6 @@ import { getPhotorealAssetUrl } from "./circuits/generated/photorealAssets.js";
 import {
   addComponent,
   applyStarterTemplate,
-  connectTerminals,
   createCircuitLabProject,
   normalizeProject,
   parseCircuitLabProjectJson,
@@ -77,13 +95,22 @@ import {
   updateComponent
 } from "./circuits/model.js";
 import { runCircuitLabTest } from "./circuits/testBench.js";
+import {
+  commitStagedMutation,
+  stageDisconnectMutation,
+  stageInsertionMutation,
+  stageWireMutation
+} from "./circuits/transactions.js";
 import { normalizeMechatronicsBinding, parseMechatronicsBindingJson, serializeMechatronicsBinding } from "./mechatronics/model.js";
 import { previewMechatronicsBindingSuggestions } from "./mechatronics/suggestions.js";
 
+installMaterialSymbolsFallback(document);
+
 const SVG_NS = "http://www.w3.org/2000/svg";
-const MIN_BENCH_ZOOM = 0.65;
-const MAX_BENCH_ZOOM = 2.6;
+const MIN_BENCH_ZOOM = MIN_VIEW_ZOOM;
+const MAX_BENCH_ZOOM = MAX_VIEW_ZOOM;
 const BENCH_ZOOM_STEP = 1.18;
+const WIRE_HINT_SESSION_KEY = "robostudio:circuit-lab:first-wire-complete";
 
 const statusEl = document.querySelector("#circuit-status");
 const projectNameInput = document.querySelector("#circuit-lab-name");
@@ -116,6 +143,9 @@ const zoomOutButton = document.querySelector("#circuit-zoom-out");
 const zoomInButton = document.querySelector("#circuit-zoom-in");
 const zoomResetButton = document.querySelector("#circuit-zoom-reset");
 const zoomLevelEl = document.querySelector("#circuit-zoom-level");
+const overviewButton = document.querySelector("#circuit-view-overview");
+const frameButton = document.querySelector("#circuit-view-frame");
+const edgeCues = document.querySelector("#circuit-edge-cues");
 const applyComponentButton = document.querySelector("#apply-circuit-component");
 const removeComponentButton = document.querySelector("#remove-circuit-component");
 const testSummaryEl = document.querySelector("#circuit-test-summary");
@@ -148,12 +178,38 @@ const exportJsonButton = document.querySelector("#export-circuit-lab-json");
 const downloadSourceButton = document.querySelector("#download-circuit-lab-source");
 const runTestButton = document.querySelector("#run-circuit-test");
 const modeButtons = [...document.querySelectorAll("[data-circuit-mode]")];
+const mutationConfirmation = document.querySelector("#circuit-mutation-confirmation");
+const mutationConfirmationTitle = document.querySelector("#circuit-mutation-confirmation-title");
+const mutationConfirmationSummary = document.querySelector("#circuit-mutation-confirmation-summary");
+const mutationConfirmationEndpoints = document.querySelector("#circuit-mutation-confirmation-endpoints");
+const mutationConfirmationHazards = document.querySelector("#circuit-mutation-confirmation-hazards");
+const confirmMutationButton = document.querySelector("#confirm-circuit-mutation");
+const cancelMutationButton = document.querySelector("#cancel-circuit-mutation");
+const precisionHud = document.querySelector("#circuit-precision-hud");
+const liveRegion = document.querySelector("#circuit-live-region");
+const activeTerminalProxy = document.querySelector("#circuit-active-terminal-proxy");
+const hardwareDrawer = document.querySelector("#circuit-hardware-drawer");
+const workflowDrawer = document.querySelector("#circuit-workflow-drawer");
+const hardwareDrawerTrigger = document.querySelector("#open-circuit-hardware-drawer");
+const workflowDrawerTrigger = document.querySelector("#open-circuit-workflow-drawer");
+const workflowPanel = document.querySelector("#circuit-workflow-panel");
+const drawerMediaQuery = window.matchMedia("(max-width: 1199.98px)");
+
+function sessionWireHintDismissed() {
+  try {
+    return window.sessionStorage.getItem(WIRE_HINT_SESSION_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 const history = createHistory(createCircuitLabProject());
 const workspaceStore = createWorkspaceStore();
 const uiState = {
   pendingEndpoint: null,
   wireDrag: null,
+  pendingMutation: null,
+  projectGeneration: 0,
   activeTab: "inspect",
   selectedIssueId: null,
   binding: normalizeMechatronicsBinding(),
@@ -169,8 +225,23 @@ const uiState = {
   },
   controls: createControlInteractionState(),
   view: {
-    zoom: 1,
-    center: [BENCH_WIDTH / 2, BENCH_HEIGHT / 2]
+    ...defaultCameraForProject(currentHistoryValue(history), (typeId) => catalog.getComponent(typeId)),
+    userAdjusted: false,
+    userAdjustedBeforeHydration: false
+  },
+  placement: null,
+  explicitSelectedComponentId: null,
+  openDrawer: null,
+  drawerTrigger: null,
+  wireHintDismissed: sessionWireHintDismissed(),
+  targeting: {
+    resolution: null,
+    focusedEndpoint: null,
+    focusSource: null,
+    lockedEndpointKey: "",
+    ambiguityAction: null,
+    lastClientPoint: null,
+    pointerType: "mouse"
   }
 };
 let storageHydrationFinished = false;
@@ -180,8 +251,77 @@ let wireInteraction = null;
 let benchPanInteraction = null;
 let pendingPreviewProject = null;
 let previewAnimationFrame = 0;
+let pendingTargetPointer = null;
 let suppressNextBenchClick = false;
 let pendingFritzingFzpFile = null;
+let benchLayers = null;
+let circuitAssistantHandle = null;
+
+const cycle3Diagnostics = {
+  fullBenchReplacementCount: 0,
+  stableBenchRenderCount: 0,
+  transientRenderCount: 0,
+  pointerFrameCount: 0,
+  pointerEventCount: 0,
+  wheelEventCount: 0
+};
+
+function physicalPortForTerminal(definition, terminalId) {
+  return (definition?.physicalPorts ?? []).find((port) => port.terminalIds.includes(terminalId)) ?? null;
+}
+
+function collectProjectedTerminalAnchors(project = currentProject()) {
+  const occupancy = derivePhysicalOccupancy(project);
+  const anchors = [];
+  for (const component of project.components) {
+    const definition = catalog.getComponent(component.typeId);
+    if (!definition) continue;
+    const visualDefinition = getVisualDefinition(component.typeId);
+    for (const terminal of definition.terminals) {
+      const endpoint = { componentId: component.id, terminalId: terminal.id };
+      const endpointKey = terminalEndpointKey(endpoint);
+      const used = occupancy.occupancyByEndpoint.get(endpointKey)?.length ?? 0;
+      const capacity = Math.max(1, Number(terminal.attachmentCapacity ?? 1));
+      const port = physicalPortForTerminal(definition, terminal.id);
+      const contactIndex = port ? port.terminalIds.indexOf(terminal.id) : -1;
+      anchors.push({
+        endpoint,
+        endpointKey,
+        svgPoint: terminalWorldPosition(component, terminal),
+        componentId: component.id,
+        componentLabel: component.name,
+        componentTypeId: component.typeId,
+        terminalId: terminal.id,
+        terminalLabel: terminal.physicalLabel ?? terminal.label ?? terminal.id,
+        terminalAriaLabel: terminalAriaLabel(component, terminal),
+        physicalPortId: port?.id ?? terminal.connectorId ?? null,
+        physicalPortLabel: port?.id ?? terminal.connectorId ?? "Independent contact",
+        contactPosition: port && contactIndex >= 0 ? `${contactIndex + 1}/${port.terminalIds.length}` : "Independent",
+        connectorType: terminal.connectorInterface ?? port?.engineeringConnectorId ?? "unknown",
+        engineeringConnectorId: port?.engineeringConnectorId ?? terminal.connectorId ?? null,
+        capacityUsed: used,
+        capacity,
+        invalidReason: used >= capacity
+          ? `Terminal ${component.id}.${terminal.id} is full (${used}/${capacity} attachments).`
+          : null,
+        electricalRole: terminal.electricalRole ?? terminal.kind ?? "unknown",
+        voltageDomainId: terminal.voltageDomainId ?? "unspecified",
+        geometryAccuracy: definition.geometryEvidence?.accuracyClass ?? "unclassified",
+        terminal,
+        component,
+        componentDefinition: definition,
+        port,
+        terminalVisual: visualDefinition?.terminalVisuals?.[terminal.id] ?? null
+      });
+    }
+  }
+  return anchors;
+}
+
+const projectedTerminalResolver = createProjectedTerminalResolver({
+  collectAnchors: (project) => collectProjectedTerminalAnchors(project),
+  getScreenCTM: () => benchSvg.getScreenCTM()
+});
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -238,48 +378,109 @@ function showStatus(message, timeoutMs = 3600) {
   }, timeoutMs);
 }
 
+function announceInteraction(message) {
+  if (!liveRegion || !message) return;
+  liveRegion.textContent = "";
+  window.requestAnimationFrame(() => {
+    liveRegion.textContent = String(message);
+  });
+}
+
+function markWireHintComplete() {
+  if (uiState.wireHintDismissed) return;
+  uiState.wireHintDismissed = true;
+  try {
+    window.sessionStorage.setItem(WIRE_HINT_SESSION_KEY, "true");
+  } catch {
+    // The hint remains dismissed for this page session when storage is unavailable.
+  }
+}
+
+function drawerRecord(name) {
+  if (name === "hardware") return { panel: hardwareDrawer, trigger: hardwareDrawerTrigger };
+  if (name === "workflow") return { panel: workflowDrawer, trigger: workflowDrawerTrigger };
+  return null;
+}
+
+function syncDrawerLayout() {
+  const compact = drawerMediaQuery.matches;
+  for (const name of ["hardware", "workflow"]) {
+    const record = drawerRecord(name);
+    if (!record?.panel || !record.trigger) continue;
+    const open = compact && uiState.openDrawer === name;
+    record.panel.classList.toggle("is-open", open);
+    record.panel.inert = compact && !open;
+    record.trigger.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+  document.querySelector(".circuit-shell")?.classList.toggle("has-open-drawer", compact && Boolean(uiState.openDrawer));
+}
+
+function closeOpenDrawer(options = {}) {
+  if (!uiState.openDrawer) return false;
+  const trigger = uiState.drawerTrigger ?? drawerRecord(uiState.openDrawer)?.trigger;
+  const panel = drawerRecord(uiState.openDrawer)?.panel;
+  if (panel?.contains(document.activeElement)) trigger?.focus({ preventScroll: true });
+  uiState.openDrawer = null;
+  uiState.drawerTrigger = null;
+  syncDrawerLayout();
+  if (options.restoreFocus !== false) trigger?.focus({ preventScroll: true });
+  return true;
+}
+
+function openDrawer(name, trigger = drawerRecord(name)?.trigger) {
+  if (!drawerMediaQuery.matches) return false;
+  if (uiState.openDrawer === name) return true;
+  if (uiState.openDrawer) closeOpenDrawer({ restoreFocus: false });
+  uiState.openDrawer = name;
+  uiState.drawerTrigger = trigger;
+  syncDrawerLayout();
+  const panel = drawerRecord(name)?.panel;
+  panel?.querySelector("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex='0']")?.focus({ preventScroll: true });
+  return true;
+}
+
 function formatCount(count, singular, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function normalizeBenchZoom(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return 1;
-  return Math.min(MAX_BENCH_ZOOM, Math.max(MIN_BENCH_ZOOM, numeric));
+  return Math.min(MAX_BENCH_ZOOM, Math.max(MIN_BENCH_ZOOM, Number(value) || DEFAULT_VIEW_ZOOM));
 }
 
 function clampBenchViewCenter(center, zoom = uiState.view.zoom) {
-  const viewWidth = BENCH_WIDTH / zoom;
-  const viewHeight = BENCH_HEIGHT / zoom;
-  const halfWidth = Math.min(BENCH_WIDTH / 2, viewWidth / 2);
-  const halfHeight = Math.min(BENCH_HEIGHT / 2, viewHeight / 2);
-  return [
-    Math.min(BENCH_WIDTH - halfWidth, Math.max(halfWidth, Number(center?.[0] ?? BENCH_WIDTH / 2))),
-    Math.min(BENCH_HEIGHT - halfHeight, Math.max(halfHeight, Number(center?.[1] ?? BENCH_HEIGHT / 2)))
-  ];
+  return clampViewCenter(center, zoom);
 }
 
 function benchViewBoxFor(zoom = uiState.view.zoom, center = uiState.view.center) {
-  const normalizedZoom = normalizeBenchZoom(zoom);
-  const viewWidth = BENCH_WIDTH / normalizedZoom;
-  const viewHeight = BENCH_HEIGHT / normalizedZoom;
-  const clampedCenter = clampBenchViewCenter(center, normalizedZoom);
-  return [
-    clampedCenter[0] - viewWidth / 2,
-    clampedCenter[1] - viewHeight / 2,
-    viewWidth,
-    viewHeight
-  ];
+  return viewBoxForCamera({ zoom, center });
+}
+
+function renderEdgeCues() {
+  if (!edgeCues) return;
+  const counts = clippedComponentCounts(currentProject(), (typeId) => catalog.getComponent(typeId), benchViewBoxFor());
+  const labels = { top: "Up", right: "Right", bottom: "Down", left: "Left" };
+  let visible = false;
+  for (const direction of Object.keys(labels)) {
+    const element = edgeCues.querySelector(`[data-edge-direction='${direction}']`);
+    const count = counts[direction];
+    if (!element) continue;
+    element.hidden = count === 0;
+    element.textContent = count ? `${labels[direction]} ${count}` : "";
+    if (count) visible = true;
+  }
+  edgeCues.hidden = !visible;
 }
 
 function renderBenchView() {
   const viewBox = benchViewBoxFor();
   benchSvg.setAttribute("viewBox", viewBox.map((value) => value.toFixed(3)).join(" "));
+  projectedTerminalResolver.invalidate("camera-viewbox");
   benchSvg.classList.toggle("is-pan-ready", uiState.view.zoom > 1.001);
   benchSvg.classList.toggle("is-panning", Boolean(benchPanInteraction));
-  if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(uiState.view.zoom * 100)}%`;
+  if (zoomLevelEl) zoomLevelEl.textContent = `View ${Math.round(uiState.view.zoom * 100)}%`;
   if (zoomOutButton) zoomOutButton.disabled = uiState.view.zoom <= MIN_BENCH_ZOOM + 0.001;
   if (zoomInButton) zoomInButton.disabled = uiState.view.zoom >= MAX_BENCH_ZOOM - 0.001;
+  renderEdgeCues();
 }
 
 function setBenchZoom(nextZoom, options = {}) {
@@ -302,20 +503,179 @@ function setBenchZoom(nextZoom, options = {}) {
   }
   uiState.view.zoom = next;
   uiState.view.center = clampBenchViewCenter(center, next);
-  renderBench();
+  if (options.userAdjusted !== false) {
+    uiState.view.userAdjusted = true;
+    if (!storageHydrationFinished) uiState.view.userAdjustedBeforeHydration = true;
+  }
+  renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+  renderTransientLayer();
 }
 
 function resetBenchZoom() {
-  uiState.view.zoom = 1;
-  uiState.view.center = [BENCH_WIDTH / 2, BENCH_HEIGHT / 2];
-  renderBench();
+  const project = currentProject();
+  const selected = uiState.explicitSelectedComponentId
+    ? project.components.find((component) => component.id === uiState.explicitSelectedComponentId)
+    : null;
+  const definition = selected ? catalog.getComponent(selected.typeId) : null;
+  const next = selected && definition
+    ? { zoom: DEFAULT_VIEW_ZOOM, center: [
+        (componentBounds(selected, definition).left + componentBounds(selected, definition).right) / 2,
+        (componentBounds(selected, definition).top + componentBounds(selected, definition).bottom) / 2
+      ] }
+    : defaultCameraForProject(project, (typeId) => catalog.getComponent(typeId));
+  uiState.view.zoom = DEFAULT_VIEW_ZOOM;
+  uiState.view.center = clampBenchViewCenter(next.center, DEFAULT_VIEW_ZOOM);
+  uiState.view.userAdjusted = true;
+  if (!storageHydrationFinished) uiState.view.userAdjustedBeforeHydration = true;
+  renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+  renderTransientLayer();
+}
+
+function showOverview() {
+  const next = overviewCameraForProject(currentProject(), (typeId) => catalog.getComponent(typeId));
+  uiState.view.zoom = next.zoom;
+  uiState.view.center = next.center;
+  uiState.view.userAdjusted = true;
+  if (!storageHydrationFinished) uiState.view.userAdjustedBeforeHydration = true;
+  renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+  renderTransientLayer();
+}
+
+function frameSelectionOrPort() {
+  const project = currentProject();
+  const target = targetRecordForDisplay();
+  let next = null;
+  if (target?.component && target?.port) next = portCamera(target.component, target.port);
+  if (!next) {
+    const selectedId = uiState.explicitSelectedComponentId ?? project.selectedComponentId;
+    const component = project.components.find((item) => item.id === selectedId);
+    const definition = component ? catalog.getComponent(component.typeId) : null;
+    if (component && definition) next = componentCamera(component, definition);
+  }
+  if (!next) {
+    showStatus("Select a component or focus a physical port before framing.", 5200);
+    return;
+  }
+  uiState.view.zoom = next.zoom;
+  uiState.view.center = next.center;
+  uiState.view.userAdjusted = true;
+  if (!storageHydrationFinished) uiState.view.userAdjustedBeforeHydration = true;
+  renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+  renderTransientLayer();
+}
+
+function clearPendingMutation() {
+  uiState.pendingMutation = null;
+}
+
+function mutationVerb(mutation) {
+  if (mutation?.operationKind === "connect") return "Connect";
+  if (mutation?.operationKind === "re-seat") return "Re-seat";
+  if (mutation?.operationKind === "disconnect") return "Disconnect";
+  return "Place";
+}
+
+function renderMutationConfirmation() {
+  const mutation = uiState.pendingMutation;
+  if (!mutationConfirmation) return;
+  mutationConfirmation.hidden = !mutation;
+  if (!mutation) return;
+  const project = mutation.candidateProject ?? currentProject();
+  const verb = mutationVerb(mutation);
+  mutationConfirmationTitle.textContent = `${verb} anyway? Electrical hazard detected`;
+  mutationConfirmationSummary.textContent = `Mechanical fit is resolved, but ${mutation.electrical.hazards.length} new or worsened electrical hazard${mutation.electrical.hazards.length === 1 ? "" : "s"} would be added. The project and history remain unchanged until you confirm.`;
+  mutationConfirmationEndpoints.innerHTML = mutation.exactEndpointPairs.length
+    ? mutation.exactEndpointPairs.map((pair) => `
+        <div>${escapeHtml(endpointLabel(project, pair.sourceEndpoint))} &harr; ${escapeHtml(endpointLabel(project, pair.targetEndpoint))}</div>
+      `).join("")
+    : `<div>No direct endpoint pair is staged.</div>`;
+  mutationConfirmationHazards.innerHTML = mutation.electrical.hazards
+    .map((issue) => `<li><strong>${escapeHtml(issue.code)}</strong>: ${escapeHtml(issue.message)}</li>`)
+    .join("");
+  confirmMutationButton.textContent = `${verb} anyway`;
+}
+
+function stagedMutationMessage(mutation) {
+  if (mutation.operationKind === "connect") return "Wire connected";
+  if (mutation.operationKind === "disconnect") return "Direct insertion disconnected";
+  if (mutation.operationKind === "re-seat") return "Direct insertion re-seated";
+  const count = mutation.exactEndpointPairs.length;
+  return count ? `Component inserted into ${count} terminal${count === 1 ? "" : "s"}` : "Component updated";
+}
+
+function commitResolvedMutation(mutation, message = stagedMutationMessage(mutation)) {
+  let committed;
+  try {
+    committed = commitStagedMutation(currentProject(), uiState.projectGeneration, mutation);
+  } catch (error) {
+    clearPendingMutation();
+    refreshDerived();
+    render();
+    showStatus(`The physical connection could not be committed: ${error.message ?? "unknown commit failure"}. Nothing changed.`, 6200);
+    announceInteraction(`Error. ${error.message ?? "The physical connection could not be committed"}. Nothing changed.`);
+    return { committed: false, reason: "commit-failure", project: currentProject(), error };
+  }
+  if (!committed.ok) {
+    clearPendingMutation();
+    refreshDerived();
+    render();
+    const stale = committed.reason === "stale-generation" || committed.reason === "stale-base-project" || committed.reason === "stale-plan";
+    showStatus(stale
+      ? "The staged connection is stale because the project changed; nothing was committed."
+      : "The physical connection could not be revalidated; nothing was committed.", 6200);
+    announceInteraction(stale ? "Error. The staged connection is stale. Nothing changed." : "Error. The physical connection could not be revalidated. Nothing changed.");
+    return { committed: false, reason: committed.reason, project: currentProject() };
+  }
+  if (mutation.operationKind === "connect") markWireHintComplete();
+  const project = commitProject(committed.project, message);
+  announceInteraction(`${message}.`);
+  return { committed: true, reason: null, project };
+}
+
+function presentStagedMutation(mutation, options = {}) {
+  clearPendingMutation();
+  if (!mutation || mutation.status === "mechanically-impossible") {
+    refreshDerived();
+    render();
+    showStatus(`Connection blocked: ${mutation?.mechanical?.message ?? "mechanically impossible"} No changes were made.`, 6200);
+    announceInteraction(`Error. ${mutation?.mechanical?.message ?? "Mechanical placement is impossible"} No changes were made.`);
+    return { committed: false, pending: false, blocked: true, project: currentProject(), mutation };
+  }
+  if (mutation.requiresConfirmation) {
+    uiState.pendingMutation = mutation;
+    refreshDerived();
+    render();
+    showStatus(`${mutationVerb(mutation)} is mechanically resolved but electrically hazardous; confirmation is required.`, 0);
+    announceInteraction(`${mutationVerb(mutation)} target confirmed. Electrical hazard confirmation is required.`);
+    return { committed: false, pending: true, blocked: false, project: currentProject(), mutation };
+  }
+  const committed = commitResolvedMutation(mutation, options.message ?? stagedMutationMessage(mutation));
+  return { ...committed, pending: false, blocked: !committed.committed, mutation };
+}
+
+function cancelPendingMutation(message = "Staged connection canceled; no changes were made.") {
+  if (!uiState.pendingMutation) return false;
+  clearPendingMutation();
+  refreshDerived();
+  render();
+  showStatus(message);
+  announceInteraction("Cancellation confirmed. No changes were made.");
+  return true;
 }
 
 function commitProject(project, message = "Circuit Lab updated", options = {}) {
   noteUserEdit(options);
+  clearPendingMutation();
   commitHistory(history, normalizeProject(project));
+  uiState.projectGeneration += 1;
   uiState.pendingEndpoint = null;
   uiState.wireDrag = null;
+  uiState.placement = null;
+  clearTargetingResolution();
   releaseAllMomentaryControls(uiState.controls);
   refreshDerived();
   render();
@@ -325,10 +685,23 @@ function commitProject(project, message = "Circuit Lab updated", options = {}) {
 
 function resetProject(project, message = "Circuit Lab reset", options = {}) {
   noteUserEdit(options);
+  clearPendingMutation();
   resetHistory(history, normalizeProject(project));
+  uiState.projectGeneration += 1;
   if (options.preserveBinding !== true) uiState.binding = normalizeMechatronicsBinding();
   uiState.pendingEndpoint = null;
   uiState.wireDrag = null;
+  clearTargetingResolution();
+  uiState.targeting.focusedEndpoint = null;
+  uiState.targeting.focusSource = null;
+  uiState.explicitSelectedComponentId = null;
+  uiState.placement = null;
+  if (options.preserveView !== true) {
+    const nextView = defaultCameraForProject(project, (typeId) => catalog.getComponent(typeId));
+    uiState.view.zoom = nextView.zoom;
+    uiState.view.center = nextView.center;
+    uiState.view.userAdjusted = false;
+  }
   releaseAllMomentaryControls(uiState.controls);
   refreshDerived();
   render();
@@ -430,8 +803,11 @@ function removeBindingSession({ targetType, targetId }) {
   return normalizeMechatronicsBinding(uiState.binding);
 }
 
-function commitSelection(project) {
+function commitSelection(project, options = {}) {
+  clearPendingMutation();
   replaceHistoryValue(history, normalizeProject(project));
+  uiState.projectGeneration += 1;
+  if (options.explicit !== false) uiState.explicitSelectedComponentId = normalizeProject(project).selectedComponentId;
   render();
 }
 
@@ -465,7 +841,8 @@ function componentLabel(component, componentDef) {
     "text-anchor": "middle",
     class: "bench-label"
   });
-  label.textContent = component.name;
+  const accuracy = componentDef.geometryEvidence?.accuracyClass;
+  label.textContent = accuracy === "approximate" ? `${component.name} · approximate geometry` : component.name;
   return label;
 }
 
@@ -898,30 +1275,147 @@ function componentHitbox(componentDef) {
   });
 }
 
-function renderTerminals(component, componentDef, highlightEndpointKeys, occupancyByEndpoint = new Map()) {
-  const terminals = [];
-  for (const terminal of componentDef.terminals) {
-    const endpointKey = `${component.id}:${terminal.id}`;
-    const terminalEl = svgElement("circle", {
-      cx: terminal.position[0],
-      cy: terminal.position[1],
-      r: terminalRadius(componentDef),
-      class: [
-        componentDef.sim.role === "breadboard" ? "breadboard-hole" : "terminal",
-        uiState.pendingEndpoint?.componentId === component.id && uiState.pendingEndpoint?.terminalId === terminal.id ? "is-pending" : "",
-        highlightEndpointKeys.has(endpointKey) ? "is-highlighted" : "",
-        uiState.wireDrag?.targetEndpoint && endpointKey === `${uiState.wireDrag.targetEndpoint.componentId}:${uiState.wireDrag.targetEndpoint.terminalId}` ? "is-snap-target" : ""
-      ].filter(Boolean).join(" "),
-      "data-terminal-component": component.id,
-      "data-terminal-id": terminal.id,
-      "data-kind": terminal.kind,
-      tabindex: 0,
-      role: "button",
-      "aria-label": terminalAriaLabel(component, terminal)
-    }, [svgElement("title", {}, [document.createTextNode(terminalTooltip(component, terminal, occupancyByEndpoint.get(endpointKey)))])]);
-    terminals.push(terminalEl);
+function terminalGlyphKind(terminal, terminalVisual) {
+  const connector = terminal.connectorInterface ?? "";
+  if (connector.includes("breadboard")) return "breadboard-socket";
+  if (connector.includes("female-controller") || terminalVisual?.emphasisShape === "socket") return "female-header";
+  if (connector.includes("male-header")) return "male-pin";
+  if (connector.includes("screw")) return "screw-cup";
+  if (connector.includes("component-lead")) return "lead";
+  if (connector.includes("lug")) return "lug";
+  if (connector.includes("tab")) return "tab";
+  if (connector.includes("pigtail") || connector.includes("jst") || connector.includes("coil-lead")) return "pigtail";
+  return "contact-pad";
+}
+
+function terminalGlyphShapes(kind, width, height) {
+  const halfWidth = Math.max(0.8, width / 2);
+  const halfHeight = Math.max(0.8, height / 2);
+  const radius = Math.max(0.7, Math.min(halfWidth, halfHeight));
+  if (kind === "breadboard-socket") {
+    return [
+      svgElement("circle", { cx: 0, cy: 0, r: radius, class: "terminal-glyph__body" }),
+      svgElement("circle", { cx: 0, cy: 0, r: radius * 0.42, class: "terminal-glyph__aperture" })
+    ];
   }
-  return terminals;
+  if (kind === "female-header") {
+    return [
+      svgElement("rect", { x: -halfWidth, y: -halfHeight, width: halfWidth * 2, height: halfHeight * 2, rx: 0.45, class: "terminal-glyph__body" }),
+      svgElement("circle", { cx: 0, cy: 0, r: radius * 0.38, class: "terminal-glyph__aperture" })
+    ];
+  }
+  if (kind === "male-pin") {
+    return [
+      svgElement("rect", { x: -halfWidth * 0.58, y: -halfHeight * 0.58, width: halfWidth * 1.16, height: halfHeight * 1.16, rx: 0.2, class: "terminal-glyph__pin" }),
+      svgElement("rect", { x: -halfWidth, y: -halfHeight, width: halfWidth * 2, height: halfHeight * 2, rx: 0.3, class: "terminal-glyph__outline" })
+    ];
+  }
+  if (kind === "screw-cup") {
+    return [
+      svgElement("circle", { cx: 0, cy: 0, r: radius, class: "terminal-glyph__metal" }),
+      svgElement("line", { x1: -radius * 0.62, y1: radius * 0.62, x2: radius * 0.62, y2: -radius * 0.62, class: "terminal-glyph__slot" })
+    ];
+  }
+  if (kind === "lead") {
+    return [
+      svgElement("line", { x1: -halfWidth, y1: 0, x2: halfWidth, y2: 0, class: "terminal-glyph__lead" }),
+      svgElement("circle", { cx: 0, cy: 0, r: Math.min(radius, 1.05), class: "terminal-glyph__metal" })
+    ];
+  }
+  if (kind === "lug") {
+    return [
+      svgElement("ellipse", { cx: 0, cy: 0, rx: halfWidth, ry: halfHeight, class: "terminal-glyph__metal" }),
+      svgElement("circle", { cx: 0, cy: 0, r: radius * 0.35, class: "terminal-glyph__aperture" })
+    ];
+  }
+  if (kind === "tab") {
+    return [
+      svgElement("rect", { x: -halfWidth, y: -halfHeight * 0.65, width: halfWidth * 2, height: halfHeight * 1.3, rx: 0.35, class: "terminal-glyph__metal" }),
+      svgElement("circle", { cx: 0, cy: 0, r: radius * 0.28, class: "terminal-glyph__aperture" })
+    ];
+  }
+  if (kind === "pigtail") {
+    return [
+      svgElement("line", { x1: -halfWidth, y1: 0, x2: halfWidth * 0.35, y2: 0, class: "terminal-glyph__lead" }),
+      svgElement("circle", { cx: halfWidth * 0.45, cy: 0, r: Math.min(radius, 1.25), class: "terminal-glyph__body" })
+    ];
+  }
+  return [svgElement("rect", {
+    x: -halfWidth,
+    y: -halfHeight,
+    width: halfWidth * 2,
+    height: halfHeight * 2,
+    rx: Math.min(halfWidth, halfHeight) * 0.35,
+    class: "terminal-glyph__body"
+  })];
+}
+
+function renderTerminalGlyphs(project, highlightEndpointKeys, occupancyByEndpoint = new Map()) {
+  const group = svgElement("g", {
+    class: "bench-terminal-overlay",
+    "data-bench-layer-content": "terminals",
+    "aria-hidden": "true"
+  });
+  for (const component of project.components) {
+    const definition = catalog.getComponent(component.typeId);
+    if (!definition) continue;
+    const visualDefinition = getVisualDefinition(component.typeId);
+    for (const terminal of definition.terminals) {
+      const endpointKey = `${component.id}:${terminal.id}`;
+      const bounds = terminal.visibleBoundsMm ?? { width: 3.2, height: 3.2 };
+      const worldPosition = terminalWorldPosition(component, terminal);
+      const kind = terminalGlyphKind(terminal, visualDefinition?.terminalVisuals?.[terminal.id]);
+      const terminalGroup = svgElement("g", {
+        transform: `translate(${worldPosition[0]} ${worldPosition[1]}) rotate(${normalizeComponentRotation(component.rotation)}) scale(${componentScale(component)})`,
+        class: [
+          "terminal-glyph",
+          `terminal-glyph--${kind}`,
+          highlightEndpointKeys.has(endpointKey) ? "is-highlighted" : ""
+        ].filter(Boolean).join(" "),
+        "data-terminal-component": component.id,
+        "data-terminal-id": terminal.id,
+        "data-terminal-key": endpointKey,
+        "data-kind": terminal.kind,
+        "data-connector-glyph": kind,
+        "data-terminal-aria-label": terminalAriaLabel(component, terminal)
+      });
+      terminalGroup.append(
+        ...terminalGlyphShapes(kind, Number(bounds.width ?? 3.2), Number(bounds.height ?? 3.2)),
+        svgElement("title", {}, [document.createTextNode(terminalTooltip(component, terminal, occupancyByEndpoint.get(endpointKey)))])
+      );
+      group.append(terminalGroup);
+    }
+  }
+  return group;
+}
+
+function renderPhysicalPorts(componentDef) {
+  return (componentDef.physicalPorts ?? []).map((port) => {
+    const bounds = port.housingBoundsMm;
+    return svgElement("rect", {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      rx: Math.min(1.1, bounds.width / 4, bounds.height / 4),
+      class: `physical-port-housing ${port.keyed ? "is-keyed" : ""}`,
+      "data-physical-port-id": port.id,
+      "data-engineering-connector-id": port.engineeringConnectorId,
+      "data-geometry-evidence-id": port.geometryEvidenceId,
+      "aria-hidden": "true"
+    }, [svgElement("title", {}, [document.createTextNode(`${port.id}: ${port.terminalIds.join(", ")}`)])]);
+  });
+}
+
+function renderFormedLeads(componentDef) {
+  return Object.entries(componentDef.formedLeadGeometry?.leadPathsMm ?? {}).map(([terminalId, points]) => (
+    svgElement("polyline", {
+      points: points.map((point) => `${point[0]},${point[1]}`).join(" "),
+      class: "formed-component-lead",
+      "data-formed-lead-terminal-id": terminalId,
+      "aria-hidden": "true"
+    })
+  ));
 }
 
 function selectionOverlay(component, componentDef) {
@@ -959,7 +1453,7 @@ function selectionOverlay(component, componentDef) {
   return overlay;
 }
 
-function renderComponent(project, component, highlightEndpointKeys, highlightComponentIds = new Set(), occupancyByEndpoint = new Map()) {
+function renderComponent(project, component, highlightComponentIds = new Set()) {
   const componentDef = catalog.getComponent(component.typeId);
   if (!componentDef) return null;
   const visualStatus = componentVisualStatus(componentDef);
@@ -967,15 +1461,15 @@ function renderComponent(project, component, highlightEndpointKeys, highlightCom
   const group = svgElement("g", {
     class: `bench-component ${component.id === project.selectedComponentId ? "is-selected" : ""} ${highlightComponentIds.has(component.id) ? "is-highlighted" : ""}`,
     "data-component-id": component.id,
-    "data-visual-kind": visualStatus.assetKind
+    "data-visual-kind": visualStatus.assetKind,
+    "data-geometry-accuracy": componentDef.geometryEvidence?.accuracyClass ?? "unclassified"
   });
   const artwork = svgElement("g", {
     class: "component-artwork",
     transform: `translate(${component.position[0]} ${component.position[1]}) rotate(${normalizeComponentRotation(component.rotation)}) scale(${scale})`,
     "data-component-id": component.id
   });
-  artwork.append(componentHitbox(componentDef), ...componentArtwork(componentDef, component));
-  artwork.append(...renderTerminals(component, componentDef, highlightEndpointKeys, occupancyByEndpoint));
+  artwork.append(componentHitbox(componentDef), ...componentArtwork(componentDef, component), ...renderFormedLeads(componentDef), ...renderPhysicalPorts(componentDef));
   group.append(artwork, componentLabel(component, componentDef));
   if (!visualStatus.ok) group.append(svgElement("title", {}, [document.createTextNode(fallbackVisualNotice(componentDef))]));
   if (component.id === project.selectedComponentId) group.append(selectionOverlay(component, componentDef));
@@ -984,12 +1478,26 @@ function renderComponent(project, component, highlightEndpointKeys, highlightCom
 
 function renderWires(project, highlightConnectionIds) {
   const group = svgElement("g", { class: "bench-wires" });
+  const staleInsertionIds = new Set(uiState.test.issues
+    .filter((issue) => issue.code === "stale-direct-insertion")
+    .flatMap((issue) => issue.connectionIds));
   for (const connection of project.connections) {
-    if (!shouldRenderExternalWire(connection)) continue;
     const points = connection.endpoints
       .map((endpoint) => resolveTerminal(project, endpoint))
       .filter((terminal) => terminal.ok);
     if (points.length < 2) continue;
+    if (!shouldRenderExternalWire(connection)) {
+      if (staleInsertionIds.has(connection.id)) {
+        for (let index = 1; index < points.length; index += 1) {
+          group.append(svgElement("path", {
+            d: wirePath(points[0].worldPosition, points[index].worldPosition),
+            class: "wire-path wire-path--stale-insertion",
+            "data-stale-insertion-id": connection.id
+          }));
+        }
+      }
+      continue;
+    }
     const bridgeWire = points.every((point) => point.componentDefinition.sim.role === "breadboard");
     for (let index = 1; index < points.length; index += 1) {
       group.append(svgElement("path", {
@@ -1029,7 +1537,9 @@ function fittingElement(descriptor, highlightConnectionIds) {
     transform: `translate(${descriptor.position[0]} ${descriptor.position[1]}) rotate(${descriptor.angle})`,
     "data-fitting-connection-id": descriptor.connectionId,
     "data-fitting-type": descriptor.type,
-    "data-fitting-endpoint": descriptor.endpointKey
+    "data-fitting-endpoint": descriptor.endpointKey,
+    "data-fitting-port-id": descriptor.portId ?? "",
+    "data-fitting-combined": descriptor.combined ? "true" : "false"
   });
   const color = descriptor.color ?? "#f59e0b";
   if (descriptor.type === "breadboard-wire") {
@@ -1080,7 +1590,7 @@ function renderWirePreview(project) {
   if (!start.ok) return null;
   const target = uiState.wireDrag.targetEndpoint ? resolveTerminal(project, uiState.wireDrag.targetEndpoint) : null;
   const end = target?.ok ? target.worldPosition : uiState.wireDrag.currentPoint;
-  const color = target?.ok ? "#0ea5a4" : "#64748b";
+  const color = uiState.wireDrag.invalidReason ? "#dc2626" : target?.ok ? "#0ea5a4" : "#64748b";
   return svgElement("g", { class: "bench-wire-preview" }, [
     svgElement("path", {
       d: wirePath(start.worldPosition, end),
@@ -1092,11 +1602,41 @@ function renderWirePreview(project) {
   ]);
 }
 
-function renderBench() {
-  const project = currentProject();
-  const occupancy = derivePhysicalOccupancy(project);
-  renderBenchView();
-  benchSvg.replaceChildren();
+function ensureBenchLayers() {
+  if (benchLayers) return benchLayers;
+  const background = svgElement("rect", {
+    x: 0,
+    y: 0,
+    width: BENCH_WIDTH,
+    height: BENCH_HEIGHT,
+    fill: "transparent",
+    class: "bench-pan-surface",
+    "data-bench-layer": "background"
+  });
+  const committedWires = svgElement("g", {
+    class: "bench-layer bench-layer--committed-wires",
+    "data-bench-layer": "committed-wires"
+  });
+  const components = svgElement("g", {
+    class: "bench-layer bench-layer--components",
+    "data-bench-layer": "components"
+  });
+  const terminals = svgElement("g", {
+    class: "bench-layer bench-layer--terminals",
+    "data-bench-layer": "terminals",
+    "aria-hidden": "true"
+  });
+  const transient = svgElement("g", {
+    class: "bench-layer bench-layer--transient",
+    "data-bench-layer": "transient",
+    "aria-hidden": "true"
+  });
+  benchSvg.append(background, committedWires, components, terminals, transient);
+  benchLayers = { background, committedWires, components, terminals, transient };
+  return benchLayers;
+}
+
+function activeBenchHighlights() {
   const selectedIssue = uiState.selectedIssueId
     ? uiState.test.issues.find((issue) => issue.id === uiState.selectedIssueId)
     : null;
@@ -1105,33 +1645,317 @@ function renderBench() {
   );
   const selectedConnectionIds = new Set(selectedIssue?.targets?.connectionIds ?? []);
   const selectedComponentIds = new Set(selectedIssue?.targets?.componentIds ?? []);
-  const activeHighlights = selectedIssue
+  const highlights = selectedIssue
     ? uiState.test.highlights.filter((item) => (
       (item.endpoint && selectedEndpointKeys.has(`${item.endpoint.componentId}:${item.endpoint.terminalId}`))
       || (item.connectionId && selectedConnectionIds.has(item.connectionId))
       || (item.componentId && selectedComponentIds.has(item.componentId))
     ))
     : uiState.test.highlights;
-  const highlightEndpointKeys = new Set(
-    activeHighlights.filter((item) => item.type === "endpoint").map((item) => `${item.endpoint.componentId}:${item.endpoint.terminalId}`)
+  return {
+    endpointKeys: new Set(highlights.filter((item) => item.type === "endpoint").map((item) => `${item.endpoint.componentId}:${item.endpoint.terminalId}`)),
+    connectionIds: new Set(highlights.filter((item) => item.type === "connection").map((item) => item.connectionId)),
+    componentIds: new Set(highlights.filter((item) => item.type === "component").map((item) => item.componentId))
+  };
+}
+
+function renderStableBench() {
+  const project = currentProject();
+  const occupancy = derivePhysicalOccupancy(project);
+  const layers = ensureBenchLayers();
+  renderBenchView();
+  const highlights = activeBenchHighlights();
+  layers.committedWires.replaceChildren(
+    renderWires(project, highlights.connectionIds),
+    renderConnectionFittings(project, highlights.connectionIds)
   );
-  const highlightConnectionIds = new Set(
-    activeHighlights.filter((item) => item.type === "connection").map((item) => item.connectionId)
-  );
-  const highlightComponentIds = new Set(
-    activeHighlights.filter((item) => item.type === "component").map((item) => item.componentId)
-  );
-  benchSvg.append(svgElement("rect", { x: 0, y: 0, width: BENCH_WIDTH, height: BENCH_HEIGHT, fill: "transparent", class: "bench-pan-surface" }));
-  benchSvg.append(renderWires(project, highlightConnectionIds));
-  const preview = renderWirePreview(project);
-  if (preview) benchSvg.append(preview);
-  const componentsLayer = svgElement("g", { class: "bench-components" });
+  layers.components.replaceChildren();
   for (const component of project.components) {
-    const rendered = renderComponent(project, component, highlightEndpointKeys, highlightComponentIds, occupancy.occupancyByEndpoint);
-    if (rendered) componentsLayer.append(rendered);
+    const rendered = renderComponent(project, component, highlights.componentIds);
+    if (rendered) layers.components.append(rendered);
   }
-  benchSvg.append(componentsLayer);
-  benchSvg.append(renderConnectionFittings(project, highlightConnectionIds));
+  layers.terminals.replaceChildren(renderTerminalGlyphs(project, highlights.endpointKeys, occupancy.occupancyByEndpoint));
+  projectedTerminalResolver.invalidate("stable-bench-geometry");
+  cycle3Diagnostics.stableBenchRenderCount += 1;
+}
+
+function cssPixelsToWorld(pixels) {
+  const matrix = benchSvg.getScreenCTM();
+  if (!matrix) return Number(pixels);
+  const xScale = Math.hypot(Number(matrix.a), Number(matrix.b));
+  const yScale = Math.hypot(Number(matrix.c), Number(matrix.d));
+  const scale = Math.max(0.0001, (xScale + yScale) / 2);
+  return Number(pixels) / scale;
+}
+
+function targetRecordForDisplay() {
+  if (uiState.targeting.resolution?.target) return uiState.targeting.resolution.target;
+  const endpoint = uiState.targeting.focusedEndpoint ?? uiState.pendingEndpoint;
+  return endpoint ? projectedTerminalResolver.resolveEndpoint(endpoint, currentProject()) : null;
+}
+
+function syncActiveTerminalProxy() {
+  if (!activeTerminalProxy) return;
+  const target = targetRecordForDisplay();
+  if (!target) {
+    activeTerminalProxy.textContent = "No terminal focused";
+    activeTerminalProxy.setAttribute("aria-label", "No terminal focused");
+    activeTerminalProxy.removeAttribute("data-endpoint-key");
+    return;
+  }
+  const blocked = target.invalidReason ? ` Blocked: ${target.invalidReason}` : " Available.";
+  const label = `${target.terminalAriaLabel}. ${target.capacityUsed} of ${target.capacity} attachments used.${blocked}`;
+  activeTerminalProxy.textContent = label;
+  activeTerminalProxy.setAttribute("aria-label", label);
+  activeTerminalProxy.dataset.endpointKey = target.endpointKey;
+}
+
+function renderTargetingOverlay() {
+  const record = targetRecordForDisplay();
+  if (!record) return null;
+  const resolution = uiState.targeting.resolution;
+  const profile = terminalPointerProfile(resolution?.pointerType ?? uiState.targeting.pointerType);
+  const haloRadius = cssPixelsToWorld(resolution?.radiusPx ?? profile.radiusPx);
+  const crosshairRadius = cssPixelsToWorld(5);
+  const group = svgElement("g", {
+    class: [
+      "bench-targeting-overlay",
+      record.invalidReason ? "is-invalid" : "is-valid",
+      resolution?.ambiguous ? "is-ambiguous" : ""
+    ].filter(Boolean).join(" "),
+    "data-target-endpoint": record.endpointKey
+  });
+  group.append(
+    svgElement("circle", {
+      cx: record.svgPoint[0],
+      cy: record.svgPoint[1],
+      r: haloRadius,
+      class: "terminal-acquisition-halo"
+    }),
+    svgElement("path", {
+      d: `M ${record.svgPoint[0] - crosshairRadius} ${record.svgPoint[1]} L ${record.svgPoint[0] + crosshairRadius} ${record.svgPoint[1]} M ${record.svgPoint[0]} ${record.svgPoint[1] - crosshairRadius} L ${record.svgPoint[0]} ${record.svgPoint[1] + crosshairRadius}`,
+      class: "terminal-exact-crosshair"
+    })
+  );
+  if (resolution?.ambiguous) {
+    for (const candidate of resolution.candidates.slice(0, 4)) {
+      group.append(svgElement("circle", {
+        cx: candidate.svgPoint[0],
+        cy: candidate.svgPoint[1],
+        r: cssPixelsToWorld(3.5),
+        class: "terminal-ambiguity-marker",
+        "data-ambiguity-endpoint": candidate.endpointKey
+      }));
+    }
+  }
+  return group;
+}
+
+function renderComponentGhost() {
+  const previewProject = pointerInteraction?.previewProject ?? uiState.placement?.previewProject;
+  if (!previewProject) return null;
+  const componentId = pointerInteraction?.componentId ?? uiState.placement?.componentId;
+  const component = previewProject.components.find((item) => item.id === componentId);
+  if (!component) return null;
+  const ghost = renderComponent(previewProject, component, new Set());
+  if (!ghost) return null;
+  ghost.classList.add("bench-component--ghost");
+  ghost.dataset.placementPreviewComponentId = componentId;
+  ghost.removeAttribute("data-component-id");
+  return ghost;
+}
+
+function activePlacementPreview() {
+  if (pointerInteraction?.previewMutation || pointerInteraction?.previewProject) {
+    return {
+      componentId: pointerInteraction.componentId,
+      project: pointerInteraction.previewProject,
+      mutation: pointerInteraction.previewMutation
+    };
+  }
+  if (uiState.placement) {
+    return {
+      componentId: uiState.placement.componentId,
+      project: uiState.placement.previewProject,
+      mutation: uiState.placement.mutation
+    };
+  }
+  return null;
+}
+
+function placementStatus(mutation) {
+  if (!mutation || mutation.status === "mechanically-impossible") {
+    return { key: "blocked", label: "Blocked", detail: mutation?.mechanical?.message ?? "Mechanical placement is impossible." };
+  }
+  if (mutation.requiresConfirmation) {
+    return { key: "hazard", label: "Electrical hazard", detail: "Mechanical fit resolved; confirmation is required." };
+  }
+  return { key: "safe", label: "Mechanically valid", detail: mutation.exactEndpointPairs.length ? "All physical contacts match." : "Free placement is available." };
+}
+
+function renderPlacementPreviewOverlay() {
+  const preview = activePlacementPreview();
+  if (!preview?.project) return null;
+  const component = preview.project.components.find((item) => item.id === preview.componentId);
+  const definition = component ? catalog.getComponent(component.typeId) : null;
+  if (!component || !definition) return null;
+  const status = placementStatus(preview.mutation);
+  const bounds = componentBounds(component, definition);
+  const group = svgElement("g", {
+    class: `placement-preview placement-preview--${status.key}`,
+    "data-placement-status": status.key,
+    "aria-hidden": "true"
+  });
+  group.append(svgElement("rect", {
+    x: bounds.left,
+    y: bounds.top,
+    width: bounds.width,
+    height: bounds.height,
+    rx: 4,
+    class: "placement-preview__bounds",
+    "data-placement-preview-bounds": component.id,
+    "data-placement-preview-shape": status.key
+  }));
+  for (const pair of preview.mutation?.exactEndpointPairs ?? []) {
+    const source = resolveTerminal(preview.project, pair.sourceEndpoint);
+    const target = resolveTerminal(preview.project, pair.targetEndpoint);
+    if (!source.ok || !target.ok) continue;
+    group.append(
+      svgElement("line", {
+        x1: source.worldPosition[0],
+        y1: source.worldPosition[1],
+        x2: target.worldPosition[0],
+        y2: target.worldPosition[1],
+        class: "placement-preview__match"
+      }),
+      svgElement("circle", { cx: source.worldPosition[0], cy: source.worldPosition[1], r: 3, class: "placement-preview__contact" }),
+      svgElement("circle", { cx: target.worldPosition[0], cy: target.worldPosition[1], r: 3, class: "placement-preview__contact" })
+    );
+  }
+  const labelWidth = Math.max(92, Math.min(190, status.label.length * 7.2 + 24));
+  group.append(
+    svgElement("rect", {
+      x: bounds.left,
+      y: Math.max(8, bounds.top - 24),
+      width: labelWidth,
+      height: 18,
+      rx: 3,
+      class: "placement-preview__status-box"
+    }),
+    svgElement("text", {
+      x: bounds.left + 7,
+      y: Math.max(8, bounds.top - 24) + 12.5,
+      class: "placement-preview__status-text"
+    }, [document.createTextNode(status.label)])
+  );
+  return group;
+}
+
+function renderTransientLayer() {
+  const layers = ensureBenchLayers();
+  const project = currentProject();
+  const children = [];
+  const preview = renderWirePreview(project);
+  if (preview) children.push(preview);
+  const ghost = renderComponentGhost();
+  if (ghost) children.push(ghost);
+  const placementPreview = renderPlacementPreviewOverlay();
+  if (placementPreview) children.push(placementPreview);
+  const targeting = renderTargetingOverlay();
+  if (targeting) children.push(targeting);
+  layers.transient.replaceChildren(...children);
+  renderPrecisionHud();
+  syncActiveTerminalProxy();
+  cycle3Diagnostics.transientRenderCount += 1;
+}
+
+function renderBench() {
+  renderStableBench();
+  renderTransientLayer();
+}
+
+function precisionClusterMarkup(target, candidates) {
+  const nearby = (candidates?.length ? candidates : [target]).slice(0, 12);
+  const size = 112;
+  const center = size / 2;
+  const scale = 2.4;
+  const points = nearby.map((candidate) => {
+    const dx = (candidate.screenPoint?.[0] ?? target.screenPoint?.[0] ?? 0) - (target.screenPoint?.[0] ?? 0);
+    const dy = (candidate.screenPoint?.[1] ?? target.screenPoint?.[1] ?? 0) - (target.screenPoint?.[1] ?? 0);
+    const x = Math.min(size - 8, Math.max(8, center + dx * scale));
+    const y = Math.min(size - 8, Math.max(8, center + dy * scale));
+    return `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${candidate.endpointKey === target.endpointKey ? 5 : 3.2}" class="${candidate.endpointKey === target.endpointKey ? "is-target" : ""}" />`;
+  }).join("");
+  return `
+    <svg class="circuit-precision-hud__cluster" viewBox="0 0 ${size} ${size}" aria-hidden="true" focusable="false">
+      <rect x="0.5" y="0.5" width="${size - 1}" height="${size - 1}" rx="4" />
+      ${points}
+      <path d="M ${center - 9} ${center} H ${center + 9} M ${center} ${center - 9} V ${center + 9}" />
+    </svg>`;
+}
+
+function renderPrecisionHud() {
+  if (!precisionHud) return;
+  const project = currentProject();
+  const resolution = uiState.targeting.resolution;
+  const target = targetRecordForDisplay();
+  const allowedContext = project.mode === "wire"
+    || project.mode === "place"
+    || Boolean(uiState.targeting.focusedEndpoint)
+    || Boolean(resolution?.ambiguous);
+  precisionHud.hidden = !target || !allowedContext || Boolean(uiState.pendingMutation);
+  if (precisionHud.hidden) {
+    precisionHud.replaceChildren();
+    return;
+  }
+
+  const invalidReason = target.invalidReason;
+  const candidates = resolution?.nearbyCandidates ?? [target];
+  const ambiguityCandidates = resolution?.candidates ?? [];
+  const chooser = resolution?.ambiguous
+    ? `
+      <div class="circuit-precision-hud__chooser" role="group" aria-label="Ambiguous terminal candidates">
+        <strong>${formatCount(resolution.ambiguityCount, "contact")} ${resolution.ambiguityCount === 1 ? "is" : "are"} within the ${escapeHtml(resolution.pointerType)} precision band</strong>
+        ${ambiguityCandidates.slice(0, 4).map((candidate) => `
+          <button type="button" data-precision-candidate="${escapeHtml(candidate.endpointKey)}" aria-label="Choose ${escapeHtml(candidate.terminalAriaLabel)}">
+            <span>${escapeHtml(candidate.componentLabel)} / ${escapeHtml(candidate.terminalLabel)}</span>
+            <small>${escapeHtml(candidate.terminalId)} / ${candidate.capacityUsed}/${candidate.capacity}${candidate.invalidReason ? ` / blocked` : ""}</small>
+          </button>
+        `).join("")}
+        ${resolution.ambiguityCount > 4 ? `
+          <div class="circuit-precision-hud__zoom-actions">
+            <button type="button" data-precision-action="frame-port">Frame port</button>
+            <button type="button" data-precision-action="add-zoom">Add zoom</button>
+          </div>
+        ` : ""}
+      </div>
+    `
+    : "";
+  precisionHud.dataset.endpointKey = target.endpointKey;
+  precisionHud.dataset.invalid = invalidReason ? "true" : "false";
+  precisionHud.innerHTML = `
+    <div class="circuit-precision-hud__header">
+      <div>
+        <span class="circuit-precision-hud__eyebrow">${resolution?.ambiguous ? "Ambiguous precision target" : "Exact precision target"}</span>
+        <strong>${escapeHtml(target.componentLabel)} / ${escapeHtml(target.terminalLabel)}</strong>
+      </div>
+      <span class="circuit-precision-hud__state ${invalidReason ? "is-invalid" : "is-valid"}">${invalidReason ? "Blocked" : "Available"}</span>
+    </div>
+    <div class="circuit-precision-hud__body">
+      ${precisionClusterMarkup(target, candidates)}
+      <dl>
+        <div><dt>Terminal</dt><dd>${escapeHtml(target.terminalId)}</dd></div>
+        <div><dt>Physical port</dt><dd>${escapeHtml(target.physicalPortLabel)} / ${escapeHtml(target.contactPosition)}</dd></div>
+        <div><dt>Connector</dt><dd>${escapeHtml(target.connectorType)}</dd></div>
+        <div><dt>Role / voltage</dt><dd>${escapeHtml(target.electricalRole)} / ${escapeHtml(target.voltageDomainId)}</dd></div>
+        <div><dt>Occupancy</dt><dd>${target.capacityUsed}/${target.capacity}</dd></div>
+        <div><dt>Position</dt><dd>${target.svgPoint[0].toFixed(2)}, ${target.svgPoint[1].toFixed(2)} mm</dd></div>
+        <div><dt>Geometry</dt><dd>${escapeHtml(target.geometryAccuracy)}</dd></div>
+      </dl>
+    </div>
+    ${invalidReason ? `<p class="circuit-precision-hud__reason"><strong>Cannot connect:</strong> ${escapeHtml(invalidReason)}</p>` : ""}
+    ${chooser}
+  `;
 }
 
 function renderProjectPanel(project) {
@@ -1172,12 +1996,22 @@ function renderHardwareCatalog() {
   const customTotal = components.filter((item) => item.custom?.localOnly && !item.custom?.missing).length;
   const hasActiveFilters = Boolean(query) || category !== "all";
   const categoryLabel = category === "all" ? "All categories" : category;
-  const itemMarkup = (item) => `
+  const itemMarkup = (item) => {
+    const accuracyClass = item.geometryEvidence?.accuracyClass;
+    const accuracyLabel = accuracyClass === "approximate"
+      ? "approximate geometry"
+      : accuracyClass === "representative-nominal"
+        ? "representative geometry"
+        : accuracyClass === "exact-model-verified"
+          ? "verified geometry"
+          : "";
+    return `
     <article class="hardware-item ${item.custom?.localOnly ? "hardware-item--custom" : ""}" draggable="true" data-hardware-item="${escapeHtml(item.id)}">
       <span class="hardware-swatch" style="background:${escapeHtml(componentColor(item))}"></span>
       <div>
         <strong>${escapeHtml(item.name)}</strong>
         <span>${escapeHtml(item.category)} / ${item.terminals.length} terminals${item.custom?.localOnly ? " / local" : ""}</span>
+        ${accuracyLabel ? `<span class="hardware-geometry-class hardware-geometry-class--${escapeHtml(accuracyClass)}">${escapeHtml(accuracyLabel)}</span>` : ""}
       </div>
       <div class="hardware-item__actions">
         <button type="button" data-add-hardware="${escapeHtml(item.id)}">Add</button>
@@ -1186,6 +2020,7 @@ function renderHardwareCatalog() {
       </div>
     </article>
   `;
+  };
   hardwareList.innerHTML = `
     <div class="hardware-library-tools">
       <label class="hardware-filter-field">
@@ -1244,7 +2079,8 @@ function renderWiresList(project) {
       <span>${connection.endpoints.map((endpoint) => escapeHtml(endpointLabel(project, endpoint))).join(" / ")}</span>
       <div class="circuit-item__meta">
         <span>${connection.endpoints.length} terminals</span>
-        <button type="button" data-remove-connection="${escapeHtml(connection.id)}">Remove</button>
+        <span>${escapeHtml(connection.kind ?? "wire")}</span>
+        <button type="button" data-remove-connection="${escapeHtml(connection.id)}">${connection.kind === "direct-insertion" ? "Disconnect" : "Remove"}</button>
       </div>
     </article>
   `).join("");
@@ -1362,9 +2198,15 @@ function renderTest() {
   }
   testList.innerHTML = issues.map((item) => `
     <article class="test-item ${item.id === uiState.selectedIssueId ? "is-selected" : ""}" data-severity="${escapeHtml(item.severity)}" data-issue-id="${escapeHtml(item.id)}">
-      <strong class="test-item__title">${escapeHtml(item.severity.toUpperCase())} / ${escapeHtml(item.code)}</strong>
+      <strong class="test-item__title">${escapeHtml(item.severity.toUpperCase())} / ${escapeHtml(item.domain)} / ${escapeHtml(item.code)}</strong>
       <span class="test-item__message">${escapeHtml(item.message)}</span>
       ${item.fix ? `<span class="test-item__fix">${escapeHtml(item.fix)}</span>` : ""}
+      ${item.code === "stale-direct-insertion" ? `
+        <div class="test-item__actions">
+          <button type="button" data-stale-action="re-seat" ${item.componentId ? "" : "disabled"}>Re-seat</button>
+          <button type="button" data-stale-action="disconnect">Disconnect</button>
+        </div>
+      ` : ""}
     </article>
   `).join("");
 }
@@ -1386,18 +2228,23 @@ function renderSource() {
 
 function renderWorkflowTabs() {
   for (const button of tabButtons) {
-    button.classList.toggle("is-active", button.dataset.circuitTab === uiState.activeTab);
+    const active = button.dataset.circuitTab === uiState.activeTab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    button.tabIndex = active ? 0 : -1;
   }
   const visibleByTab = {
     inspect: new Set(["circuit-inspector-card", "circuit-wires-card"]),
-    validate: new Set(["circuit-test-card", "circuit-bringup-card"]),
-    bind: new Set(["circuit-binding-card", "circuit-test-card"]),
+    "test-results": new Set(["circuit-test-card", "circuit-bringup-card"]),
+    bind: new Set(["circuit-binding-card"]),
     build: new Set(["circuit-build-card", "circuit-source-card"])
   };
   const visible = visibleByTab[uiState.activeTab] ?? visibleByTab.inspect;
   for (const card of document.querySelectorAll(".circuit-panel--right [data-card-id]")) {
     card.hidden = !visible.has(card.dataset.cardId);
   }
+  const activeButton = tabButtons.find((button) => button.dataset.circuitTab === uiState.activeTab);
+  if (workflowPanel && activeButton) workflowPanel.setAttribute("aria-labelledby", activeButton.id);
 }
 
 function renderStatusList(container, rows) {
@@ -1468,18 +2315,27 @@ function renderHistoryButtons() {
 
 function renderModeButtons(project) {
   for (const button of modeButtons) {
-    button.classList.toggle("is-active", button.dataset.circuitMode === project.mode);
+    const active = button.dataset.circuitMode === project.mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
   }
 }
 
 function renderWireStatus(project) {
-  if (uiState.wireDrag) {
+  if (uiState.placement) {
+    const status = placementStatus(uiState.placement.mutation);
+    wireStatus.textContent = `Place ${uiState.placement.name}: ${status.label}. ${status.detail}`;
+  } else if (uiState.wireDrag) {
     const target = uiState.wireDrag.targetEndpoint ? endpointLabel(project, uiState.wireDrag.targetEndpoint) : "a terminal";
-    wireStatus.textContent = `Wire drag: release on ${target}.`;
+    if (uiState.wireDrag.invalidReason) wireStatus.textContent = `Wire target ${target} is blocked: ${uiState.wireDrag.invalidReason}`;
+    else if (uiState.wireDrag.ambiguous) wireStatus.textContent = `Wire target overlaps multiple contacts near ${target}; release, then choose the exact terminal.`;
+    else wireStatus.textContent = `Wire drag: release on ${target}.`;
   } else if (uiState.pendingEndpoint) {
     wireStatus.textContent = `Wire start: ${endpointLabel(project, uiState.pendingEndpoint)}. Click a second terminal.`;
   } else if (project.mode === "wire") {
-    wireStatus.textContent = "Wire mode: drag from one terminal to another, or click two terminals.";
+    wireStatus.textContent = uiState.wireHintDismissed
+      ? "Wire mode: drag from one terminal to another, or click two terminals."
+      : "First Wire: choose an exact terminal, then choose its destination. The hint dismisses after a successful connection.";
   } else if (project.mode === "test") {
     wireStatus.textContent = uiState.test.ok ? "Circuit test is clear for source generation." : "Circuit test found blocking issues.";
   } else {
@@ -1504,6 +2360,7 @@ function render() {
   renderHistoryButtons();
   renderModeButtons(project);
   renderWireStatus(project);
+  renderMutationConfirmation();
   renderBench();
   const summary = projectSummary(project);
   statusEl.textContent = `${summary.name} / ${summary.componentCount} components / ${summary.connectionCount} wires`;
@@ -1544,16 +2401,149 @@ function releaseAllMomentaryControlsAndRender() {
   if (releaseAllMomentaryControls(uiState.controls)) renderControlSessionState();
 }
 
-function addHardware(typeId, options = {}) {
+function addHardwareImmediate(typeId, options = {}) {
+  const base = currentProject();
   const definition = catalog.getComponent(typeId);
   const requestedPosition = Array.isArray(options.position) && definition
     ? clampComponentPosition({ position: options.position, props: options.props ?? {} }, definition, options.position)
     : options.position;
-  const next = addComponent(currentProject(), typeId, { ...options, position: requestedPosition });
+  const next = addComponent(base, typeId, { ...options, position: requestedPosition });
   const componentId = next.selectedComponentId;
-  const insertion = componentId ? insertComponentIntoNearestTerminals(next, componentId) : { project: next, insertedCount: 0 };
   const name = catalog.getComponent(typeId)?.name ?? typeId;
-  return commitProject(insertion.project, insertion.insertedCount ? `${name} inserted` : `${name} added`);
+  if (!componentId) return commitProject(next, `${name} added`);
+  const mutation = stageInsertionMutation(base, next, componentId, uiState.projectGeneration, { operationKind: "place" });
+  return presentStagedMutation(mutation, { message: mutation.exactEndpointPairs.length ? `${name} inserted` : `${name} added` }).project;
+}
+
+function setPlacementMode() {
+  noteUserEdit();
+  const project = currentProject();
+  if (project.mode === "place") return project;
+  clearPendingMutation();
+  renderMutationConfirmation();
+  const next = setProjectMode(project, "place");
+  replaceHistoryValue(history, next);
+  uiState.projectGeneration += 1;
+  renderModeButtons(next);
+  renderWireStatus(next);
+  return currentProject();
+}
+
+function buildNewPlacementPreview(point) {
+  const placement = uiState.placement;
+  if (!placement) return null;
+  const definition = catalog.getComponent(placement.typeId);
+  if (!definition) return null;
+  const position = clampComponentPosition({ position: point, props: placement.props }, definition, point);
+  const proposed = addComponent(placement.baseProject, placement.typeId, {
+    id: placement.componentId,
+    name: placement.name,
+    props: placement.props,
+    position
+  });
+  const mutation = stageInsertionMutation(
+    placement.baseProject,
+    proposed,
+    placement.componentId,
+    placement.baseGeneration,
+    { operationKind: "place" }
+  );
+  placement.point = position;
+  placement.mutation = mutation;
+  placement.previewProject = mutation.candidateProject ?? proposed;
+  return placement;
+}
+
+function beginPlacement(typeId, options = {}) {
+  const definition = catalog.getComponent(typeId);
+  if (!definition) throw new Error(`Unknown Circuit Lab component: ${typeId}`);
+  if (uiState.placement) cancelPlacement("Previous placement canceled.", { announce: false });
+  const baseProject = setPlacementMode();
+  const seed = addComponent(baseProject, typeId, {
+    name: options.name,
+    props: options.props,
+    position: options.position ?? uiState.view.center
+  });
+  uiState.placement = {
+    typeId,
+    componentId: seed.selectedComponentId,
+    name: options.name ?? definition.name,
+    props: options.props ?? {},
+    source: options.source ?? "hardware-card",
+    nativeDrag: Boolean(options.nativeDrag),
+    baseProject,
+    baseGeneration: uiState.projectGeneration,
+    point: options.position ?? uiState.view.center,
+    pendingPoint: null,
+    mutation: null,
+    previewProject: null
+  };
+  buildNewPlacementPreview(uiState.placement.point);
+  if (
+    drawerMediaQuery.matches
+    && uiState.openDrawer === "hardware"
+    && ["hardware-card", "hardware-drag", "hardware-drop"].includes(uiState.placement.source)
+  ) {
+    closeOpenDrawer({ restoreFocus: false });
+  }
+  renderTransientLayer();
+  renderWireStatus(baseProject);
+  benchSvg.focus({ preventScroll: true });
+  announceInteraction(`${definition.name} placement started. Move the ghost, then press Enter or tap the bench to place it.`);
+  return uiState.placement;
+}
+
+function updatePlacementAtPoint(point) {
+  if (!uiState.placement) return null;
+  buildNewPlacementPreview(point);
+  const status = placementStatus(uiState.placement.mutation);
+  wireStatus.textContent = `Place ${uiState.placement.name}: ${status.label}. ${status.detail}`;
+  return uiState.placement;
+}
+
+function schedulePlacementAtPoint(point) {
+  if (!uiState.placement) return;
+  uiState.placement.pendingPoint = point;
+  schedulePointerFrame();
+}
+
+function flushPlacementPreview() {
+  const point = uiState.placement?.pendingPoint;
+  if (!uiState.placement || !point) return;
+  uiState.placement.pendingPoint = null;
+  updatePlacementAtPoint(point);
+}
+
+function commitPlacement() {
+  const placement = uiState.placement;
+  if (!placement?.mutation) return { committed: false, pending: false, blocked: true };
+  if (placement.mutation.status === "mechanically-impossible") {
+    const status = placementStatus(placement.mutation);
+    showStatus(`Placement blocked: ${status.detail} No changes were made.`, 6200);
+    announceInteraction(`Error. ${status.detail} No changes were made.`);
+    renderTransientLayer();
+    return { committed: false, pending: false, blocked: true, mutation: placement.mutation };
+  }
+  const mutation = placement.mutation;
+  const componentId = placement.componentId;
+  const name = placement.name;
+  uiState.placement = null;
+  uiState.explicitSelectedComponentId = componentId;
+  renderTransientLayer();
+  return presentStagedMutation(mutation, {
+    message: mutation.exactEndpointPairs.length ? `${name} inserted` : `${name} added`
+  });
+}
+
+function cancelPlacement(message = "Placement canceled; no component was added.", options = {}) {
+  if (!uiState.placement) return false;
+  uiState.placement = null;
+  pendingTargetPointer = null;
+  renderWireStatus(currentProject());
+  renderTransientLayer();
+  showStatus(message);
+  if (options.announce !== false) announceInteraction("Placement canceled. No component was added and history was unchanged.");
+  return true;
 }
 
 function benchPointFromEvent(event) {
@@ -1606,24 +2596,21 @@ function updateBenchPanInteraction(event) {
   const dyClient = event.clientY - benchPanInteraction.startClientY;
   if (!benchPanInteraction.moved && Math.hypot(dxClient, dyClient) < 3) return;
   benchPanInteraction.moved = true;
-  const [, , viewWidth, viewHeight] = benchPanInteraction.startViewBox;
-  const dxWorld = dxClient * viewWidth / benchPanInteraction.svgWidth;
-  const dyWorld = dyClient * viewHeight / benchPanInteraction.svgHeight;
-  uiState.view.center = clampBenchViewCenter([
-    benchPanInteraction.startCenter[0] - dxWorld,
-    benchPanInteraction.startCenter[1] - dyWorld
-  ], uiState.view.zoom);
-  renderBenchView();
+  benchPanInteraction.pendingClientPoint = [event.clientX, event.clientY];
+  schedulePointerFrame();
   event.preventDefault();
 }
 
 function finishBenchPanInteraction(event) {
   if (!benchPanInteraction || event.pointerId !== benchPanInteraction.pointerId) return;
+  flushPointerFrameNow();
   const moved = benchPanInteraction.moved;
   if (benchSvg.hasPointerCapture(event.pointerId)) benchSvg.releasePointerCapture(event.pointerId);
   benchPanInteraction = null;
   suppressNextBenchClick = moved;
   renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+  renderTransientLayer();
   if (moved) event.preventDefault();
 }
 
@@ -1632,71 +2619,205 @@ function cancelBenchPanInteraction(event) {
   if (benchSvg.hasPointerCapture(event.pointerId)) benchSvg.releasePointerCapture(event.pointerId);
   benchPanInteraction = null;
   renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+  renderTransientLayer();
 }
 
 function endpointKeyValue(endpoint) {
   return endpoint ? `${endpoint.componentId}:${endpoint.terminalId}` : "";
 }
 
-function nearestTerminalEndpoint(project, point, options = {}) {
-  let best = null;
-  const excludeKey = endpointKeyValue(options.exclude);
-  for (const component of project.components) {
-    const definition = catalog.getComponent(component.typeId);
-    if (!definition) continue;
-    for (const terminal of definition.terminals) {
-      const endpoint = { componentId: component.id, terminalId: terminal.id };
-      if (excludeKey && endpointKeyValue(endpoint) === excludeKey) continue;
-      const resolved = resolveTerminal(project, endpoint);
-      if (!resolved.ok) continue;
-      const distance = Math.hypot(point[0] - resolved.worldPosition[0], point[1] - resolved.worldPosition[1]);
-      const threshold = definition.sim.role === "breadboard" ? 5.2 : 10;
-      if (distance <= threshold && (!best || distance < best.distance)) {
-        best = { endpoint: resolved.endpoint, distance };
-      }
-    }
+function candidateWithInteractionValidity(candidate, startEndpoint = null) {
+  if (!candidate) return candidate;
+  const sameEndpoint = startEndpoint && candidate.endpointKey === endpointKeyValue(startEndpoint);
+  return {
+    ...candidate,
+    invalidReason: sameEndpoint
+      ? `Choose a different terminal; ${candidate.componentId}.${candidate.terminalId} is already the wire start.`
+      : candidate.invalidReason
+  };
+}
+
+function resolutionWithInteractionValidity(result, startEndpoint = null) {
+  if (!result) return null;
+  const nearbyCandidates = result.nearbyCandidates.map((candidate) => candidateWithInteractionValidity(candidate, startEndpoint));
+  const byKey = new Map(nearbyCandidates.map((candidate) => [candidate.endpointKey, candidate]));
+  return {
+    ...result,
+    target: result.target ? byKey.get(result.target.endpointKey) ?? candidateWithInteractionValidity(result.target, startEndpoint) : null,
+    candidates: result.candidates.map((candidate) => byKey.get(candidate.endpointKey) ?? candidateWithInteractionValidity(candidate, startEndpoint)),
+    nearbyCandidates
+  };
+}
+
+function resolveTerminalAtClientPoint(clientPoint, pointerType = "mouse", startEndpoint = null) {
+  const result = projectedTerminalResolver.resolve(clientPoint, {
+    pointerType,
+    lockedEndpointKey: uiState.targeting.lockedEndpointKey
+  }, currentProject());
+  return resolutionWithInteractionValidity(result, startEndpoint);
+}
+
+function setTargetingResolution(result, options = {}) {
+  uiState.targeting.resolution = result;
+  if (result?.target && !result.ambiguous) uiState.targeting.lockedEndpointKey = result.target.endpointKey;
+  if (options.clientPoint) uiState.targeting.lastClientPoint = [...options.clientPoint];
+  if (options.pointerType) uiState.targeting.pointerType = options.pointerType;
+  if (Object.hasOwn(options, "ambiguityAction")) uiState.targeting.ambiguityAction = options.ambiguityAction;
+  return result;
+}
+
+function clearTargetingResolution(options = {}) {
+  uiState.targeting.resolution = null;
+  uiState.targeting.ambiguityAction = null;
+  uiState.targeting.lockedEndpointKey = null;
+  if (options.keepPointer !== true) uiState.targeting.lastClientPoint = null;
+}
+
+function refreshTargetResolutionFromLastPoint() {
+  const clientPoint = uiState.targeting.lastClientPoint;
+  if (!clientPoint) {
+    const endpoint = uiState.targeting.focusedEndpoint ?? uiState.pendingEndpoint;
+    const projected = endpoint ? projectedTerminalResolver.resolveEndpoint(endpoint, currentProject()) : null;
+    if (!projected) return null;
+    uiState.targeting.resolution = {
+      pointerType: uiState.targeting.pointerType,
+      ...terminalPointerProfile(uiState.targeting.pointerType),
+      target: projected,
+      candidates: [projected],
+      nearbyCandidates: [projected],
+      ambiguous: false,
+      ambiguityCount: 1
+    };
+    return uiState.targeting.resolution;
   }
-  return best?.endpoint ?? null;
+  const startEndpoint = wireInteraction?.startEndpoint ?? uiState.pendingEndpoint;
+  const result = resolveTerminalAtClientPoint(clientPoint, uiState.targeting.pointerType, startEndpoint);
+  setTargetingResolution(result, { clientPoint, pointerType: uiState.targeting.pointerType });
+  return result;
 }
 
 function renderInteractionPreview(project) {
-  replaceHistoryValue(history, normalizeProject(project));
-  const normalized = currentProject();
-  renderComponents(normalized);
-  renderWiresList(normalized);
-  renderInspector(normalized);
-  renderWireStatus(normalized);
-  renderBench();
-  const summary = projectSummary(normalized);
-  statusEl.textContent = `${summary.name} / ${summary.componentCount} components / ${summary.connectionCount} wires`;
+  if (!pointerInteraction) return;
+  const proposed = normalizeProject(project);
+  pointerInteraction.proposedProject = proposed;
+  const mutation = stageInsertionMutation(
+    pointerInteraction.startProject,
+    proposed,
+    pointerInteraction.componentId,
+    pointerInteraction.baseGeneration,
+    { operationKind: "place" }
+  );
+  pointerInteraction.previewMutation = mutation;
+  pointerInteraction.previewProject = mutation.candidateProject ?? proposed;
+  const status = placementStatus(mutation);
+  wireStatus.textContent = `${pointerInteraction.kind === "resize" ? "Resize" : "Move"} ${pointerInteraction.component.name}: ${status.label}. ${status.detail}`;
+}
+
+function flushWirePointerPreview() {
+  const pending = wireInteraction?.pendingPointer;
+  if (!wireInteraction || !pending) return;
+  wireInteraction.pendingPointer = null;
+  const result = resolveTerminalAtClientPoint(
+    pending.clientPoint,
+    pending.pointerType,
+    wireInteraction.startEndpoint
+  );
+  setTargetingResolution(result, {
+    clientPoint: pending.clientPoint,
+    pointerType: pending.pointerType
+  });
+  wireInteraction.currentPoint = pending.worldPoint;
+  wireInteraction.targetResolution = result;
+  wireInteraction.targetEndpoint = result?.target?.endpoint ?? null;
+  wireInteraction.invalidReason = result?.target?.invalidReason ?? null;
+  uiState.pendingEndpoint = wireInteraction.startEndpoint;
+  uiState.wireDrag = {
+    startEndpoint: wireInteraction.startEndpoint,
+    currentPoint: pending.worldPoint,
+    targetEndpoint: wireInteraction.targetEndpoint,
+    invalidReason: wireInteraction.invalidReason,
+    ambiguous: Boolean(result?.ambiguous)
+  };
+  renderWireStatus(currentProject());
+}
+
+function flushBenchPanPreview() {
+  const clientPoint = benchPanInteraction?.pendingClientPoint;
+  if (!benchPanInteraction || !clientPoint) return;
+  benchPanInteraction.pendingClientPoint = null;
+  const dxClient = clientPoint[0] - benchPanInteraction.startClientX;
+  const dyClient = clientPoint[1] - benchPanInteraction.startClientY;
+  const [, , viewWidth, viewHeight] = benchPanInteraction.startViewBox;
+  const dxWorld = dxClient * viewWidth / benchPanInteraction.svgWidth;
+  const dyWorld = dyClient * viewHeight / benchPanInteraction.svgHeight;
+  uiState.view.center = clampBenchViewCenter([
+    benchPanInteraction.startCenter[0] - dxWorld,
+    benchPanInteraction.startCenter[1] - dyWorld
+  ], uiState.view.zoom);
+  uiState.view.userAdjusted = true;
+  if (!storageHydrationFinished) uiState.view.userAdjustedBeforeHydration = true;
+  renderBenchView();
+  refreshTargetResolutionFromLastPoint();
+}
+
+function flushPassiveTargetPreview() {
+  if (wireInteraction || !pendingTargetPointer) return;
+  const pending = pendingTargetPointer;
+  pendingTargetPointer = null;
+  const startEndpoint = uiState.pendingEndpoint;
+  const result = resolveTerminalAtClientPoint(pending.clientPoint, pending.pointerType, startEndpoint);
+  setTargetingResolution(result, {
+    clientPoint: pending.clientPoint,
+    pointerType: pending.pointerType
+  });
+}
+
+function schedulePointerFrame() {
+  if (previewAnimationFrame) return;
+  previewAnimationFrame = window.requestAnimationFrame(() => {
+    previewAnimationFrame = 0;
+    if (pendingPreviewProject) {
+      renderInteractionPreview(pendingPreviewProject);
+      pendingPreviewProject = null;
+    }
+    flushBenchPanPreview();
+    flushWirePointerPreview();
+    flushPlacementPreview();
+    flushPassiveTargetPreview();
+    renderTransientLayer();
+    cycle3Diagnostics.pointerFrameCount += 1;
+  });
+}
+
+function flushPointerFrameNow() {
+  if (previewAnimationFrame) {
+    window.cancelAnimationFrame(previewAnimationFrame);
+    previewAnimationFrame = 0;
+  }
+  if (pendingPreviewProject) {
+    renderInteractionPreview(pendingPreviewProject);
+    pendingPreviewProject = null;
+  }
+  flushBenchPanPreview();
+  flushWirePointerPreview();
+  flushPlacementPreview();
+  flushPassiveTargetPreview();
+  renderTransientLayer();
 }
 
 function scheduleInteractionPreview(project) {
   pendingPreviewProject = project;
-  if (previewAnimationFrame) return;
-  previewAnimationFrame = window.requestAnimationFrame(() => {
-    previewAnimationFrame = 0;
-    if (!pendingPreviewProject) return;
-    renderInteractionPreview(pendingPreviewProject);
-    pendingPreviewProject = null;
-  });
-}
-
-function selectedStartProject(project, componentId) {
-  try {
-    return selectComponent(project, componentId);
-  } catch {
-    return project;
-  }
+  schedulePointerFrame();
 }
 
 function beginComponentInteraction(event, componentId, kind) {
+  cancelPendingMutation("Previous staged connection canceled.");
   const project = currentProject();
-  const startProject = selectedStartProject(project, componentId);
+  const startProject = project;
   const component = startProject.components.find((item) => item.id === componentId);
   const definition = component ? catalog.getComponent(component.typeId) : null;
   if (!component || !definition) return;
-  noteUserEdit();
   pointerInteraction = {
     pointerId: event.pointerId,
     kind,
@@ -1704,11 +2825,16 @@ function beginComponentInteraction(event, componentId, kind) {
     definition,
     component,
     startProject,
+    baseGeneration: uiState.projectGeneration,
     startPoint: benchPointFromEvent(event),
+    previewProject: null,
+    proposedProject: null,
+    previewMutation: null,
     moved: false
   };
   uiState.pendingEndpoint = null;
-  renderInteractionPreview(startProject);
+  clearTargetingResolution();
+  renderTransientLayer();
   benchSvg.setPointerCapture(event.pointerId);
   event.preventDefault();
 }
@@ -1755,109 +2881,148 @@ function finishComponentInteraction(event) {
     pendingPreviewProject = null;
   }
   const moved = pointerInteraction.moved;
-  const finalProject = currentProject();
+  const finalProject = pointerInteraction.proposedProject ?? pointerInteraction.startProject;
   const startProject = pointerInteraction.startProject;
   const componentId = pointerInteraction.componentId;
-  const interactionKind = pointerInteraction.kind;
+  const baseGeneration = pointerInteraction.baseGeneration;
   const message = pointerInteraction.kind === "resize" ? "Component resized" : "Component moved";
   if (benchSvg.hasPointerCapture(event.pointerId)) benchSvg.releasePointerCapture(event.pointerId);
   pointerInteraction = null;
   suppressNextBenchClick = moved;
   if (!moved) return;
-  const insertion = interactionKind === "move"
-    ? (() => {
-        const rematch = rematchDirectInsertionConnections(finalProject, componentId);
-        return rematch.hadDirectInsertion ? rematch : insertComponentIntoNearestTerminals(finalProject, componentId);
-      })()
-    : rematchDirectInsertionConnections(finalProject, componentId);
-  if (interactionKind === "resize" && insertion.hadDirectInsertion && !insertion.rematched) {
-    commitHistoryFrom(history, startProject, startProject);
-    refreshDerived();
-    render();
-    showStatus("Resize blocked: directly inserted components must stay aligned to every inserted terminal. Detach it first.", 6200);
-    return;
-  }
-  commitHistoryFrom(history, startProject, insertion.project);
-  refreshDerived();
-  render();
-  showStatus(insertion.detachedCount
-    ? `Component detached from ${insertion.detachedCount} direct insertion${insertion.detachedCount === 1 ? "" : "s"}`
-    : insertion.insertedCount
-    ? `Component inserted into ${insertion.insertedCount} terminal${insertion.insertedCount === 1 ? "" : "s"}`
-    : message);
+  const mutation = stageInsertionMutation(startProject, finalProject, componentId, baseGeneration, {
+    operationKind: "place"
+  });
+  presentStagedMutation(mutation, { message });
 }
 
 function cancelComponentInteraction(event) {
   if (!pointerInteraction || event.pointerId !== pointerInteraction.pointerId) return;
   if (benchSvg.hasPointerCapture(event.pointerId)) benchSvg.releasePointerCapture(event.pointerId);
-  const startProject = pointerInteraction.startProject;
   pointerInteraction = null;
   pendingPreviewProject = null;
+  suppressNextBenchClick = true;
   if (previewAnimationFrame) {
     window.cancelAnimationFrame(previewAnimationFrame);
     previewAnimationFrame = 0;
   }
-  renderInteractionPreview(startProject);
+  renderWireStatus(currentProject());
+  renderTransientLayer();
+  showStatus("Pointer interaction canceled; no staged connection was committed.");
+  announceInteraction("Component move canceled. Transform, connections, generation, and history are unchanged.");
 }
 
-function beginWireInteraction(event, componentId, terminalId) {
+function requestWireConnection(endpointA, endpointB, options = {}) {
   const project = currentProject();
-  const endpoint = { componentId, terminalId };
-  const resolved = resolveTerminal(project, endpoint);
-  if (!resolved.ok) return;
+  announceInteraction(`Confirmed target ${endpointLabel(project, endpointB)}.`);
+  try {
+    const mutation = stageWireMutation(project, endpointA, endpointB, uiState.projectGeneration, {
+      name: options.name ?? `${endpointLabel(project, endpointA)} to ${endpointLabel(project, endpointB)}`,
+      color: options.color
+    });
+    return presentStagedMutation(mutation, { message: "Wire connected" });
+  } catch (error) {
+    clearPendingMutation();
+    renderTransientLayer();
+    showStatus(`Connection blocked: ${error.message ?? "the endpoints could not be committed"}. No changes were made.`, 6200);
+    announceInteraction(`Error. ${error.message ?? "The endpoints could not be committed"}. No changes were made.`);
+    return { committed: false, pending: false, blocked: true, project, mutation: null, error };
+  }
+}
+
+function beginWireInteraction(event, resolution) {
+  cancelPendingMutation("Previous staged connection canceled.");
+  const target = resolution?.target;
+  if (!target) return false;
+  setTargetingResolution(resolution, {
+    clientPoint: [event.clientX, event.clientY],
+    pointerType: event.pointerType || "mouse",
+    ambiguityAction: resolution.ambiguous ? { kind: "wire-start" } : null
+  });
+  if (resolution.ambiguous) {
+    renderTransientLayer();
+    showStatus("Multiple terminals are within the precision tie band; choose the exact contact in the precision HUD.", 0);
+    return false;
+  }
+  if (target.invalidReason) {
+    renderTransientLayer();
+    showStatus(`Connection blocked: ${target.invalidReason} No changes were made.`, 6200);
+    announceInteraction(`Error. ${target.invalidReason} No changes were made.`);
+    return false;
+  }
   wireInteraction = {
     pointerId: event.pointerId,
-    startEndpoint: resolved.endpoint,
+    pointerType: event.pointerType || "mouse",
+    startEndpoint: target.endpoint,
     startPoint: benchPointFromEvent(event),
-    currentPoint: resolved.worldPosition,
+    startClientPoint: [event.clientX, event.clientY],
+    currentPoint: target.svgPoint,
     targetEndpoint: null,
+    targetResolution: null,
+    invalidReason: null,
+    pendingPointer: null,
     moved: false
   };
   benchSvg.setPointerCapture(event.pointerId);
+  event.preventDefault();
+  return true;
 }
 
 function updateWireInteraction(event) {
   if (!wireInteraction || event.pointerId !== wireInteraction.pointerId) return;
-  const project = currentProject();
-  const point = benchPointFromEvent(event);
-  const dx = point[0] - wireInteraction.startPoint[0];
-  const dy = point[1] - wireInteraction.startPoint[1];
+  const clientPoint = [event.clientX, event.clientY];
+  const dx = clientPoint[0] - wireInteraction.startClientPoint[0];
+  const dy = clientPoint[1] - wireInteraction.startClientPoint[1];
   if (!wireInteraction.moved && Math.hypot(dx, dy) < 3) return;
   wireInteraction.moved = true;
-  const targetEndpoint = nearestTerminalEndpoint(project, point, { exclude: wireInteraction.startEndpoint });
-  wireInteraction.currentPoint = point;
-  wireInteraction.targetEndpoint = targetEndpoint;
-  uiState.pendingEndpoint = wireInteraction.startEndpoint;
-  uiState.wireDrag = {
-    startEndpoint: wireInteraction.startEndpoint,
-    currentPoint: point,
-    targetEndpoint
+  wireInteraction.pendingPointer = {
+    clientPoint,
+    pointerType: event.pointerType || wireInteraction.pointerType,
+    worldPoint: benchPointFromEvent(event)
   };
-  renderWireStatus(project);
-  renderBench();
+  schedulePointerFrame();
+  event.preventDefault();
 }
 
 function finishWireInteraction(event) {
   if (!wireInteraction || event.pointerId !== wireInteraction.pointerId) return;
+  flushPointerFrameNow();
   const interaction = wireInteraction;
   if (benchSvg.hasPointerCapture(event.pointerId)) benchSvg.releasePointerCapture(event.pointerId);
   wireInteraction = null;
   uiState.wireDrag = null;
-  uiState.pendingEndpoint = null;
   if (!interaction.moved) {
-    renderWireStatus(currentProject());
+    suppressNextBenchClick = true;
+    handleResolvedTerminalClick(interaction.startEndpoint);
     return;
   }
+  uiState.pendingEndpoint = null;
   suppressNextBenchClick = true;
-  if (!interaction.targetEndpoint) {
-    render();
+  const targetResolution = interaction.targetResolution;
+  if (!targetResolution?.target) {
+    clearTargetingResolution();
+    renderTransientLayer();
     showStatus("Wire was not connected: release on a real terminal or breadboard hole.", 5200);
     return;
   }
+  if (targetResolution.ambiguous) {
+    uiState.targeting.ambiguityAction = {
+      kind: "wire-drop",
+      startEndpoint: interaction.startEndpoint
+    };
+    renderTransientLayer();
+    showStatus("Wire release is ambiguous; choose the exact contact in the precision HUD. No changes were made yet.", 0);
+    return;
+  }
+  if (targetResolution.target.invalidReason) {
+    renderTransientLayer();
+    showStatus(`Connection blocked: ${targetResolution.target.invalidReason} No changes were made.`, 6200);
+    return;
+  }
   const project = currentProject();
-  commitProject(connectTerminals(project, interaction.startEndpoint, interaction.targetEndpoint, {
-    name: `${endpointLabel(project, interaction.startEndpoint)} to ${endpointLabel(project, interaction.targetEndpoint)}`
-  }), "Wire connected");
+  requestWireConnection(interaction.startEndpoint, targetResolution.target.endpoint, {
+    name: `${endpointLabel(project, interaction.startEndpoint)} to ${endpointLabel(project, targetResolution.target.endpoint)}`
+  });
 }
 
 function cancelWireInteraction(event) {
@@ -1866,36 +3031,110 @@ function cancelWireInteraction(event) {
   wireInteraction = null;
   uiState.wireDrag = null;
   uiState.pendingEndpoint = null;
-  render();
+  clearTargetingResolution();
+  cancelPendingMutation("Pointer interaction canceled; no staged connection was committed.");
+  renderTransientLayer();
+  announceInteraction("Wire interaction canceled. No changes were made.");
 }
 
-function handleTerminalClick(componentId, terminalId) {
+function handleResolvedTerminalClick(endpointInput) {
   const project = currentProject();
-  const endpoint = { componentId, terminalId };
+  const resolved = resolveTerminal(project, endpointInput);
+  if (!resolved.ok) {
+    showStatus(`Connection blocked: ${resolved.error}`, 6200);
+    announceInteraction(`Error. ${resolved.error}`);
+    return;
+  }
+  const endpoint = resolved.endpoint;
+  const isCurrentWireStart = project.mode === "wire"
+    && uiState.pendingEndpoint?.componentId === endpoint.componentId
+    && uiState.pendingEndpoint?.terminalId === endpoint.terminalId;
+  if (isCurrentWireStart) {
+    uiState.pendingEndpoint = null;
+    renderWireStatus(project);
+    renderTransientLayer();
+    showStatus("Wire start cleared");
+    announceInteraction("Wire start canceled.");
+    return;
+  }
+  const projected = projectedTerminalResolver.resolveEndpoint(endpoint, project);
+  const validatedTarget = candidateWithInteractionValidity(projected, uiState.pendingEndpoint);
+  if (project.mode === "wire" && validatedTarget?.invalidReason) {
+    uiState.targeting.resolution = {
+      pointerType: "mouse",
+      ...terminalPointerProfile("mouse"),
+      target: validatedTarget,
+      candidates: [validatedTarget],
+      nearbyCandidates: [validatedTarget],
+      ambiguous: false,
+      ambiguityCount: 1
+    };
+    renderTransientLayer();
+    showStatus(`Connection blocked: ${validatedTarget.invalidReason} No changes were made.`, 6200);
+    announceInteraction(`Error. ${validatedTarget.invalidReason} No changes were made.`);
+    return;
+  }
   if (project.mode !== "wire") {
-    commitSelection(selectComponent(project, componentId));
+    commitSelection(selectComponent(project, endpoint.componentId));
     wireStatus.textContent = endpointLabel(project, endpoint);
     return;
   }
   if (!uiState.pendingEndpoint) {
     uiState.pendingEndpoint = endpoint;
+    uiState.targeting.focusedEndpoint = endpoint;
+    uiState.targeting.focusSource = "wire-start";
+    uiState.targeting.lastClientPoint = null;
     renderWireStatus(project);
-    renderBench();
+    renderTransientLayer();
     showStatus(`Selected ${endpointLabel(project, endpoint)} as wire start`);
-    return;
-  }
-  if (uiState.pendingEndpoint.componentId === componentId && uiState.pendingEndpoint.terminalId === terminalId) {
-    uiState.pendingEndpoint = null;
-    renderWireStatus(project);
-    renderBench();
-    showStatus("Wire start cleared");
+    announceInteraction(`Wire started at ${endpointLabel(project, endpoint)}.`);
     return;
   }
   const first = uiState.pendingEndpoint;
   uiState.pendingEndpoint = null;
-  commitProject(connectTerminals(project, first, endpoint, {
+  requestWireConnection(first, endpoint, {
     name: `${endpointLabel(project, first)} to ${endpointLabel(project, endpoint)}`
-  }), "Wire connected");
+  });
+}
+
+function cancelActivePointerInteraction() {
+  if (wireInteraction) {
+    const pointerId = wireInteraction.pointerId;
+    if (benchSvg.hasPointerCapture(pointerId)) benchSvg.releasePointerCapture(pointerId);
+    wireInteraction = null;
+    uiState.wireDrag = null;
+    uiState.pendingEndpoint = null;
+    clearTargetingResolution();
+    renderWireStatus(currentProject());
+    renderTransientLayer();
+    announceInteraction("Wire pointer interaction canceled. No changes were made.");
+    return true;
+  }
+  if (pointerInteraction) {
+    const pointerId = pointerInteraction.pointerId;
+    if (benchSvg.hasPointerCapture(pointerId)) benchSvg.releasePointerCapture(pointerId);
+    pointerInteraction = null;
+    pendingPreviewProject = null;
+    suppressNextBenchClick = true;
+    if (previewAnimationFrame) {
+      window.cancelAnimationFrame(previewAnimationFrame);
+      previewAnimationFrame = 0;
+    }
+    renderWireStatus(currentProject());
+    renderTransientLayer();
+    announceInteraction("Component pointer interaction canceled. Transform, connections, generation, and history are unchanged.");
+    return true;
+  }
+  if (benchPanInteraction) {
+    const pointerId = benchPanInteraction.pointerId;
+    if (benchSvg.hasPointerCapture(pointerId)) benchSvg.releasePointerCapture(pointerId);
+    benchPanInteraction = null;
+    renderBenchView();
+    renderTransientLayer();
+    announceInteraction("Bench pan canceled.");
+    return true;
+  }
+  return false;
 }
 
 function numericInputOverride(input) {
@@ -1916,13 +3155,12 @@ function inspectorEngineeringOverrides() {
   return entries.length ? Object.fromEntries(entries) : null;
 }
 
-function updateComponentWithInsertionGuard(project, componentId, patch) {
+function updateComponentWithInsertionGuard(project, componentId, patch, message) {
   const transformed = updateComponent(project, componentId, patch);
-  const rematch = rematchDirectInsertionConnections(transformed, componentId);
-  if (rematch.hadDirectInsertion && !rematch.rematched) {
-    throw new Error("Directly inserted components must stay aligned to a complete compatible hole pattern. Detach it before changing scale or rotation.");
-  }
-  return rematch.hadDirectInsertion ? rematch.project : transformed;
+  const mutation = stageInsertionMutation(project, transformed, componentId, uiState.projectGeneration, {
+    operationKind: "place"
+  });
+  return presentStagedMutation(mutation, { message });
 }
 
 function applyInspectorEdit() {
@@ -1936,7 +3174,7 @@ function applyInspectorEdit() {
   if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Component coordinates must be finite numbers.");
   if (!definition) throw new Error(`Unknown component type: ${component.typeId}`);
   const engineeringOverrides = inspectorEngineeringOverrides();
-  const nextProject = updateComponentWithInsertionGuard(currentProject(), component.id, {
+  updateComponentWithInsertionGuard(currentProject(), component.id, {
     name: componentNameInput.value.trim() || component.name,
     position: clampComponentPosition(component, definition, [x, y], scale, rotation),
     rotation,
@@ -1945,8 +3183,7 @@ function applyInspectorEdit() {
       scale,
       ...(engineeringOverrides ? { engineeringOverrides } : { engineeringOverrides: undefined })
     }
-  });
-  commitProject(nextProject, `${component.name} updated`);
+  }, `${component.name} updated`);
 }
 
 function rotateSelectedComponent(deltaDegrees) {
@@ -1955,11 +3192,10 @@ function rotateSelectedComponent(deltaDegrees) {
   const definition = catalog.getComponent(component.typeId);
   if (!definition) throw new Error(`Unknown component type: ${component.typeId}`);
   const rotation = normalizeComponentRotation(component.rotation + deltaDegrees);
-  const nextProject = updateComponentWithInsertionGuard(currentProject(), component.id, {
+  updateComponentWithInsertionGuard(currentProject(), component.id, {
     rotation,
     position: clampComponentPosition(component, definition, component.position, componentScale(component), rotation)
-  });
-  commitProject(nextProject, `${component.name} rotated`);
+  }, `${component.name} rotated`);
 }
 
 async function saveProject() {
@@ -1996,13 +3232,24 @@ async function hydrateSavedProject() {
   }
   uiState.robotDesign = saved?.robotDesign ?? null;
   if (saved?.binding) uiState.binding = saved.binding;
-  if (saved?.project && !userEditedBeforeStorageHydration) {
-    resetProject(saved.project, "Saved Circuit Lab project loaded", { userEdit: false, preserveBinding: true });
-  } else if (saved?.project && userEditedBeforeStorageHydration) {
-    showStatus("Saved Circuit Lab project found; current edits were kept", 5200);
-  } else {
-    showStatus("Starter Circuit Lab project loaded");
+  applyHydratedProject(saved?.project);
+}
+
+function applyHydratedProject(savedProject) {
+  if (savedProject && !userEditedBeforeStorageHydration) {
+    resetProject(savedProject, "Saved Circuit Lab project loaded", {
+      userEdit: false,
+      preserveBinding: true,
+      preserveView: uiState.view.userAdjustedBeforeHydration
+    });
+    return "loaded";
   }
+  if (savedProject && userEditedBeforeStorageHydration) {
+    showStatus("Saved Circuit Lab project found; current edits were kept", 5200);
+    return "preserved-user-edit";
+  }
+  showStatus("Starter Circuit Lab project loaded");
+  return "starter";
 }
 
 function timeoutAfter(ms, message) {
@@ -2099,7 +3346,31 @@ async function editCustomComponentDefinition(typeId) {
 
 function exportProjectJson() {
   downloadBlob(serializeCircuitLabProject(currentProject()), "robostudio-circuit-lab.json", "application/json;charset=utf-8");
-  showStatus("Circuit Lab JSON export started");
+  const staleCount = uiState.test.issues.filter((issue) => issue.code === "stale-direct-insertion").length;
+  showStatus(staleCount
+    ? `Circuit Lab JSON exported unchanged with ${staleCount} blocking stale direct insertion${staleCount === 1 ? "" : "s"}; use Re-seat or Disconnect before physical build.`
+    : "Circuit Lab JSON export started", staleCount ? 7200 : 3600);
+}
+
+function reSeatStaleInsertion(issue) {
+  if (!issue?.componentId) {
+    showStatus("This legacy direct insertion has no valid source component; use Disconnect.", 6200);
+    return;
+  }
+  const project = currentProject();
+  const mutation = stageInsertionMutation(project, project, issue.componentId, uiState.projectGeneration, {
+    operationKind: "re-seat",
+    repairMode: true
+  });
+  presentStagedMutation(mutation, { message: "Direct insertion re-seated" });
+}
+
+function disconnectStaleInsertion(issue) {
+  const project = currentProject();
+  const mutation = stageDisconnectMutation(project, issue?.connectionIds ?? [], uiState.projectGeneration, {
+    componentId: issue?.componentId ?? null
+  });
+  presentStagedMutation(mutation, { message: "Direct insertion disconnected" });
 }
 
 async function exportBuildGuideZip() {
@@ -2142,15 +3413,106 @@ function controlsForComponent(component) {
   };
 }
 
-function focusTerminal(endpoint) {
+function focusTerminal(endpoint, options = {}) {
   const resolved = resolveTerminal(currentProject(), endpoint);
   if (!resolved.ok) throw new Error(resolved.error);
-  renderBench();
-  const selector = `[data-terminal-component="${CSS.escape(resolved.endpoint.componentId)}"][data-terminal-id="${CSS.escape(resolved.endpoint.terminalId)}"]`;
-  const element = benchSvg.querySelector(selector);
-  element?.focus();
+  const projected = projectedTerminalResolver.resolveEndpoint(resolved.endpoint, currentProject());
+  if (!projected) throw new Error(`Unable to project terminal: ${resolved.endpoint.componentId}.${resolved.endpoint.terminalId}`);
+  uiState.targeting.focusedEndpoint = resolved.endpoint;
+  uiState.targeting.focusSource = options.source ?? "programmatic";
+  uiState.targeting.lockedEndpointKey = projected.endpointKey;
+  uiState.targeting.lastClientPoint = null;
+  uiState.targeting.resolution = {
+    pointerType: "mouse",
+    ...terminalPointerProfile("mouse"),
+    target: projected,
+    candidates: [projected],
+    nearbyCandidates: [projected],
+    ambiguous: false,
+    ambiguityCount: 1
+  };
+  benchSvg.dataset.focusedTerminal = projected.endpointKey;
+  if (options.focusBench !== false) benchSvg.focus({ preventScroll: true });
+  renderTransientLayer();
   wireStatus.textContent = endpointLabel(currentProject(), resolved.endpoint);
-  return resolved;
+  return { ...resolved, projected };
+}
+
+function moveTerminalFocus(direction) {
+  const bounds = benchSvg.getBoundingClientRect();
+  const visibleRect = { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom };
+  const currentKey = terminalEndpointKey(
+    uiState.targeting.focusedEndpoint
+      ?? uiState.targeting.resolution?.target?.endpoint
+      ?? uiState.pendingEndpoint
+  );
+  const next = nearestVisibleTerminalInDirection(
+    projectedTerminalResolver.snapshot(currentProject()),
+    currentKey,
+    direction,
+    visibleRect
+  );
+  if (!next) {
+    announceInteraction("No visible terminal is available in that direction.");
+    return null;
+  }
+  focusTerminal(next.endpoint, { source: "keyboard", focusBench: false });
+  return next;
+}
+
+function choosePrecisionCandidate(endpointKey) {
+  const resolution = uiState.targeting.resolution;
+  const candidate = resolution?.candidates?.find((item) => item.endpointKey === endpointKey)
+    ?? resolution?.nearbyCandidates?.find((item) => item.endpointKey === endpointKey);
+  if (!candidate) return false;
+  const action = uiState.targeting.ambiguityAction;
+  uiState.targeting.lockedEndpointKey = candidate.endpointKey;
+  uiState.targeting.ambiguityAction = null;
+  uiState.targeting.resolution = {
+    ...resolution,
+    target: candidate,
+    candidates: [candidate],
+    ambiguous: false,
+    ambiguityCount: 1
+  };
+  uiState.targeting.focusedEndpoint = candidate.endpoint;
+  uiState.targeting.focusSource = "ambiguity-choice";
+  renderTransientLayer();
+  announceInteraction(`Confirmed target ${candidate.terminalAriaLabel}.`);
+  if (candidate.invalidReason) {
+    showStatus(`Connection blocked: ${candidate.invalidReason} No changes were made.`, 6200);
+    return false;
+  }
+  if (action?.kind === "wire-drop" && action.startEndpoint) {
+    const project = currentProject();
+    requestWireConnection(action.startEndpoint, candidate.endpoint, {
+      name: `${endpointLabel(project, action.startEndpoint)} to ${endpointLabel(project, candidate.endpoint)}`
+    });
+    return true;
+  }
+  if (action?.kind === "wire-start") {
+    handleResolvedTerminalClick(candidate.endpoint);
+    return true;
+  }
+  focusTerminal(candidate.endpoint, { source: "ambiguity-choice" });
+  return true;
+}
+
+function framePrecisionPort() {
+  const target = targetRecordForDisplay();
+  if (!target) return;
+  if (target.component && target.port) {
+    const next = portCamera(target.component, target.port);
+    uiState.view.center = next.center;
+    setBenchZoom(next.zoom);
+    return;
+  }
+  frameSelectionOrPort();
+}
+
+function addPrecisionZoom() {
+  const target = targetRecordForDisplay();
+  setBenchZoom(uiState.view.zoom * 1.5, { anchorPoint: target?.svgPoint });
 }
 
 function circuitAssistantContext() {
@@ -2217,6 +3579,7 @@ function mountCircuitAssistant() {
   const assistant = mountPageAssistant({
     pageId: "circuits",
     title: "Circuit Lab",
+    staticHostingMessage: "Circuit Lab's assistant is unavailable on GitHub Pages because it requires RoboStudio's local server proxy. Deterministic browser wiring tools, DRC, JSON, build-guide ZIP, and source-only exports remain available; no API key is exposed.",
     getContext: circuitAssistantContext,
     actions: {
       circuits_new_project: () => {
@@ -2240,8 +3603,10 @@ function mountCircuitAssistant() {
         return `${templateId} loaded.`;
       },
       circuits_add_hardware: ({ componentTypeId, name, position }) => {
-        const next = addHardware(componentTypeId, { name, position });
-        return `${selectedComponentInstance(next)?.name ?? componentTypeId} added.`;
+        const next = addHardwareImmediate(componentTypeId, { name, position });
+        return uiState.pendingMutation
+          ? `${componentTypeId} is mechanically resolved but needs the visible electrical-hazard confirmation.`
+          : `${selectedComponentInstance(next)?.name ?? componentTypeId} added.`;
       },
       circuits_select_component: ({ componentId }) => {
         commitSelection(selectComponent(currentProject(), componentId));
@@ -2252,11 +3617,11 @@ function mountCircuitAssistant() {
         const component = project.components.find((item) => item.id === componentId);
         const definition = component ? catalog.getComponent(component.typeId) : null;
         const nextPosition = definition ? clampComponentPosition(component, definition, position, componentScale(component)) : position;
-        const insertion = insertComponentIntoNearestTerminals(updateComponent(project, componentId, { position: nextPosition }), componentId);
-        commitProject(insertion.project, insertion.insertedCount ? `${componentId} inserted` : `${componentId} moved`);
-        return insertion.insertedCount
-          ? `${componentId} moved and inserted into ${insertion.insertedCount} terminal${insertion.insertedCount === 1 ? "" : "s"}.`
-          : `${componentId} moved.`;
+        const mutation = stageInsertionMutation(project, updateComponent(project, componentId, { position: nextPosition }), componentId, uiState.projectGeneration, { operationKind: "place" });
+        const result = presentStagedMutation(mutation, { message: `${componentId} moved` });
+        return result.pending
+          ? `${componentId} needs the visible electrical-hazard confirmation.`
+          : result.blocked ? `${componentId} was not moved: ${mutation.mechanical.message}` : `${componentId} moved.`;
       },
       circuits_resize_component: ({ componentId, scale }) => {
         const project = currentProject();
@@ -2264,11 +3629,12 @@ function mountCircuitAssistant() {
         const definition = component ? catalog.getComponent(component.typeId) : null;
         if (!component || !definition) throw new Error(`Unknown component: ${componentId}`);
         const normalizedScale = normalizeComponentScale(scale);
-        commitProject(updateComponent(project, componentId, {
+        const result = updateComponentWithInsertionGuard(project, componentId, {
           position: clampComponentPosition(component, definition, component.position, normalizedScale),
           props: { ...component.props, scale: normalizedScale }
-        }), `${componentId} resized`);
-        return `${componentId} resized to ${Math.round(normalizedScale * 100)}%.`;
+        }, `${componentId} resized`);
+        return result.pending ? `${componentId} resize needs electrical-hazard confirmation.`
+          : result.blocked ? `${componentId} was not resized.` : `${componentId} resized to ${Math.round(normalizedScale * 100)}%.`;
       },
       circuits_rotate_component: ({ componentId, rotationDegrees }) => {
         const project = currentProject();
@@ -2276,22 +3642,33 @@ function mountCircuitAssistant() {
         const definition = component ? catalog.getComponent(component.typeId) : null;
         if (!component || !definition) throw new Error(`Unknown component: ${componentId}`);
         const rotation = normalizeComponentRotation(rotationDegrees);
-        commitProject(updateComponent(project, componentId, {
+        const result = updateComponentWithInsertionGuard(project, componentId, {
           rotation,
           position: clampComponentPosition(component, definition, component.position, componentScale(component), rotation)
-        }), `${componentId} rotated`);
-        return `${componentId} rotated to ${rotation} degrees.`;
+        }, `${componentId} rotated`);
+        return result.pending ? `${componentId} rotation needs electrical-hazard confirmation.`
+          : result.blocked ? `${componentId} was not rotated.` : `${componentId} rotated to ${rotation} degrees.`;
       },
       circuits_connect_terminals: ({ endpointA, endpointB, name }) => {
-        commitProject(connectTerminals(currentProject(), endpointA, endpointB, { name }), "Wire connected");
-        return "Wire connected.";
+        const result = requestWireConnection(endpointA, endpointB, { name });
+        return result.pending ? "The wire needs the visible electrical-hazard confirmation."
+          : result.blocked ? "The wire was mechanically blocked." : "Wire connected.";
       },
       circuits_remove_component: ({ componentId }) => {
         commitProject(removeComponent(currentProject(), componentId), "Component removed");
         return `${componentId} removed.`;
       },
       circuits_remove_connection: ({ connectionId }) => {
-        commitProject(removeConnection(currentProject(), connectionId), "Wire removed");
+        const project = currentProject();
+        const connection = project.connections.find((item) => item.id === connectionId);
+        if (connection?.kind === "direct-insertion") {
+          const state = inspectDirectInsertionState(project).find((item) => item.connectionIds.includes(connectionId));
+          const result = presentStagedMutation(stageDisconnectMutation(project, state?.connectionIds ?? [connectionId], uiState.projectGeneration, {
+            componentId: state?.componentId ?? null
+          }), { message: "Direct insertion disconnected" });
+          return result.blocked ? `${connectionId} was not disconnected.` : `${connectionId} direct insertion disconnected.`;
+        }
+        commitProject(removeConnection(project, connectionId), "Wire removed");
         return `${connectionId} removed.`;
       },
       circuits_run_test: () => {
@@ -2456,7 +3833,7 @@ function mountCircuitAssistant() {
       }
     }
   });
-  if (window.matchMedia("(max-width: 980px)").matches) {
+  if (drawerMediaQuery.matches) {
     assistant.root.classList.add("is-collapsed");
     assistant.root.querySelector(".assistant-card__collapse")?.setAttribute("aria-expanded", "false");
   }
@@ -2465,6 +3842,26 @@ function mountCircuitAssistant() {
 
 function bindEvents() {
   mountShellCardToggles(document);
+  syncDrawerLayout();
+  hardwareDrawerTrigger?.addEventListener("click", () => (
+    uiState.openDrawer === "hardware" ? closeOpenDrawer() : openDrawer("hardware", hardwareDrawerTrigger)
+  ));
+  workflowDrawerTrigger?.addEventListener("click", () => (
+    uiState.openDrawer === "workflow" ? closeOpenDrawer() : openDrawer("workflow", workflowDrawerTrigger)
+  ));
+  document.querySelectorAll("[data-close-circuit-drawer]").forEach((button) => {
+    button.addEventListener("click", () => closeOpenDrawer());
+  });
+  drawerMediaQuery.addEventListener?.("change", () => {
+    if (!drawerMediaQuery.matches) {
+      uiState.openDrawer = null;
+      uiState.drawerTrigger = null;
+    } else if (circuitAssistantHandle?.root) {
+      circuitAssistantHandle.root.classList.add("is-collapsed");
+      circuitAssistantHandle.root.querySelector(".assistant-card__collapse")?.setAttribute("aria-expanded", "false");
+    }
+    syncDrawerLayout();
+  });
   newButton.addEventListener("click", () => {
     if (window.confirm("Start a new Circuit Lab project?")) resetProject(createCircuitLabProject(), "New Circuit Lab project");
   });
@@ -2501,18 +3898,24 @@ function bindEvents() {
   });
   undoButton.addEventListener("click", () => {
     noteUserEdit();
+    clearPendingMutation();
     undoHistory(history);
+    uiState.projectGeneration += 1;
     uiState.pendingEndpoint = null;
     uiState.wireDrag = null;
+    uiState.placement = null;
     refreshDerived();
     render();
     showStatus("Undo complete");
   });
   redoButton.addEventListener("click", () => {
     noteUserEdit();
+    clearPendingMutation();
     redoHistory(history);
+    uiState.projectGeneration += 1;
     uiState.pendingEndpoint = null;
     uiState.wireDrag = null;
+    uiState.placement = null;
     refreshDerived();
     render();
     showStatus("Redo complete");
@@ -2522,7 +3925,19 @@ function bindEvents() {
   for (const button of tabButtons) {
     button.addEventListener("click", () => {
       uiState.activeTab = button.dataset.circuitTab;
-      render();
+      renderWorkflowTabs();
+    });
+    button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const index = tabButtons.indexOf(button);
+      const nextIndex = event.key === "Home" ? 0
+        : event.key === "End" ? tabButtons.length - 1
+          : (index + (event.key === "ArrowRight" ? 1 : -1) + tabButtons.length) % tabButtons.length;
+      const next = tabButtons[nextIndex];
+      uiState.activeTab = next.dataset.circuitTab;
+      renderWorkflowTabs();
+      next.focus();
     });
   }
   applyBindingButton?.addEventListener("click", () => {
@@ -2558,7 +3973,11 @@ function bindEvents() {
   });
   for (const button of modeButtons) {
     button.addEventListener("click", () => {
-      commitProject(setProjectMode(currentProject(), button.dataset.circuitMode), `${button.dataset.circuitMode} mode`);
+      if (uiState.placement) cancelPlacement("Placement canceled by mode change.");
+      const mode = button.dataset.circuitMode;
+      if (mode === "test") uiState.activeTab = "test-results";
+      commitProject(setProjectMode(currentProject(), mode), `${mode} mode`);
+      if (mode === "test" && drawerMediaQuery.matches) openDrawer("workflow", button);
     });
   }
   starterList.addEventListener("click", (event) => {
@@ -2596,7 +4015,8 @@ function bindEvents() {
     }
     const button = event.target.closest("[data-add-hardware]");
     if (!button) return;
-    addHardware(button.dataset.addHardware);
+    beginPlacement(button.dataset.addHardware, { source: "hardware-card" });
+    closeOpenDrawer({ restoreFocus: false });
   });
   hardwareList.addEventListener("input", (event) => {
     const search = event.target.closest("[data-hardware-search]");
@@ -2627,6 +4047,10 @@ function bindEvents() {
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData("application/x-robostudio-circuit-component", item.dataset.hardwareItem);
     event.dataTransfer.setData("text/plain", item.dataset.hardwareItem);
+    beginPlacement(item.dataset.hardwareItem, { source: "hardware-drag", nativeDrag: true });
+  });
+  hardwareList.addEventListener("dragend", () => {
+    if (uiState.placement?.nativeDrag) cancelPlacement("Drag placement canceled; no component was added.");
   });
   componentList.addEventListener("click", (event) => {
     const item = event.target.closest("[data-component-id]");
@@ -2636,7 +4060,17 @@ function bindEvents() {
   wireList.addEventListener("click", (event) => {
     const removeButton = event.target.closest("[data-remove-connection]");
     if (removeButton) {
-      commitProject(removeConnection(currentProject(), removeButton.dataset.removeConnection), "Wire removed");
+      const project = currentProject();
+      const connectionId = removeButton.dataset.removeConnection;
+      const connection = project.connections.find((item) => item.id === connectionId);
+      if (connection?.kind === "direct-insertion") {
+        const state = inspectDirectInsertionState(project).find((item) => item.connectionIds.includes(connectionId));
+        presentStagedMutation(stageDisconnectMutation(project, state?.connectionIds ?? [connectionId], uiState.projectGeneration, {
+          componentId: state?.componentId ?? null
+        }), { message: "Direct insertion disconnected" });
+      } else {
+        commitProject(removeConnection(project, connectionId), "Wire removed");
+      }
       return;
     }
     const item = event.target.closest("[data-connection-id]");
@@ -2646,16 +4080,63 @@ function bindEvents() {
   testList.addEventListener("click", (event) => {
     const item = event.target.closest("[data-issue-id]");
     if (!item) return;
+    const issue = uiState.test.issues.find((candidate) => candidate.id === item.dataset.issueId);
+    const staleAction = event.target.closest("[data-stale-action]");
+    if (staleAction && issue?.code === "stale-direct-insertion") {
+      if (staleAction.dataset.staleAction === "re-seat") reSeatStaleInsertion(issue);
+      else disconnectStaleInsertion(issue);
+      return;
+    }
     uiState.selectedIssueId = uiState.selectedIssueId === item.dataset.issueId ? null : item.dataset.issueId;
     renderTest();
     renderBench();
+    const selectedIssue = uiState.test.issues.find((candidate) => candidate.id === uiState.selectedIssueId);
+    const [terminalRef] = selectedIssue?.targets?.terminalRefs ?? [];
+    if (terminalRef) focusTerminal(terminalRef, { source: "validation", focusBench: false });
+    else if (uiState.targeting.focusSource === "validation") {
+      uiState.targeting.focusedEndpoint = null;
+      uiState.targeting.focusSource = null;
+      clearTargetingResolution();
+      renderTransientLayer();
+    }
+  });
+  confirmMutationButton?.addEventListener("click", () => {
+    const mutation = uiState.pendingMutation;
+    if (!mutation) return;
+    commitResolvedMutation(mutation);
+  });
+  cancelMutationButton?.addEventListener("click", () => cancelPendingMutation());
+  precisionHud?.addEventListener("click", (event) => {
+    const candidate = event.target.closest("[data-precision-candidate]");
+    if (candidate) {
+      choosePrecisionCandidate(candidate.dataset.precisionCandidate);
+      return;
+    }
+    const action = event.target.closest("[data-precision-action]")?.dataset.precisionAction;
+    if (action === "frame-port") framePrecisionPort();
+    if (action === "add-zoom") addPrecisionZoom();
   });
   benchSvg.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
-    const terminal = event.target.closest("[data-terminal-component]");
-    if (terminal && currentProject().mode === "wire") {
-      beginWireInteraction(event, terminal.dataset.terminalComponent, terminal.dataset.terminalId);
+    const project = currentProject();
+    if (uiState.placement) {
+      updatePlacementAtPoint(benchPointFromEvent(event));
+      renderTransientLayer();
+      suppressNextBenchClick = true;
+      commitPlacement();
+      event.preventDefault();
       return;
+    }
+    if (project.mode === "wire") {
+      const resolution = resolveTerminalAtClientPoint(
+        [event.clientX, event.clientY],
+        event.pointerType || "mouse"
+      );
+      if (resolution?.target) {
+        suppressNextBenchClick = true;
+        beginWireInteraction(event, resolution);
+        return;
+      }
     }
     const resizeHandle = event.target.closest("[data-resize-component-id]");
     if (resizeHandle) {
@@ -2664,7 +4145,6 @@ function bindEvents() {
     }
     if (event.target.closest("[data-terminal-component]") || event.target.closest("[data-connection-id]")) return;
     const component = event.target.closest("[data-component-id]");
-    const project = currentProject();
     if (component && (project.mode === "select" || project.mode === "place")) {
       beginComponentInteraction(event, component.dataset.componentId, "move");
       return;
@@ -2672,9 +4152,19 @@ function bindEvents() {
     beginBenchPanInteraction(event);
   });
   benchSvg.addEventListener("pointermove", (event) => {
+    cycle3Diagnostics.pointerEventCount += 1;
     updateWireInteraction(event);
     updateComponentInteraction(event);
     updateBenchPanInteraction(event);
+    const project = currentProject();
+    if (uiState.placement) schedulePlacementAtPoint(benchPointFromEvent(event));
+    if (!wireInteraction && !pointerInteraction && !benchPanInteraction && (project.mode === "wire" || project.mode === "place")) {
+      pendingTargetPointer = {
+        clientPoint: [event.clientX, event.clientY],
+        pointerType: event.pointerType || "mouse"
+      };
+      schedulePointerFrame();
+    }
   });
   benchSvg.addEventListener("pointerup", (event) => {
     finishWireInteraction(event);
@@ -2685,25 +4175,39 @@ function bindEvents() {
     cancelWireInteraction(event);
     cancelComponentInteraction(event);
     cancelBenchPanInteraction(event);
+    cancelPendingMutation("Pointer interaction canceled; no staged connection was committed.");
+  });
+  benchSvg.addEventListener("pointerleave", () => {
+    if (wireInteraction || pointerInteraction || benchPanInteraction || uiState.targeting.focusedEndpoint || uiState.pendingEndpoint) return;
+    pendingTargetPointer = null;
+    clearTargetingResolution();
+    renderTransientLayer();
   });
   benchSvg.addEventListener("dragover", (event) => {
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    if (uiState.placement) {
+      updatePlacementAtPoint(benchPointFromEvent(event));
+      renderTransientLayer();
+    }
   });
   benchSvg.addEventListener("drop", (event) => {
     event.preventDefault();
     const typeId = event.dataTransfer?.getData("application/x-robostudio-circuit-component") || event.dataTransfer?.getData("text/plain");
     if (!typeId || !catalog.getComponent(typeId)) return;
-    addHardware(typeId, { position: benchPointFromEvent(event) });
+    if (!uiState.placement || uiState.placement.typeId !== typeId) beginPlacement(typeId, { source: "hardware-drop", nativeDrag: true });
+    updatePlacementAtPoint(benchPointFromEvent(event));
+    renderTransientLayer();
+    commitPlacement();
+  });
+  benchSvg.addEventListener("contextmenu", (event) => {
+    if (!uiState.placement) return;
+    event.preventDefault();
+    cancelPlacement();
   });
   benchSvg.addEventListener("click", (event) => {
     if (suppressNextBenchClick) {
       suppressNextBenchClick = false;
-      return;
-    }
-    const terminal = event.target.closest("[data-terminal-component]");
-    if (terminal) {
-      handleTerminalClick(terminal.dataset.terminalComponent, terminal.dataset.terminalId);
       return;
     }
     const connection = event.target.closest("[data-connection-id]");
@@ -2716,13 +4220,32 @@ function bindEvents() {
   });
   benchSvg.addEventListener("wheel", (event) => {
     event.preventDefault();
+    cycle3Diagnostics.wheelEventCount += 1;
     const anchorPoint = benchPointFromEvent(event);
     const direction = event.deltaY < 0 ? BENCH_ZOOM_STEP : 1 / BENCH_ZOOM_STEP;
     setBenchZoom(uiState.view.zoom * direction, { anchorPoint });
   }, { passive: false });
+  benchSvg.addEventListener("keydown", (event) => {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      event.preventDefault();
+      moveTerminalFocus(event.key);
+      return;
+    }
+    if ((event.key === "Enter" || event.key === " ") && uiState.placement) {
+      event.preventDefault();
+      commitPlacement();
+      return;
+    }
+    if ((event.key === "Enter" || event.key === " ") && uiState.targeting.focusedEndpoint) {
+      event.preventDefault();
+      handleResolvedTerminalClick(uiState.targeting.focusedEndpoint);
+    }
+  });
   zoomOutButton.addEventListener("click", () => setBenchZoom(uiState.view.zoom / BENCH_ZOOM_STEP));
   zoomInButton.addEventListener("click", () => setBenchZoom(uiState.view.zoom * BENCH_ZOOM_STEP));
   zoomResetButton.addEventListener("click", resetBenchZoom);
+  overviewButton?.addEventListener("click", showOverview);
+  frameButton?.addEventListener("click", frameSelectionOrPort);
   applyComponentButton.addEventListener("click", () => {
     try {
       applyInspectorEdit();
@@ -2779,9 +4302,51 @@ function bindEvents() {
   });
   window.addEventListener("pointerup", releaseActiveMomentaryControlAndRender);
   window.addEventListener("pointercancel", releaseActiveMomentaryControlAndRender);
-  window.addEventListener("blur", releaseAllMomentaryControlsAndRender);
+  window.addEventListener("blur", () => {
+    releaseAllMomentaryControlsAndRender();
+    cancelPendingMutation("Staged connection canceled when the window lost focus.");
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") cancelPendingMutation("Staged connection canceled when the page was hidden.");
+  });
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") releaseAllMomentaryControlsAndRender();
+    if (event.key === "Escape") {
+      if (cancelActivePointerInteraction()) {
+        event.preventDefault();
+        return;
+      }
+      if (uiState.targeting.ambiguityAction || uiState.targeting.resolution?.ambiguous) {
+        clearTargetingResolution();
+        renderTransientLayer();
+        showStatus("Precision target choice canceled; no changes were made.");
+        announceInteraction("Precision target choice canceled. No changes were made.");
+        event.preventDefault();
+        return;
+      }
+      if (cancelPendingMutation()) {
+        event.preventDefault();
+        return;
+      }
+      if (uiState.pendingEndpoint) {
+        uiState.pendingEndpoint = null;
+        uiState.wireDrag = null;
+        renderWireStatus(currentProject());
+        renderTransientLayer();
+        showStatus("Wire start canceled");
+        announceInteraction("Wire start canceled.");
+        event.preventDefault();
+        return;
+      }
+      if (cancelPlacement()) {
+        event.preventDefault();
+        return;
+      }
+      if (closeOpenDrawer()) {
+        event.preventDefault();
+        return;
+      }
+      releaseAllMomentaryControlsAndRender();
+    }
   });
   rotateReverseButton.addEventListener("click", () => {
     try {
@@ -2811,12 +4376,176 @@ function bindEvents() {
     uiState.selectedSourcePath = sourceFileSelect.value;
     renderSource();
   });
+
+  const invalidateProjectedLayout = (reason) => {
+    projectedTerminalResolver.invalidate(reason);
+    refreshTargetResolutionFromLastPoint();
+    renderTransientLayer();
+  };
+  document.querySelector(".circuit-shell")?.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-toggle-shell-card]")) return;
+    window.requestAnimationFrame(() => invalidateProjectedLayout("panel-layout-change"));
+  });
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(() => invalidateProjectedLayout("viewport-or-panel-layout"));
+    observer.observe(benchSvg);
+    observer.observe(benchSvg.parentElement);
+  }
+  window.addEventListener("resize", () => invalidateProjectedLayout("viewport-resize"));
+  window.addEventListener("scroll", (event) => {
+    if (![document, document.documentElement, document.body].includes(event.target)) return;
+    invalidateProjectedLayout("viewport-scroll");
+  }, { passive: true, capture: true });
+  window.visualViewport?.addEventListener("resize", () => invalidateProjectedLayout("visual-viewport-resize"));
+}
+
+function installCycle3Diagnostics() {
+  ensureBenchLayers();
+  const observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === "childList" && record.target === benchSvg) {
+        cycle3Diagnostics.fullBenchReplacementCount += 1;
+      }
+    }
+  });
+  observer.observe(benchSvg, { childList: true });
+  window.__circuitLabCycle3 = Object.freeze({
+    diagnostics: () => ({ ...cycle3Diagnostics }),
+    resolverStats: () => projectedTerminalResolver.stats(),
+    targetingState: () => ({
+      lockedEndpointKey: uiState.targeting.lockedEndpointKey,
+      resolutionEndpointKey: uiState.targeting.resolution?.target?.endpointKey ?? null,
+      ambiguous: Boolean(uiState.targeting.resolution?.ambiguous)
+    }),
+    invalidateResolver: (reason = "browser-test") => projectedTerminalResolver.invalidate(reason),
+    focusTerminal: (endpoint) => {
+      const resolved = focusTerminal(endpoint, { source: "browser-instrumentation" });
+      return {
+        endpoint: resolved.endpoint,
+        screenPoint: resolved.projected.screenPoint,
+        svgPoint: resolved.projected.svgPoint,
+        capacity: `${resolved.projected.capacityUsed}/${resolved.projected.capacity}`
+      };
+    },
+    resolveAtClient: (clientPoint, pointerType = "mouse", startEndpoint = null) => {
+      const result = resolveTerminalAtClientPoint(clientPoint, pointerType, startEndpoint);
+      return result ? {
+        target: result.target ? {
+          endpoint: result.target.endpoint,
+          endpointKey: result.target.endpointKey,
+          invalidReason: result.target.invalidReason,
+          capacityUsed: result.target.capacityUsed,
+          capacity: result.target.capacity,
+          distancePx: result.target.distancePx
+        } : null,
+        candidates: result.candidates.map((candidate) => candidate.endpointKey),
+        ambiguityCount: result.ambiguityCount,
+        ambiguous: result.ambiguous,
+        radiusPx: result.radiusPx,
+        tieBandPx: result.tieBandPx,
+        hysteresisPx: result.hysteresisPx
+      } : null;
+    },
+    serializedProject: () => serializeCircuitLabProject(currentProject())
+  });
+  window.__circuitLabCycle4 = Object.freeze({
+    cameraState: () => ({
+      zoom: uiState.view.zoom,
+      center: [...uiState.view.center],
+      viewBox: benchViewBoxFor(),
+      userAdjusted: uiState.view.userAdjusted,
+      userAdjustedBeforeHydration: uiState.view.userAdjustedBeforeHydration
+    }),
+    setCamera: ({ zoom, center, userAdjusted = true }) => {
+      uiState.view.center = clampBenchViewCenter(center ?? uiState.view.center, zoom ?? uiState.view.zoom);
+      setBenchZoom(zoom ?? uiState.view.zoom, { userAdjusted });
+      return { zoom: uiState.view.zoom, center: [...uiState.view.center], viewBox: benchViewBoxFor() };
+    },
+    resetView: resetBenchZoom,
+    overview: showOverview,
+    frame: frameSelectionOrPort,
+    terminalGeometry: (endpoint) => {
+      const resolved = resolveTerminal(currentProject(), endpoint);
+      if (!resolved.ok) return null;
+      return {
+        endpoint: resolved.endpoint,
+        worldPosition: [...resolved.worldPosition],
+        localPosition: [...resolved.terminal.position],
+        visibleBoundsMm: { ...(resolved.terminal.visibleBoundsMm ?? {}) },
+        componentScale: componentScale(resolved.component),
+        componentRotation: normalizeComponentRotation(resolved.component.rotation),
+        physicalPortId: resolved.terminal.physicalPortId ?? null
+      };
+    },
+    project: () => JSON.parse(serializeCircuitLabProject(currentProject())),
+    serializedProject: () => serializeCircuitLabProject(currentProject()),
+    history: () => ({ ...historyStatus(history) }),
+    generation: () => uiState.projectGeneration,
+    placementState: () => uiState.placement ? {
+      typeId: uiState.placement.typeId,
+      componentId: uiState.placement.componentId,
+      source: uiState.placement.source,
+      status: placementStatus(uiState.placement.mutation),
+      point: [...uiState.placement.point],
+      exactEndpointPairs: uiState.placement.mutation?.exactEndpointPairs ?? []
+    } : null,
+    beginPlacement: (typeId, options = {}) => beginPlacement(typeId, options),
+    movePlacement: (point) => {
+      updatePlacementAtPoint(point);
+      renderTransientLayer();
+      return window.__circuitLabCycle4.placementState();
+    },
+    commitPlacement,
+    cancelPlacement,
+    beginHydrationGuardProbe: () => {
+      storageHydrationFinished = false;
+      userEditedBeforeStorageHydration = false;
+      uiState.view.userAdjustedBeforeHydration = uiState.view.userAdjusted;
+      return { storageHydrationFinished, userEditedBeforeStorageHydration };
+    },
+    finishHydrationGuardProbe: (project) => {
+      storageHydrationFinished = true;
+      const outcome = applyHydratedProject(normalizeProject(project));
+      return {
+        outcome,
+        storageHydrationFinished,
+        userEditedBeforeStorageHydration,
+        placement: window.__circuitLabCycle4.placementState(),
+        project: window.__circuitLabCycle4.project()
+      };
+    },
+    drawerState: () => ({
+      compact: drawerMediaQuery.matches,
+      openDrawer: uiState.openDrawer,
+      hardwareInert: Boolean(hardwareDrawer?.inert),
+      workflowInert: Boolean(workflowDrawer?.inert)
+    }),
+    openDrawer,
+    closeDrawer: closeOpenDrawer,
+    wireHintDismissed: () => uiState.wireHintDismissed,
+    simulateLateHydration: (project) => {
+      storageHydrationFinished = false;
+      uiState.view.userAdjustedBeforeHydration = uiState.view.userAdjusted;
+      resetProject(normalizeProject(project), "Late hydration applied", {
+        userEdit: false,
+        preserveBinding: true,
+        preserveView: uiState.view.userAdjustedBeforeHydration
+      });
+      storageHydrationFinished = true;
+      return { camera: window.__circuitLabCycle4.cameraState(), project: window.__circuitLabCycle4.project() };
+    },
+    executeAssistantAction: (name, args) => {
+      if (!circuitAssistantHandle?.adapter) throw new Error("Circuit assistant is not mounted yet.");
+      return circuitAssistantHandle.adapter.executeAction(name, args);
+    }
+  });
 }
 
 async function start() {
   bindEvents();
   refreshDerived();
   render();
+  installCycle3Diagnostics();
   try {
     await Promise.race([
       hydrateSavedProject(),
@@ -2825,7 +4554,7 @@ async function start() {
   } catch (error) {
     showStatus(error.message ?? "Starter Circuit Lab project is ready", 5200);
   }
-  mountCircuitAssistant();
+  circuitAssistantHandle = mountCircuitAssistant();
 }
 
 start().catch((error) => {

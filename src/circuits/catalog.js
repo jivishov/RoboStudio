@@ -4,6 +4,7 @@ import {
 } from "./customComponents.js";
 import { breadboardBusDefinitions, getPhysicalDefinition, physicalTerminalIds } from "./physicalCatalog.js";
 import { roboticsComponentDefinitions } from "./roboticsCatalog.js";
+import { getGeometryEvidence } from "./geometryEvidence.js";
 
 export const TERMINAL_KINDS = Object.freeze({
   SIGNAL: "signal",
@@ -71,6 +72,7 @@ function terminal(id, label, kind, x, y, options = {}) {
     shareableBus: Boolean(options.shareableBus),
     connectorId: options.connectorId ?? null,
     connectorInterface: options.connectorInterface ?? null,
+    anchorKind: options.anchorKind ?? "on-body",
     attachmentCapacity: options.attachmentCapacity ?? 1,
     sourceMappingId: options.sourceMappingId ?? null,
     visibleBoundsMm: options.visibleBoundsMm ?? null,
@@ -120,7 +122,9 @@ function derivePhysicalTerminals(definition, rawTerminals = []) {
     return Object.freeze({
       ...raw,
       position: Object.freeze([...physicalTerminal.positionMm]),
+      connectorId: physicalTerminal.connectorId ?? raw.connectorId ?? null,
       connectorInterface: physicalTerminal.connectorInterface,
+      anchorKind: physicalTerminal.anchorKind ?? raw.anchorKind ?? "on-body",
       attachmentCapacity: physicalTerminal.attachmentCapacity,
       sourceMappingId: physicalTerminal.sourceMappingId,
       visibleBoundsMm: Object.freeze({ ...physicalTerminal.visibleBoundsMm }),
@@ -147,12 +151,16 @@ function component(definition) {
     ...definition,
     dimensions: Object.freeze(dimensions),
     physicalDefinitionId: physical?.id ?? definition.physicalDefinitionId ?? null,
+    geometryEvidenceId: physical?.geometryEvidenceId ?? definition.geometryEvidenceId ?? null,
+    geometryEvidence: Object.freeze(getGeometryEvidence(physical?.geometryEvidenceId ?? definition.geometryEvidenceId) ?? {}),
     bodyBoundsMm: Object.freeze(physical?.bodyBoundsMm ?? { x: -dimensions[0] / 2, y: -dimensions[1] / 2, width: dimensions[0], height: dimensions[1] }),
     visualBoundsMm: Object.freeze(physical?.visualBoundsMm ?? { x: -dimensions[0] / 2, y: -dimensions[1] / 2, width: dimensions[0], height: dimensions[1] }),
     clampBoundsMm: Object.freeze(physical?.clampBoundsMm ?? { x: -dimensions[0] / 2, y: -dimensions[1] / 2, width: dimensions[0], height: dimensions[1] }),
     terminals: Object.freeze(derivedTerminals),
     internalBuses: Object.freeze(definition.internalBuses ?? []),
     insertionPatterns: Object.freeze(physical?.insertionPatterns ?? definition.insertionPatterns ?? []),
+    physicalPorts: Object.freeze(physical?.physicalPorts ?? definition.physicalPorts ?? []),
+    formedLeadGeometry: physical?.formedLeadGeometry ?? definition.formedLeadGeometry ?? null,
     controls: Object.freeze(physical?.controls ?? definition.controls ?? {}),
     hidden: Boolean(definition.hidden),
     engineering: Object.freeze({
@@ -244,7 +252,14 @@ const esp32SignalMeta = [
   ["GPIO3", "GPIO3/RX0", false, false, true],
   ["GPIO1", "GPIO1/TX0", false, false, true],
   ["GPIO22", "GPIO22", false, false, false],
-  ["GPIO23", "GPIO23", false, false, false]
+  ["GPIO23", "GPIO23", false, false, false],
+  ["GPIO0", "GPIO0", true, false, false],
+  ["D2", "GPIO9/D2", false, false, true],
+  ["D3", "GPIO10/D3", false, false, true],
+  ["CMD", "GPIO11/CMD", false, false, true],
+  ["D1", "GPIO8/D1", false, false, true],
+  ["D0", "GPIO7/D0", false, false, true],
+  ["CLK", "GPIO6/CLK", false, false, true]
 ];
 
 const esp32Signals = esp32SignalMeta.map(([id, label, strapping, inputOnly, reserved], index) =>
@@ -263,7 +278,13 @@ const esp32Signals = esp32SignalMeta.map(([id, label, strapping, inputOnly, rese
     inputOnly,
     strapping,
     reserved,
-    reservedReason: reserved ? (id === "EN" ? "Enable/reset pin; not a general GPIO." : "Default serial/programming terminal.") : "",
+    reservedReason: reserved
+      ? (id === "EN"
+          ? "Enable/reset pin; not a general GPIO."
+          : ["D0", "D1", "D2", "D3", "CMD", "CLK"].includes(id)
+            ? "Connected to module flash; not available for general wiring."
+            : "Default serial/programming terminal.")
+      : "",
     maxCurrentMa: inputOnly ? null : 12
   })
 );
@@ -325,6 +346,11 @@ const components = Object.freeze({
         electricalRole: "signal-input",
         inputOnly: true
       }),
+      terminal("NC", "NC", TERMINAL_KINDS.PASSIVE, 0, 0, {
+        electricalRole: "passive",
+        reserved: true,
+        reservedReason: "Unconnected header position on the Arduino Uno R3 power header."
+      }),
       terminal("5V", "5V", TERMINAL_KINDS.POWER, -30, 20, {
         voltage: 5,
         maxCurrentMa: 500,
@@ -361,8 +387,10 @@ const components = Object.freeze({
         { id: "raw", role: "input", minimumV: 7, nominalV: 9, maximumV: 12 }
       ],
       connectors: [
-        { id: "digital-header", family: "arduino-stackable-header", pinPitchMm: 2.54, keyed: false, terminalIds: [...arduinoDigital.map((item) => item.id), "AREF", "GND3", "SDA", "SCL"] },
-        { id: "analog-power-header", family: "arduino-stackable-header", pinPitchMm: 2.54, keyed: false, terminalIds: [...arduinoAnalog.map((item) => item.id), "IOREF", "RESET", "5V", "3V3", "GND", "GND2", "VIN"] }
+        { id: "digital-header-8", family: "arduino-stackable-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7"] },
+        { id: "digital-header-10", family: "arduino-stackable-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["D8", "D9", "D10", "D11", "D12", "D13", "GND3", "AREF", "SDA", "SCL"] },
+        { id: "power-header", family: "arduino-stackable-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["NC", "IOREF", "RESET", "3V3", "5V", "GND", "GND2", "VIN"] },
+        { id: "analog-header", family: "arduino-stackable-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["A0", "A1", "A2", "A3", "A4", "A5"] }
       ],
       protection: { levelShifting: "not-required", currentLimiting: "unknown" },
       robotics: { role: "controller", interface: "digital" }
@@ -371,7 +399,7 @@ const components = Object.freeze({
   }),
   "controller-esp32-devkit": component({
     id: "controller-esp32-devkit",
-    name: "ESP32 DevKit V1 - 30 pin",
+    name: "ESP32-DevKitC V4 - 38 pin",
     category: "Controller",
     dimensions: [58, 86],
     color: "#0f766e",
@@ -392,15 +420,18 @@ const components = Object.freeze({
         recommendedWireColor: "red"
       }),
       terminal("GND", "GND", TERMINAL_KINDS.GROUND, -23, 39, { voltageDomainId: "ground", recommendedWireColor: "black" }),
-      terminal("GND2", "GND", TERMINAL_KINDS.GROUND, 23, 39, { voltageDomainId: "ground", recommendedWireColor: "black" })
+      terminal("GND2", "GND", TERMINAL_KINDS.GROUND, 23, 39, { voltageDomainId: "ground", recommendedWireColor: "black" }),
+      terminal("GND3", "GND", TERMINAL_KINDS.GROUND, 23, 0, { voltageDomainId: "ground", recommendedWireColor: "black" })
     ],
+    internalBuses: [{ id: "ground_header_common", terminalIds: ["GND", "GND2", "GND3"] }],
     engineering: {
       voltageDomains: [
         { id: "logic", role: "source", minimumV: 3.1, nominalV: 3.3, maximumV: 3.5 },
         { id: "raw", role: "input", minimumV: 4.75, nominalV: 5, maximumV: 5.5 }
       ],
       connectors: [
-        { id: "devkit-headers", family: "esp32-devkit-v1-30pin-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["VIN", "GND2", "GPIO13", "GPIO12", "GPIO14", "GPIO27", "GPIO26", "GPIO25", "GPIO33", "GPIO32", "GPIO35", "GPIO34", "GPIO39", "GPIO36", "EN", "3V3", "GND", "GPIO15", "GPIO2", "GPIO4", "GPIO16", "GPIO17", "GPIO5", "GPIO18", "GPIO19", "GPIO21", "GPIO3", "GPIO1", "GPIO22", "GPIO23"] }
+        { id: "j2-header", family: "esp32-devkitc-v4-single-row-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["3V3", "EN", "GPIO36", "GPIO39", "GPIO34", "GPIO35", "GPIO32", "GPIO33", "GPIO25", "GPIO26", "GPIO27", "GPIO14", "GPIO12", "GND2", "GPIO13", "D2", "D3", "CMD", "VIN"] },
+        { id: "j3-header", family: "esp32-devkitc-v4-single-row-header", pinPitchMm: 2.54, keyed: false, terminalIds: ["GND", "GPIO23", "GPIO22", "GPIO1", "GPIO3", "GPIO21", "GND3", "GPIO19", "GPIO18", "GPIO5", "GPIO17", "GPIO16", "GPIO4", "GPIO0", "GPIO2", "GPIO15", "D1", "D0", "CLK"] }
       ],
       protection: { levelShifting: "required", currentLimiting: "unknown" },
       robotics: { role: "controller", interface: "digital" }
@@ -563,7 +594,7 @@ const components = Object.freeze({
     internalBuses: [{ id: "resistance", terminalIds: ["a", "b"], passive: true, resistanceOhm: 220 }],
     engineering: {
       currentMa: { idle: 0, typical: null, peak: null, stall: null },
-      connectors: [{ id: "resistor-leads", family: "through-hole-legs", pinPitchMm: 2.54, keyed: false, terminalIds: ["a", "b"] }],
+      connectors: [{ id: "resistor-leads", family: "formed-through-hole-legs", pinPitchMm: 10.16, keyed: false, terminalIds: ["a", "b"] }],
       protection: { currentLimiting: "integrated" },
       robotics: { role: "passive", interface: "passive" }
     },
@@ -643,7 +674,7 @@ const components = Object.freeze({
     ],
     engineering: {
       voltageDomains: [{ id: "logic", role: "bidirectional", minimumV: 0, nominalV: 5, maximumV: 5 }],
-      connectors: [{ id: "button-pins", family: "tactile-switch", pinPitchMm: 2.54, keyed: false, terminalIds: ["sense", "sense2", "return", "return2"] }],
+      connectors: [{ id: "button-pins", family: "tactile-switch-four-pin", pinPitchMm: null, keyed: false, terminalIds: ["sense", "sense2", "return", "return2"] }],
       robotics: { role: "sensor.digital", interface: "digital" }
     },
     sim: { role: "button", inputTerminal: "sense", returnTerminal: "return" }
@@ -848,7 +879,7 @@ const components = Object.freeze({
       terminal("B", "B", TERMINAL_KINDS.PASSIVE, 5, 6, { connectorId: "switch-pins", electricalRole: "passive" })
     ],
     engineering: {
-      connectors: [{ id: "switch-pins", family: "spdt-slide-switch", pinPitchMm: 2.54, keyed: false, terminalIds: ["A", "COM", "B"] }],
+      connectors: [{ id: "switch-pins", family: "spdt-slide-switch", pinPitchMm: 5.08, keyed: false, terminalIds: ["A", "COM", "B"] }],
       robotics: { role: "sensor.digital", interface: "digital" }
     },
     sim: { role: "switch" }

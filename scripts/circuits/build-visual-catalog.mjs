@@ -15,6 +15,7 @@ const outputDir = path.join(repoRoot, "src", "circuits", "assets", "photoreal");
 const generatedPath = path.join(repoRoot, "src", "circuits", "generated", "photorealAssets.js");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const { getPhysicalDefinition } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "physicalCatalog.js")));
+const { getAssetRegistration, registeredRasterFrame } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "assetRegistrations.js")));
 
 function escapeXml(value) {
   return String(value ?? "")
@@ -34,7 +35,7 @@ function round(value) {
   return Number(value).toFixed(3).replace(/\.?0+$/u, "");
 }
 
-function rasterDataUri(entry) {
+function rasterData(entry) {
   const rasterPath = assertRepoRelativePath(repoRoot, entry.rasterSource, `${entry.id}.rasterSource`);
   if (!fs.existsSync(rasterPath)) {
     throw new Error(`${entry.id} is missing raster source ${path.relative(repoRoot, rasterPath).replaceAll(path.sep, "/")}. Run scripts/circuits/extract-photoreal-raster-sources.py first.`);
@@ -45,16 +46,22 @@ function rasterDataUri(entry) {
   if (info.bitDepth !== 8) throw new Error(`${entry.id} raster source must use 8-bit color depth.`);
   const encoded = raster.toString("base64");
   if (hasForbiddenEmbeddedData(encoded)) throw new Error(`${entry.id} raster source contains forbidden embedded data.`);
-  return `data:image/png;base64,${encoded}`;
+  return { href: `data:image/png;base64,${encoded}`, info };
 }
 
 function svgFor(entry) {
   const width = number(entry.widthMm, `${entry.id}.widthMm`);
   const height = number(entry.heightMm, `${entry.id}.heightMm`);
-  const href = rasterDataUri(entry);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${round(width)} ${round(height)}" width="${round(width)}mm" height="${round(height)}mm" data-component-id="${escapeXml(entry.id)}" data-asset-kind="${manifest.assetKind}" data-raster-source="raster/${escapeXml(entry.id)}.png">
+  const { href, info } = rasterData(entry);
+  const registration = getAssetRegistration(entry.id);
+  if (!registration) throw new Error(`${entry.id} is missing AssetRegistrationV1.`);
+  const frame = registeredRasterFrame(registration, info.width, info.height, width, height);
+  const rotation = frame.orientationDeg
+    ? ` transform="rotate(${round(frame.orientationDeg)} ${round(width / 2)} ${round(height / 2)})"`
+    : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${round(width)} ${round(height)}" width="${round(width)}mm" height="${round(height)}mm" data-component-id="${escapeXml(entry.id)}" data-asset-kind="${manifest.assetKind}" data-raster-source="raster/${escapeXml(entry.id)}.png" data-registration-id="${escapeXml(registration.id)}" data-registration-version="${registration.version}" data-mm-per-pixel="${round(frame.mmPerPixel)}">
   <title>${escapeXml(entry.label ?? entry.id)} RoboStudio photorealistic raster wrapper</title>
-  <image href="${href}" x="0" y="0" width="${round(width)}" height="${round(height)}" preserveAspectRatio="xMidYMid meet"/>
+  <image href="${href}" x="${round(frame.x)}" y="${round(frame.y)}" width="${round(frame.width)}" height="${round(frame.height)}" preserveAspectRatio="none"${rotation}/>
 </svg>
 `;
 }

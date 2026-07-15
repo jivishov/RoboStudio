@@ -18,8 +18,8 @@
       "label": "ESP32",
       "style": "controller",
       "color": "#0f766e",
-      "widthMm": 30,
-      "heightMm": 55,
+      "widthMm": 27.94,
+      "heightMm": 48.26,
       "rasterSource": "src/circuits/assets/photoreal/raster/controller-esp32-devkit.png",
       "svgWrapper": "src/circuits/assets/photoreal/controller-esp32-devkit.svg"
     },

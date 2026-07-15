@@ -19,6 +19,10 @@ const { visualProvenanceRecords } = await import(pathToFileURL(path.join(repoRoo
 const { photorealAssetIds, photorealAssetUrls } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "generated", "photorealAssets.js")));
 const { listPhysicalDefinitions } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "physicalCatalog.js")));
 const { listVisualDefinitions } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "visualCatalog.js")));
+const { catalog } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "catalog.js")));
+const { listAssetRegistrations, getAssetRegistration } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "assetRegistrations.js")));
+const { getGeometryEvidence, listGeometryEvidence } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "geometryEvidence.js")));
+const { validateAssetRegistration, validateGeometryEvidenceRecord, validatePhysicalDefinition } = await import(pathToFileURL(path.join(repoRoot, "src", "circuits", "physicalValidation.js")));
 
 const errors = [];
 const warnings = [];
@@ -71,6 +75,8 @@ const approvedRoboStudio = new Set(allowlist.approvedRoboStudioSources);
 const manifestEntries = Array.isArray(photorealManifest.components) ? photorealManifest.components : [];
 const manifestById = new Map();
 const generatedPhotorealIds = new Set(photorealAssetIds);
+const assetRegistrations = listAssetRegistrations();
+const assetRegistrationById = new Map(assetRegistrations.map((registration) => [registration.assetId, registration]));
 
 if (photorealManifest.assetKind !== "photorealistic-svg-wrapper") fail("Photoreal manifest assetKind must be photorealistic-svg-wrapper.");
 if (photorealManifest.provenanceId !== "robostudio-photorealistic-component-wrappers") fail("Photoreal manifest must use the approved RoboStudio provenance id.");
@@ -126,25 +132,13 @@ for (const record of visualProvenanceRecords) {
   }
 }
 
+for (const evidence of listGeometryEvidence()) {
+  for (const error of validateGeometryEvidenceRecord(evidence)) fail(error);
+}
+
 for (const physical of physicalDefinitions) {
-  const terminalIds = Object.keys(physical.terminals ?? {});
-  if (!terminalIds.length) fail(`${physical.id} has no physical terminals.`);
-  const seenCoordinates = new Map();
-  for (const terminalId of terminalIds) {
-    const terminal = physical.terminals[terminalId];
-    if (!Array.isArray(terminal.positionMm) || terminal.positionMm.length !== 2) {
-      fail(`${physical.id}.${terminalId} missing positionMm.`);
-      continue;
-    }
-    const key = terminal.positionMm.map((value) => Number(value).toFixed(4)).join(",");
-    const existing = seenCoordinates.get(key);
-    if (existing) fail(`${physical.id} duplicates physical anchor ${key} for ${existing} and ${terminalId}.`);
-    seenCoordinates.set(key, terminalId);
-    if (!terminal.connectorInterface) fail(`${physical.id}.${terminalId} missing connectorInterface.`);
-    if (!Number.isFinite(Number(terminal.attachmentCapacity)) || Number(terminal.attachmentCapacity) < 1) {
-      fail(`${physical.id}.${terminalId} must define attachmentCapacity >= 1.`);
-    }
-  }
+  const componentDefinition = catalog.getComponent(physical.id);
+  for (const error of validatePhysicalDefinition(physical, componentDefinition)) fail(error);
 }
 
 for (const visual of visualDefinitions) {
@@ -204,6 +198,13 @@ for (const entry of manifestEntries) {
     if (!raster.info.criticalOnly) fail(`${entry.id} raster source must not contain PNG metadata chunks.`);
     if (raster.info.width < 16 || raster.info.height < 16) fail(`${entry.id} raster source is unexpectedly small: ${raster.info.width}x${raster.info.height}.`);
   }
+  const registration = getAssetRegistration(entry.id);
+  const evidence = physical ? getGeometryEvidence(physical.geometryEvidenceId) : null;
+  if (!registration) {
+    fail(`${entry.id} is missing AssetRegistrationV1.`);
+  } else {
+    for (const error of validateAssetRegistration(registration, physical, evidence, raster?.info ?? null)) fail(error);
+  }
   if (!fs.existsSync(wrapperPath)) {
     fail(`${entry.id} missing photoreal SVG wrapper.`);
     continue;
@@ -235,6 +236,14 @@ for (const visual of visualDefinitions.filter((definition) => definition.assetKi
 
 for (const assetId of photorealAssetIds) {
   if (!manifestById.has(assetId)) fail(`${assetId} generated photoreal asset is missing from the manifest.`);
+}
+
+for (const registration of assetRegistrations) {
+  if (!manifestById.has(registration.assetId)) fail(`${registration.id} is not associated with a photoreal manifest entry.`);
+}
+
+for (const entry of manifestEntries) {
+  if (!assetRegistrationById.has(entry.id)) fail(`${entry.id} photoreal manifest entry is missing AssetRegistrationV1.`);
 }
 
 if (warnings.length) {

@@ -9,6 +9,7 @@ import {
 import { createPageAssistantAdapter } from "./pageAdapter.js";
 import { clampAssistantPosition, isAssistantDragBlocked } from "./drag.js";
 import { formatResponseMetrics } from "./metrics.js";
+import { assistantRuntimeCapability } from "./runtimeCapability.js";
 import { addUsageTotals, runAssistantTurn } from "./turnRunner.js";
 import {
   assistantConversationFileName,
@@ -140,8 +141,11 @@ async function cleanupAssistantAttachments(attachmentIds) {
 
 export function mountPageAssistant(config) {
   const adapter = createPageAssistantAdapter(config);
+  const runtimeCapability = assistantRuntimeCapability(globalThis.location);
+  const unavailableMessage = config.staticHostingMessage ?? runtimeCapability.message;
   const root = createElement("section", "assistant-card");
   root.setAttribute("aria-label", `${adapter.title ?? "Page"} assistant`);
+  root.dataset.assistantAvailability = runtimeCapability.code;
   const initialModelId = defaultAssistantModelId();
   root.innerHTML = `
     <div class="assistant-card__header">
@@ -209,6 +213,7 @@ export function mountPageAssistant(config) {
   reasoningSelect.value = defaultReasoningEffortForModel(initialModelId);
 
   const state = {
+    available: runtimeCapability.available,
     previousResponseId: null,
     busy: false,
     confirmations: [],
@@ -231,18 +236,25 @@ export function mountPageAssistant(config) {
   }
 
   function idleStatusText() {
+    if (!state.available) return unavailableMessage;
     return hasPendingConfirmation() ? pendingConfirmationStatus() : state.lastMetrics;
   }
 
   function updateInteractiveState() {
+    const unavailable = !state.available;
     const locked = state.busy || state.uploadingAttachments;
     const pendingConfirmation = hasPendingConfirmation();
-    sendButton.disabled = locked || pendingConfirmation;
-    attachButton.disabled = locked || pendingConfirmation;
-    resetButton.disabled = locked;
-    modelSelect.disabled = locked || pendingConfirmation;
-    reasoningSelect.disabled = locked || pendingConfirmation;
-    for (const button of attachmentsEl.querySelectorAll("button")) button.disabled = locked || pendingConfirmation;
+    input.disabled = unavailable || locked || pendingConfirmation;
+    fileInput.disabled = unavailable || locked || pendingConfirmation;
+    sendButton.disabled = unavailable || locked || pendingConfirmation;
+    attachButton.disabled = unavailable || locked || pendingConfirmation;
+    resetButton.disabled = unavailable || locked;
+    saveButton.disabled = unavailable || locked;
+    modelSelect.disabled = unavailable || locked || pendingConfirmation;
+    reasoningSelect.disabled = unavailable || locked || pendingConfirmation;
+    form.setAttribute("aria-disabled", String(unavailable));
+    root.classList.toggle("is-unavailable", unavailable);
+    for (const button of attachmentsEl.querySelectorAll("button")) button.disabled = unavailable || locked || pendingConfirmation;
     for (const button of confirmationsEl.querySelectorAll("button")) button.disabled = locked;
   }
 
@@ -539,6 +551,10 @@ export function mountPageAssistant(config) {
   resetButton.addEventListener("click", resetConversation);
   saveButton.addEventListener("click", saveConversation);
   attachButton.addEventListener("click", () => {
+    if (!state.available) {
+      statusEl.textContent = unavailableMessage;
+      return;
+    }
     if (state.busy || state.uploadingAttachments) return;
     if (hasPendingConfirmation()) {
       statusEl.textContent = pendingConfirmationStatus();
@@ -570,6 +586,10 @@ export function mountPageAssistant(config) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!state.available) {
+      statusEl.textContent = unavailableMessage;
+      return;
+    }
     const message = input.value.trim();
     if (!message || state.busy || state.uploadingAttachments) return;
     if (hasPendingConfirmation()) {
@@ -651,6 +671,13 @@ export function mountPageAssistant(config) {
   });
 
   document.body.append(root);
-  appendMessage("assistant", "I can operate this page with safe automatic actions and will ask before guarded actions.");
+  if (state.available) {
+    appendMessage("assistant", "I can operate this page with safe automatic actions and will ask before guarded actions.");
+  } else {
+    input.placeholder = "Assistant unavailable on GitHub Pages";
+    appendMessage("assistant", unavailableMessage);
+    statusEl.textContent = unavailableMessage;
+  }
+  updateInteractiveState();
   return { root, adapter };
 }

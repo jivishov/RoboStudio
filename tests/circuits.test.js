@@ -67,8 +67,13 @@ test("Circuit Lab default servo starter uses external power and common ground", 
   assert.equal(project.units, "mm");
   assert.equal(project.updatedAt, "2026-06-09T12:00:00.000Z");
   assert.equal(result.summary.errors, 0);
-  assert.equal(result.summary.warnings, 1);
-  assert.equal(result.issues.some((item) => item.code === "generic-rating-review"), true);
+  assert.equal(result.summary.warnings, 6);
+  assert.deepEqual([...new Set(result.issues.filter((item) => item.severity === "warning").map((item) => item.code))].sort(), [
+    "adapter-harness-review",
+    "generic-rating-review"
+  ]);
+  assert.equal(result.issues.filter((item) => item.code === "adapter-harness-review").length, 5);
+  assert.equal(result.issues.filter((item) => item.code === "generic-rating-review").length, 1);
   assert.equal(result.ok, true);
   assert.equal(source.target, "arduino");
   assert.match(source.files.find((file) => file.path.endsWith(".ino")).content, /Servo servo1;/);
@@ -121,7 +126,10 @@ test("ESP32 starter generates source-only ESP-IDF files", () => {
   const result = runCircuitLabTest(project);
 
   assert.equal(result.summary.errors, 0);
-  assert.equal(result.summary.warnings, 0);
+  assert.equal(result.summary.warnings, 5);
+  assert.deepEqual([...new Set(result.issues.filter((item) => item.severity === "warning").map((item) => item.code))], [
+    "adapter-harness-review"
+  ]);
   assert.equal(source.target, "espidf");
   assert.equal(source.files.some((file) => file.path === "main/app_main.c"), true);
   assert.match(source.files.find((file) => file.path === "main/app_main.c").content, /GPIO_NUM_16/);
@@ -176,7 +184,7 @@ test("Circuit Lab scaled components keep terminals and bounds aligned", () => {
   const bounds = componentBounds(servo, { dimensions: [52, 28] });
 
   assert.equal(terminal.ok, true);
-  assert.deepEqual(terminal.worldPosition, [125 + 26 * 1.5, 210 - 8 * 1.5]);
+  assert.deepEqual(terminal.worldPosition, [125 + 34 * 1.5, 210 - 2.54 * 1.5]);
   assert.equal(bounds.width, 78);
   assert.equal(bounds.height, 42);
 });
@@ -202,15 +210,15 @@ test("Circuit Lab rotated terminals follow equipment center rotation", () => {
   project = updateComponent(project, "servo", { rotation: 90 });
   let terminal = resolveTerminal(project, { componentId: "servo", terminalId: "signal" });
   assert.equal(terminal.ok, true);
-  assert.deepEqual(terminal.worldPosition.map(Math.round), [133, 236]);
+  assert.deepEqual(terminal.worldPosition.map(Math.round), [128, 244]);
 
   project = updateComponent(project, "servo", { rotation: 180 });
   terminal = resolveTerminal(project, { componentId: "servo", terminalId: "signal" });
-  assert.deepEqual(terminal.worldPosition.map(Math.round), [99, 218]);
+  assert.deepEqual(terminal.worldPosition.map(Math.round), [91, 213]);
 
   project = updateComponent(project, "servo", { rotation: 270 });
   terminal = resolveTerminal(project, { componentId: "servo", terminalId: "signal" });
-  assert.deepEqual(terminal.worldPosition.map(Math.round), [117, 184]);
+  assert.deepEqual(terminal.worldPosition.map(Math.round), [122, 176]);
 });
 
 test("Circuit Lab rotated bounds and clamping keep equipment inside the bench", () => {
@@ -224,8 +232,8 @@ test("Circuit Lab rotated bounds and clamping keep equipment inside the bench", 
     props: { scale: 1 }
   };
   const bounds = componentBounds(component, definition);
-  assert.equal(Math.round(bounds.width), 28);
-  assert.equal(Math.round(bounds.height), 52);
+  assert.equal(Math.round(bounds.width), 32);
+  assert.equal(Math.round(bounds.height), 72);
 
   const position = clampComponentPosition(component, definition, [4, 4], 1, 90);
   const clampedBounds = componentBounds({ ...component, position }, definition);
@@ -238,7 +246,7 @@ test("Circuit Lab capacitor has two physical legs without an internal short", ()
   project = addComponent(project, "capacitor-electrolytic-470uf", { id: "cap" });
   const definition = catalog.getComponent("capacitor-electrolytic-470uf");
   assert.deepEqual(definition.terminals.map((terminal) => terminal.id), ["pos", "neg"]);
-  assert.deepEqual(definition.terminals.map((terminal) => terminal.position), [[0, 12], [0, 17.08]]);
+  assert.deepEqual(definition.terminals.map((terminal) => terminal.position), [[-1.27, 10], [1.27, 10]]);
   assert.equal(definition.internalBuses.length, 0);
 
   const linked = findConnectedTerminals(project, { componentId: "cap", terminalId: "pos" });
@@ -248,7 +256,7 @@ test("Circuit Lab capacitor has two physical legs without an internal short", ()
 test("Circuit Lab inserts capacitor legs into matching breadboard rail holes", () => {
   let project = createCircuitLabProject();
   project = addComponent(project, "capacitor-electrolytic-470uf", { id: "cap" });
-  project = updateComponent(project, "cap", { position: [487.78, 417.05] });
+  project = updateComponent(project, "cap", { position: [470, 388.57] });
 
   const insertion = insertComponentIntoNearestTerminals(project, "cap");
   const insertedPairs = insertion.project.connections
@@ -257,13 +265,13 @@ test("Circuit Lab inserts capacitor legs into matching breadboard rail holes", (
 
   assert.equal(insertion.insertedCount, 2);
   assert.deepEqual(insertedPairs.sort(), [
-    "breadboard:bn20|cap:neg",
-    "breadboard:bp20|cap:pos"
+    "breadboard:r15a|cap:pos",
+    "breadboard:r16a|cap:neg"
   ]);
   assert.equal(findConnectedTerminals(insertion.project, { componentId: "cap", terminalId: "pos" })
-    .some((terminal) => terminal.endpoint.componentId === "breadboard" && terminal.endpoint.terminalId === "bp20"), true);
+    .some((terminal) => terminal.endpoint.componentId === "breadboard" && terminal.endpoint.terminalId === "r15a"), true);
   assert.equal(findConnectedTerminals(insertion.project, { componentId: "cap", terminalId: "pos" })
-    .some((terminal) => terminal.endpoint.componentId === "breadboard" && terminal.endpoint.terminalId === "bn20"), false);
+    .some((terminal) => terminal.endpoint.componentId === "breadboard" && terminal.endpoint.terminalId === "r16a"), false);
 });
 
 test("Circuit Lab keeps HC-SR04 wire-connected even when its header is near breadboard holes", () => {
@@ -284,10 +292,10 @@ test("Circuit Lab keeps HC-SR04 wire-connected even when its header is near brea
   assert.equal(insertion.project.connections.some((connection) => connection.kind === "direct-insertion"), false);
 });
 
-test("Circuit Lab rematches or detaches direct insertions after transform changes", () => {
+test("Circuit Lab rematches or preserves direct insertions after transform changes", () => {
   let project = createCircuitLabProject();
   project = addComponent(project, "capacitor-electrolytic-470uf", { id: "cap" });
-  project = updateComponent(project, "cap", { position: [487.78, 417.05] });
+  project = updateComponent(project, "cap", { position: [470, 388.57] });
   const inserted = insertComponentIntoNearestTerminals(project, "cap").project;
 
   const rematched = rematchDirectInsertionConnections(inserted, "cap");
@@ -297,11 +305,11 @@ test("Circuit Lab rematches or detaches direct insertions after transform change
   const scaled = updateComponent(inserted, "cap", { props: { scale: 1.2 } });
   const broken = rematchDirectInsertionConnections(scaled, "cap");
   assert.equal(broken.rematched, false);
-  assert.equal(broken.detachedCount, 2);
-  assert.equal(broken.project.connections.some((connection) => connection.kind === "direct-insertion"), false);
+  assert.equal(broken.detachedCount, 0);
+  assert.equal(broken.project.connections.filter((connection) => connection.kind === "direct-insertion").length, 2);
 });
 
-test("Circuit Lab insertion refuses reversed polarized rail holes", () => {
+test("Circuit Lab mechanical insertion does not use electrical polarity as a mating gate", () => {
   const capacitor = catalog.getComponent("capacitor-electrolytic-470uf");
   const breadboard = catalog.getComponent("breadboard-400");
   const capPos = capacitor.terminals.find((terminal) => terminal.id === "pos");
@@ -313,8 +321,8 @@ test("Circuit Lab insertion refuses reversed polarized rail holes", () => {
   assert.equal(terminalInsertionRole(capNeg), "negative");
   assert.equal(terminalsCanInsert(capPos, positiveRail), true);
   assert.equal(terminalsCanInsert(capNeg, groundRail), true);
-  assert.equal(terminalsCanInsert(capPos, groundRail), false);
-  assert.equal(terminalsCanInsert(capNeg, positiveRail), false);
+  assert.equal(terminalsCanInsert(capPos, groundRail), true);
+  assert.equal(terminalsCanInsert(capNeg, positiveRail), true);
 });
 
 test("Circuit Lab normalizes component resize scale to supported bounds", () => {

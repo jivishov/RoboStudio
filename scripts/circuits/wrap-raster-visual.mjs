@@ -5,6 +5,7 @@ import {
   readPngInfo,
   stripPngMetadata
 } from "./png-assets.mjs";
+import { getAssetRegistration, registeredRasterFrame } from "../../src/circuits/assetRegistrations.js";
 
 const args = process.argv.slice(2);
 const componentFlagIndex = args.indexOf("--component-id");
@@ -64,9 +65,20 @@ if (hasForbiddenEmbeddedData(encoded)) {
 
 const width = Number(widthMm);
 const height = Number(heightMm);
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${round(width)} ${round(height)}" width="${round(width)}mm" height="${round(height)}mm" data-component-id="${escapeXml(wrapperComponentId)}" data-asset-kind="photorealistic-svg-wrapper" data-raster-source="${escapeXml(path.basename(resolved))}">
+const registration = getAssetRegistration(wrapperComponentId) ?? {
+  id: `${wrapperComponentId}-asset-registration-draft`,
+  rasterCrop: { units: "normalized", x: 0, y: 0, width: 1, height: 1 },
+  uniformScale: 1,
+  translationMm: [0, 0],
+  orientationDeg: 0
+};
+const frame = registeredRasterFrame(registration, info.width, info.height, width, height);
+const rotation = frame.orientationDeg
+  ? ` transform="rotate(${round(frame.orientationDeg)} ${round(width / 2)} ${round(height / 2)})"`
+  : "";
+const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${round(width)} ${round(height)}" width="${round(width)}mm" height="${round(height)}mm" data-component-id="${escapeXml(wrapperComponentId)}" data-asset-kind="photorealistic-svg-wrapper" data-raster-source="${escapeXml(path.basename(resolved))}" data-registration-id="${escapeXml(registration.id)}" data-mm-per-pixel="${round(frame.mmPerPixel)}">
   <title>${escapeXml(wrapperComponentId)} RoboStudio raster wrapper</title>
-  <image href="data:image/png;base64,${encoded}" x="0" y="0" width="${round(width)}" height="${round(height)}" preserveAspectRatio="xMidYMid meet"/>
+  <image href="data:image/png;base64,${encoded}" x="${round(frame.x)}" y="${round(frame.y)}" width="${round(frame.width)}" height="${round(frame.height)}" preserveAspectRatio="none"${rotation}/>
 </svg>
 `;
 
