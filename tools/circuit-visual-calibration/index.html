@@ -9,26 +9,45 @@
     <main id="calibration-app">
       <section class="panel">
         <h1>Circuit Visual Calibration</h1>
+        <p class="lede">Catalog geometry is read-only. Registration controls affect artwork only.</p>
         <label>
-          Source PNG/SVG
+          Built-in component
+          <select id="component-id"></select>
+        </label>
+        <label>
+          Optional artwork override
           <input id="asset-input" type="file" accept="image/png,image/svg+xml" />
         </label>
-        <label>
-          Physical width (mm)
-          <input id="width-mm" type="number" min="0.1" step="0.01" value="40" />
-        </label>
-        <label>
-          Physical height (mm)
-          <input id="height-mm" type="number" min="0.1" step="0.01" value="24" />
-        </label>
-        <button id="export-manifest" type="button">Export Manifest Fragment</button>
+        <div class="summary" id="component-summary"></div>
+        <fieldset>
+          <legend>Constrained AssetRegistrationV1</legend>
+          <div class="control-grid">
+            <label>Crop X <input id="crop-x" type="number" min="0" max="1" step="0.001" /></label>
+            <label>Crop Y <input id="crop-y" type="number" min="0" max="1" step="0.001" /></label>
+            <label>Crop width <input id="crop-width" type="number" min="0.001" max="1" step="0.001" /></label>
+            <label>Crop height <input id="crop-height" type="number" min="0.001" max="1" step="0.001" /></label>
+            <label>Uniform scale <input id="uniform-scale" type="number" min="0.01" step="0.001" /></label>
+            <label>Translate X (mm) <input id="translate-x" type="number" step="0.01" /></label>
+            <label>Translate Y (mm) <input id="translate-y" type="number" step="0.01" /></label>
+            <label>Artwork orientation
+              <select id="artwork-orientation"><option>0</option><option>90</option><option>180</option><option>270</option></select>
+            </label>
+          </div>
+        </fieldset>
+        <div class="control-grid">
+          <label>Component rotation
+            <select id="component-rotation"><option>0</option><option>90</option><option>180</option><option>270</option></select>
+          </label>
+          <label>Inspection detail
+            <select id="inspection-zoom"><option value="2">2 px/mm</option><option value="4">4 px/mm</option><option value="8" selected>8 px/mm</option></select>
+          </label>
+        </div>
+        <button id="export-manifest" type="button">Export Registration Fragment</button>
         <pre id="manifest-output"></pre>
       </section>
       <section class="stage">
-        <svg id="preview" viewBox="-20 -12 40 24" role="img" aria-label="Circuit asset calibration preview">
-          <rect x="-20" y="-12" width="40" height="24" fill="#f8fafc" stroke="#94a3b8" />
-          <text x="0" y="0" text-anchor="middle">Load PNG/SVG</text>
-        </svg>
+        <div class="stage-toolbar"><span>Blue: physical body</span><span>Amber: visual bounds</span><span>Teal: port housing</span><span>Red: immutable contact center</span></div>
+        <div class="preview-scroll"><svg id="preview" viewBox="-20 -12 40 24" role="img" aria-label="Circuit asset calibration preview"></svg></div>
       </section>
     </main>
     <script type="module" src="./main.js"></script>

@@ -1,0 +1,188 @@
+/* Shared collapsible shell-card anatomy.
+ *
+ * `src/shellCards.js` has always been shared; its CSS was not. The five pages
+ * carried five copies of the same card anatomy with drifted rule counts, from
+ * 9 rules in Electronics Studio to 30 in Component Builder. Circuit Lab carried
+ * two copies of its own: a dark original and a light override block appended
+ * later, so reading either one told you the wrong thing about the rendered
+ * page.
+ *
+ * The structure is now declared once here. Everything the five pages genuinely
+ * disagreed about is a --shell-card-* custom property, so each page keeps its
+ * exact rendered result by declaring hook values in its own `:root`, and the
+ * disagreements are visible as a short list of overrides instead of five
+ * near-identical blocks.
+ *
+ * Defaults are the light workbench form used by Assembly Studio and Component
+ * Builder. Every hook default was chosen to reproduce a real page rather than
+ * to be tidy: `medium none currentcolor` and `all 0s ease 0s` are the initial
+ * values of `border` and `transition`, and are spelled out so a page that draws
+ * no pill border or runs no transition computes exactly what it did before.
+ *
+ * Container chrome - the `.collapsible-card` / `.shell-card` box itself - stays
+ * with each page. It is entangled with page-specific card families
+ * (`.tree-card`, `.circuit-section`, `.electronics-section`,
+ * `.parts-panel-section`) that own their own margins, borders and surfaces, and
+ * pulling it in here would have meant hooks for values that are not actually
+ * shared.
+ */
+
+.collapsible-card__toggle,
+.shell-card__toggle {
+  display: var(--shell-card-toggle-display, grid);
+  grid-template-columns: var(--shell-card-toggle-columns, minmax(0, 1fr) 14px 22px);
+  align-items: center;
+  justify-content: var(--shell-card-toggle-justify, normal);
+  gap: var(--shell-card-toggle-gap, 7px);
+  width: 100%;
+  min-height: var(--shell-card-toggle-min-height, 32px);
+  padding:
+    0 var(--shell-card-toggle-padding-end, 5px)
+    0 var(--shell-card-toggle-padding-start, 12px);
+  border: 0;
+  border-bottom: 1px solid var(--shell-card-toggle-line, rgb(211 217 227 / 76%));
+  border-radius: 0;
+  background: var(
+    --shell-card-toggle-background,
+    linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%))
+  );
+  color: var(--shell-card-toggle-color, inherit);
+  text-align: left;
+}
+
+/* Electronics Studio never dropped this border when a card collapsed, so the
+   hook lets it keep its line while the other four fade theirs out. */
+.collapsible-card.is-collapsed > .collapsible-card__toggle,
+.collapsible-card.is-collapsed > .shell-card__toggle,
+.collapsible-card.is-collapsed > .shell-card__header {
+  border-bottom-color: var(--shell-card-toggle-collapsed-line, transparent);
+}
+
+/* Pages without a hover treatment fall through to their resting background, so
+   this rule is inert for them. It must stay above the header override below:
+   the two selectors tie on specificity and source order decides. */
+.collapsible-card__toggle:hover,
+.shell-card__toggle:hover {
+  background: var(
+    --shell-card-toggle-hover-background,
+    var(
+      --shell-card-toggle-background,
+      linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%))
+    )
+  );
+}
+
+.shell-card__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 32px;
+  border-bottom: 1px solid var(--shell-card-toggle-line, rgb(211 217 227 / 76%));
+  background: var(
+    --shell-card-toggle-background,
+    linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%))
+  );
+}
+
+.shell-card__header .shell-card__toggle {
+  grid-template-columns: minmax(0, 1fr) 14px;
+  min-height: 32px;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.collapsible-card__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.collapsible-card__title {
+  flex: var(--shell-card-title-flex, 1 1 auto);
+  min-width: var(--shell-card-title-min-width, 0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--shell-card-title-size, 0.76rem);
+  font-weight: var(--shell-card-title-weight, 800);
+  line-height: var(--shell-card-title-line-height, normal);
+  text-transform: var(--shell-card-title-transform, none);
+}
+
+.collapsible-card__meta {
+  flex: var(--shell-card-meta-flex, 0 1 auto);
+  max-width: var(--shell-card-meta-max-width, 116px);
+  overflow: var(--shell-card-meta-overflow, hidden);
+  padding: var(--shell-card-meta-padding, 0);
+  border: var(--shell-card-meta-border, medium none currentcolor);
+  border-radius: var(--shell-card-meta-radius, 0);
+  background: var(--shell-card-meta-background, transparent);
+  color: var(--shell-card-meta-color, inherit);
+  text-overflow: var(--shell-card-meta-text-overflow, ellipsis);
+  white-space: var(--shell-card-meta-white-space, nowrap);
+  font-size: var(--shell-card-meta-size, 0.66rem);
+  font-weight: var(--shell-card-meta-weight, 600);
+  line-height: var(--shell-card-meta-line-height, normal);
+}
+
+.collapsible-card__chevron {
+  width: var(--shell-card-chevron-size, 8px);
+  height: var(--shell-card-chevron-size, 8px);
+  border-top: var(--shell-card-chevron-idle-border, medium none currentcolor);
+  border-right: 2px solid var(--shell-card-chevron-color, #657183);
+  border-bottom: 2px solid var(--shell-card-chevron-color, #657183);
+  border-left: var(--shell-card-chevron-idle-border, medium none currentcolor);
+  transform: var(--shell-card-chevron-transform, rotate(45deg) translateY(-2px));
+  transform-origin: center;
+  transition: var(--shell-card-chevron-transition, transform 180ms ease);
+}
+
+.collapsible-card.is-collapsed .collapsible-card__chevron {
+  transform: var(--shell-card-chevron-collapsed-transform, rotate(-45deg));
+}
+
+/* Circuit Lab and Electronics Studio render no dots, so these rules never
+   match there. */
+.collapsible-card__dots {
+  justify-self: center;
+  width: 17px;
+  height: 22px;
+  border-radius: 4px;
+  background-image: radial-gradient(circle, #728093 1.05px, transparent 1.15px);
+  background-position: center;
+  background-size: 5px 5px;
+  opacity: var(--shell-card-dots-opacity, 0.58);
+}
+
+.collapsible-card__toggle:hover .collapsible-card__dots,
+.shell-card__toggle:hover .collapsible-card__dots {
+  opacity: var(--shell-card-dots-hover-opacity, var(--shell-card-dots-opacity, 0.58));
+}
+
+/* Two collapse mechanisms survive on purpose. Assembly Studio, Component
+   Builder and Robotics Workbench animate a 1fr-to-0fr grid row; Circuit Lab and
+   Electronics Studio hard-toggle display. Unifying them would change how three
+   or two pages animate, which is a visual change. */
+.collapsible-card__content {
+  display: var(--shell-card-content-display, grid);
+  grid-template-rows: var(--shell-card-content-rows, 1fr);
+  transition: var(--shell-card-content-transition, grid-template-rows 180ms ease);
+}
+
+.collapsible-card.is-collapsed .collapsible-card__content {
+  display: var(--shell-card-content-collapsed-display, var(--shell-card-content-display, grid));
+  grid-template-rows: var(--shell-card-content-collapsed-rows, 0fr);
+}
+
+.collapsible-card__inner {
+  display: grid;
+  gap: var(--shell-card-inner-gap, 8px);
+  min-height: 0;
+  overflow: var(--shell-card-inner-overflow, hidden);
+  padding: var(--shell-card-inner-padding, 10px);
+}
+
+.collapsible-card.is-collapsed .collapsible-card__inner {
+  padding-bottom: var(--shell-card-inner-collapsed-padding-bottom, 0);
+}

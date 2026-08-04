@@ -7,10 +7,14 @@ import {
   asPositiveNumber,
   cloneJson,
   createDefaultTransform,
+  isFiniteNumber as finite,
+  isPositiveNumber as positive,
   sanitizePartId,
   uniquePartId
 } from "./contracts.js";
+import { createIssue as issue } from "./issues.js";
 import { normalizeProfile } from "./sketch.js";
+import { revolveSegmentsForRadius } from "./tessellation.js";
 
 const { booleans, extrusions, primitives, transforms } = jscad;
 const { intersect, subtract, union } = booleans;
@@ -20,6 +24,7 @@ const { transform } = transforms;
 
 const TAU = Math.PI * 2;
 const MIN_REVOLVE_SEGMENTS = 16;
+export const FULL_REVOLVE_ANGLE_DEG = 360;
 const REVOLVE_ORIENTATION_MATRIX = [
   1, 0, 0, 0,
   0, 0, 1, 0,
@@ -110,18 +115,6 @@ const REVOLVE_PRESET_DATA = Object.freeze({
     ]
   }
 });
-
-function issue(code, message, path, severity = "error") {
-  return { code, message, path, severity };
-}
-
-function finite(value) {
-  return Number.isFinite(Number(value));
-}
-
-function positive(value) {
-  return finite(value) && Number(value) > 0;
-}
 
 function normalizedProfileCopy(profile, index, existingIds, idPrefix) {
   const fallbackId = `${idPrefix}_${index + 1}`;
@@ -281,20 +274,37 @@ export function listRevolvePresets() {
   }));
 }
 
+export function maxRevolveRadiusMm(profilePoints = []) {
+  const radii = profilePoints.map((point) => Number(point?.[0])).filter(Number.isFinite);
+  return radii.length ? Math.max(...radii) : 0;
+}
+
+/** Clamps a revolve angle into `(0, 360]`; a missing angle is a full revolution. */
+export function normalizeRevolveAngleDeg(value) {
+  const angle = Number(value);
+  if (!Number.isFinite(angle) || angle <= 0) return FULL_REVOLVE_ANGLE_DEG;
+  return Math.min(FULL_REVOLVE_ANGLE_DEG, angle);
+}
+
 export function normalizeRevolveFeature(value = {}) {
   const presetId = REVOLVE_PRESET_DATA[value.presetId] ? value.presetId : "spacer";
   const preset = REVOLVE_PRESET_DATA[presetId];
   const sourcePoints = Array.isArray(value.profilePoints) && value.profilePoints.length
     ? value.profilePoints
     : preset.points;
+  const profilePoints = sourcePoints.map((point) => [
+    Math.max(0, asFiniteNumber(point?.[0], 0)),
+    asFiniteNumber(point?.[1], 0)
+  ]);
+  // A stored segment count is respected; an absent one is derived from the widest
+  // radius in the profile so a 3 mm shaft and a 40 mm wheel are equally round.
+  const defaultSegments = revolveSegmentsForRadius(maxRevolveRadiusMm(profilePoints));
 
   return {
     presetId,
-    profilePoints: sourcePoints.map((point) => [
-      Math.max(0, asFiniteNumber(point?.[0], 0)),
-      asFiniteNumber(point?.[1], 0)
-    ]),
-    segments: Math.max(MIN_REVOLVE_SEGMENTS, Math.floor(asPositiveNumber(value.segments, 64, 3)))
+    profilePoints,
+    segments: Math.max(MIN_REVOLVE_SEGMENTS, Math.floor(asPositiveNumber(value.segments, defaultSegments, 3))),
+    angleDeg: normalizeRevolveAngleDeg(value.angleDeg)
   };
 }
 
@@ -309,7 +319,8 @@ export function createRevolveBodyFromPreset(presetId, options = {}, existingIds 
   const revolve = normalizeRevolveFeature({
     presetId: REVOLVE_PRESET_DATA[presetId] ? presetId : "spacer",
     profilePoints: options.profilePoints ?? preset.points,
-    segments: options.segments
+    segments: options.segments,
+    angleDeg: options.angleDeg
   });
 
   return {
@@ -344,6 +355,15 @@ export function validateRevolveFeature(revolve, path = "revolve") {
   if (!positive(revolve?.segments) || Number(revolve.segments) < MIN_REVOLVE_SEGMENTS) {
     issues.push(issue("invalid-revolve-segments", `Revolve segments must be at least ${MIN_REVOLVE_SEGMENTS}.`, `${path}.segments`));
   }
+  // Structural, not advisory: a zero or negative sweep has no solid to compile, and an
+  // angle over a full turn would silently wrap. Both belong in the compile gate.
+  if (revolve?.angleDeg !== undefined && (!positive(revolve.angleDeg) || Number(revolve.angleDeg) > FULL_REVOLVE_ANGLE_DEG)) {
+    issues.push(issue(
+      "invalid-revolve-angle",
+      `Revolve angle must be greater than 0 and at most ${FULL_REVOLVE_ANGLE_DEG} degrees.`,
+      `${path}.angleDeg`
+    ));
+  }
 
   return issues;
 }
@@ -351,8 +371,12 @@ export function validateRevolveFeature(revolve, path = "revolve") {
 export function compileRevolveBodyToSolid(body) {
   const revolve = normalizeRevolveFeature(body.revolve);
   const profile2d = polygon({ points: revolve.profilePoints });
+  // `segments` stays the count for a whole revolution: extrudeRotate scales it down
+  // to the requested angle itself, so a half revolve keeps the same facet width and
+  // a partial one is capped into a closed solid.
+  const angle = (revolve.angleDeg / FULL_REVOLVE_ANGLE_DEG) * TAU;
   return transform(
     REVOLVE_ORIENTATION_MATRIX,
-    extrudeRotate({ segments: revolve.segments, angle: TAU }, profile2d)
+    extrudeRotate({ segments: revolve.segments, angle: Math.min(TAU, angle) }, profile2d)
   );
 }

@@ -15,7 +15,7 @@ body {
 
 #calibration-app {
   display: grid;
-  grid-template-columns: 320px minmax(560px, 1fr);
+  grid-template-columns: 370px minmax(560px, 1fr);
   min-height: 100vh;
 }
 
@@ -29,9 +29,11 @@ body {
 }
 
 h1 {
-  margin: 0 0 4px;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 1.1rem;
 }
+
+.lede { margin: -4px 0 2px; color: #526176; font-size: 0.78rem; }
 
 label {
   display: grid;
@@ -41,6 +43,7 @@ label {
 }
 
 input,
+select,
 button {
   min-height: 34px;
   border: 1px solid #c4cedc;
@@ -49,6 +52,16 @@ button {
   color: #141922;
   font: inherit;
 }
+
+fieldset { margin: 0; padding: 10px; border: 1px solid #cbd3df; border-radius: 5px; }
+legend { padding: 0 5px; font-size: 0.76rem; font-weight: 750; }
+.control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.summary { display: grid; gap: 3px; padding: 10px; border: 1px solid #cbd3df; background: #fff; font-size: 0.76rem; }
+.summary span { display: block; }
+.accuracy { width: fit-content; padding: 2px 5px; border: 1px solid currentColor; border-radius: 2px; font-weight: 800; text-transform: uppercase; }
+.accuracy--exact-model-verified { color: #0f766e; }
+.accuracy--representative-nominal { color: #9a6700; }
+.accuracy--approximate { color: #b42318; background: #fff1f0; }
 
 button {
   background: #1268e8;
@@ -71,15 +84,18 @@ pre {
 
 .stage {
   display: grid;
-  place-items: center;
+  grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   padding: 24px;
 }
 
+.stage-toolbar { display: flex; flex-wrap: wrap; gap: 14px; padding: 7px 10px; color: #526176; font-size: 0.76rem; }
+.preview-scroll { display: grid; place-items: center; width: 100%; height: 100%; overflow: auto; padding: 20px; }
+
 svg {
-  width: min(90vw, 980px);
-  height: min(82vh, 720px);
+  max-width: none;
+  max-height: none;
   border: 1px solid #cbd3df;
   background:
     linear-gradient(90deg, rgb(203 213 225 / 40%) 1px, transparent 1px),
@@ -87,3 +103,19 @@ svg {
     #ffffff;
   background-size: 24px 24px;
 }
+
+.calibration-artwork { opacity: 0.72; }
+.body-bound, .visual-bound, .clamp-bound, .port-bound { fill: none; vector-effect: non-scaling-stroke; }
+.body-bound { stroke: #1268e8; stroke-width: 1.1; }
+.visual-bound { stroke: #b7791f; stroke-width: 1; stroke-dasharray: 4 2; }
+.clamp-bound { stroke: #6b7280; stroke-width: 0.7; stroke-dasharray: 1.5 1.5; }
+.port-bound { fill: rgb(15 118 110 / 10%); stroke: #0f766e; stroke-width: 1.2; }
+.terminal-center { fill: #fff; stroke: #c01623; stroke-width: 1.15; vector-effect: non-scaling-stroke; }
+.terminal-crosshair { stroke: #c01623; stroke-width: 0.65; vector-effect: non-scaling-stroke; }
+.terminal-label, .port-label { paint-order: stroke; stroke: #fff; stroke-width: 2.2px; stroke-linejoin: round; font: 1.15px "Cascadia Mono", monospace; }
+.terminal-label, .port-label { text-anchor: start; }
+.port-label { fill: #075e54; font-weight: 800; }
+.is-landmark .terminal-center { fill: #ffe4e6; stroke-width: 1.8; }
+.contact-index { margin-top: 4px; color: #526176; }
+.contact-index summary { cursor: pointer; font-weight: 700; }
+.contact-index code { display: block; max-height: 84px; overflow: auto; margin-top: 5px; color: #141922; font-size: 0.7rem; line-height: 1.45; }

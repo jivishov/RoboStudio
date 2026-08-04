@@ -1,4 +1,16 @@
 import { listPartTemplates } from "../parts/templates.js";
+import { HOLE_FACES, HOLE_PROCESSES, HOLE_STANDARDS, HOLE_STYLES } from "../parts/holes.js";
+import { CLEARANCE_FITS, FASTENER_SIZES } from "../parts/standards/fasteners.js";
+import {
+  ADVANCED_CAD_AXES,
+  ADVANCED_CAD_EDGE_FACES,
+  ADVANCED_CAD_EDGE_SELECTOR_KINDS,
+  ADVANCED_CAD_MODES,
+  ADVANCED_CAD_OPERATION_TYPES,
+  ADVANCED_CAD_THREAD_KINDS,
+  ADVANCED_CAD_THREAD_SERIES,
+  ADVANCED_CAD_THREAD_SIZES
+} from "../parts/advancedCadRecipe.js";
 import { catalog as circuitLabCatalog, starterTemplates as circuitLabStarterTemplates } from "../circuits/catalog.js";
 import { MAX_COMPONENT_SCALE, MIN_COMPONENT_SCALE } from "../circuits/geometry.js";
 import { catalog as electronicsCatalog } from "../electronics/catalog.js";
@@ -320,25 +332,44 @@ const electronicsComponentIds = Object.freeze(electronicsCatalog.listComponents(
 const revolvePresetIds = Object.freeze(["shaft", "pulley", "bushing", "wheel", "collar", "knob", "spacer"]);
 const booleanOperations = Object.freeze(["union", "subtract", "intersect"]);
 const sketchProfileTypes = Object.freeze(["rectangle", "circle", "roundedSlot", "polyline"]);
-const advancedCadOperationTypes = Object.freeze([
-  "box",
-  "cylinder",
-  "hole",
-  "slot",
-  "fillet",
-  "chamfer",
-  "shell",
-  "boolean",
-  "pattern",
-  "transform",
-  "label"
-]);
-const advancedCadModes = Object.freeze(["add", "subtract", "intersect"]);
-const advancedCadAxes = Object.freeze(["x", "y", "z"]);
+// Sourced from the modules that own them, so the schema cannot drift from the
+// fastener table or from `holes.js` the way a hand-copied enum would.
+const holeStandards = HOLE_STANDARDS;
+const holeStyles = HOLE_STYLES;
+const holeProcesses = HOLE_PROCESSES;
+const holeFaces = HOLE_FACES;
+const fastenerSizes = FASTENER_SIZES;
+const clearanceFits = CLEARANCE_FITS;
+// ⚠ These were three hand-copied literals until cycle 10. `ADVANCED_CAD_OPERATION_TYPES`
+// existed in `advancedCadRecipe.js` for validation and again here for the assistant's
+// schema, maintained separately - two lists that must agree, which is a list that will
+// eventually not agree. It cost nothing only because the list had never changed. Cycle
+// 10 changes it twice (adding `thread`, un-reserving `label`), so the copy is gone and
+// the schema now reads the module that owns the types.
+const advancedCadOperationTypes = ADVANCED_CAD_OPERATION_TYPES;
+const advancedCadModes = ADVANCED_CAD_MODES;
+const advancedCadAxes = ADVANCED_CAD_AXES;
 const hexColorSchema = stringSchema("Optional body color as a six-digit hex value.", {
   maxLength: 7,
   pattern: "^#[0-9a-fA-F]{6}$"
 });
+/**
+ * A fastener-standards hole on a cut profile.
+ *
+ * The enums are deliberately not exhaustive validation: `src/parts/holes.js`
+ * refuses any combination the fastener table does not hold and reports why, so the
+ * schema only has to stop the assistant inventing field names. A size the table
+ * lacks is a refusal with a reason, never an interpolated hole.
+ */
+const holeSchema = objectSchema({
+  standard: stringSchema("Hole standard. Only ISO metric is published.", { enum: holeStandards }),
+  size: stringSchema("Fastener size, such as M3.", { enum: fastenerSizes }),
+  fit: stringSchema("Clearance fit for the through pilot.", { enum: clearanceFits }),
+  style: stringSchema("Hole style.", { enum: holeStyles }),
+  process: stringSchema("Counterbore process; selects the printed or machined diameter.", { enum: holeProcesses }),
+  fromFace: stringSchema("Which face a counterbore, countersink, nut trap, or insert bore is cut from.", { enum: holeFaces }),
+  lockSize: booleanSchema("Whether the hole keeps its standard diameter through a resize. Defaults to true.")
+}, ["size"]);
 const customSketchProfileSchema = objectSchema({
   id: stringSchema("Optional stable profile id.", { maxLength: 80 }),
   type: stringSchema("Supported V1 profile type.", { enum: sketchProfileTypes }),
@@ -350,6 +381,7 @@ const customSketchProfileSchema = objectSchema({
   height: numberSchema("Optional rectangle height in millimeters.", { minimum: 0.1 }),
   cornerRadius: numberSchema("Optional rectangle corner radius in millimeters.", { minimum: 0 }),
   closed: booleanSchema("For polyline profiles, whether the polyline is closed."),
+  hole: holeSchema,
   points: {
     type: "array",
     description: "Polyline points as [x, z] pairs.",
@@ -404,7 +436,18 @@ const advancedCadOperationSchema = objectSchema({
     maxItems: 3,
     items: { type: "number", minimum: 1 }
   },
-  spacing: vector3Schema("Optional pattern spacing in millimeters.")
+  spacing: vector3Schema("Optional pattern spacing in millimeters."),
+  threadSize: stringSchema("For a thread operation, the ISO metric size such as M8.", { enum: ADVANCED_CAD_THREAD_SIZES }),
+  series: stringSchema("For a thread operation, the ISO 261 pitch series.", { enum: ADVANCED_CAD_THREAD_SERIES }),
+  threadKind: stringSchema("For a thread operation, whether it is external material or an internal void.", { enum: ADVANCED_CAD_THREAD_KINDS }),
+  toleranceClass: stringSchema("For a thread operation, the ISO 965-1 tolerance position letter such as g or H.", { maxLength: 2 }),
+  edgeSelector: objectSchema({
+    kind: stringSchema("Which edges a fillet or chamfer is aimed at.", { enum: ADVANCED_CAD_EDGE_SELECTOR_KINDS }),
+    axis: stringSchema("For an axis selector, the axis the edges run along.", { enum: ADVANCED_CAD_AXES }),
+    face: stringSchema("For a face selector, which face's edges to take.", { enum: ADVANCED_CAD_EDGE_FACES }),
+    minLengthMm: numberSchema("Optional shortest edge to include, in millimeters.", { minimum: 0.001 }),
+    maxLengthMm: numberSchema("Optional longest edge to include, in millimeters.", { minimum: 0.001 })
+  }, ["kind"])
 }, ["type"]);
 const advancedCadRecipeSchema = objectSchema({
   version: numberSchema("Advanced CAD recipe version. Use 1.", { minimum: 1, maximum: 1 }),
@@ -545,11 +588,13 @@ const partsActions = [
   defineAction(
     ASSISTANT_PAGES.PARTS,
     "parts_set_body_properties",
-    "Edit the selected or provided body name, color, extrusion depth, position, and scale.",
+    "Edit the selected or provided body name, color, material, manufacturing process, extrusion depth, position, and scale.",
     objectSchema({
       bodyId: stringSchema("Optional body id to edit.", { maxLength: 120 }),
       name: stringSchema("Optional body name.", { maxLength: 120 }),
       color: hexColorSchema,
+      materialId: stringSchema("Optional material id from the material catalog, such as pla or petg.", { maxLength: 40 }),
+      processId: stringSchema("Optional manufacturing process id the manufacturability rules judge this body against: fdm, laser, or cnc.", { maxLength: 40 }),
       extrudeDepthMm: numberSchema("Optional sketch extrusion depth in millimeters.", { minimum: 0.1 }),
       position: vector3Schema("Optional body position in millimeters."),
       scale: vector3Schema("Optional body scale; values must be positive.")
@@ -582,6 +627,8 @@ const partsActions = [
       width: numberSchema("Optional profile width in millimeters.", { minimum: 0.1 }),
       height: numberSchema("Optional profile height in millimeters.", { minimum: 0.1 }),
       cornerRadius: numberSchema("Optional rectangle corner radius in millimeters.", { minimum: 0 }),
+      hole: holeSchema,
+      clearHole: booleanSchema("Remove any fastener standard from this cut profile, returning it to a free radius."),
       points: {
         type: "array",
         description: "Optional replacement polyline points as [x, z] pairs.",
@@ -592,10 +639,13 @@ const partsActions = [
   defineAction(
     ASSISTANT_PAGES.PARTS,
     "parts_add_cut_profile",
-    "Add a circular or slotted cut profile to the selected or provided sketch body.",
+    "Add a circular or slotted cut profile to the selected or provided sketch body. A circular cut may carry a fastener standard, in which case its diameter comes from the standards table rather than from a typed radius.",
     objectSchema({
       bodyId: stringSchema("Optional body id.", { maxLength: 120 }),
-      type: stringSchema("Cut profile type.", { enum: ["circle", "slot"] })
+      type: stringSchema("Cut profile type.", { enum: ["circle", "slot"] }),
+      x: numberSchema("Optional cut center X in millimeters; defaults to the outer profile center."),
+      z: numberSchema("Optional cut center Z in millimeters; defaults to the outer profile center."),
+      hole: holeSchema
     }, ["type"])
   ),
   defineAction(ASSISTANT_PAGES.PARTS, "parts_remove_cut_profile", "Remove a cut profile from the selected or provided sketch body.", objectSchema({

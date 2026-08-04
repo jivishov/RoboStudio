@@ -1,21 +1,29 @@
 :root {
-  --parts-bg: #edf1f6;
-  --parts-panel: #f7f8fa;
-  --parts-panel-strong: #ffffff;
-  --parts-line: #d4d9e2;
-  --parts-line-strong: #aeb6c3;
-  --parts-text: #141922;
-  --parts-muted: #5c6675;
-  --parts-soft: #7d8795;
-  --parts-blue: #1268e8;
-  --parts-blue-deep: #0d54c7;
+  --parts-bg: var(--rs-surface);
+  --parts-panel: var(--rs-panel);
+  --parts-panel-strong: var(--rs-panel-strong);
+  --parts-line: var(--rs-line);
+  --parts-line-strong: var(--rs-line-strong);
+  --parts-text: var(--rs-text);
+  --parts-muted: var(--rs-muted);
+  --parts-soft: var(--rs-soft);
+  --parts-blue: var(--rs-blue);
+  --parts-blue-deep: var(--rs-blue-deep);
   --parts-blue-soft: #dceaff;
-  --parts-green: #0f9f6e;
-  --parts-amber: #f59e0b;
-  --parts-red: #b42318;
-  --parts-dark: #0b1016;
-  --parts-dark-soft: #151b23;
-  --parts-shadow: 0 18px 42px rgb(20 28 40 / 11%);
+  --parts-green: var(--rs-green);
+  --parts-amber: var(--rs-amber);
+  --parts-red: var(--rs-red);
+  --parts-dark: var(--rs-dark);
+  --parts-dark-soft: var(--rs-dark-soft);
+  /* 9%, not the shared 10%. Deliberate deviation, left as a literal. */
+  --parts-shadow: 0 10px 28px rgb(15 23 42 / 9%);
+  --parts-value-font: var(--rs-value-font);
+
+  /* src/shellCards.css hooks. Component Builder matches the shared defaults
+     apart from these two colours. */
+  --shell-card-toggle-color: var(--parts-text);
+  --shell-card-meta-color: var(--parts-muted);
+
   color: var(--parts-text);
   background: var(--parts-bg);
   font-family:
@@ -197,6 +205,84 @@ ul {
   opacity: 0.55;
 }
 
+/*
+ * The export menu. Four formats plus STEP would be five more buttons in an
+ * already crowded command bar, so they share one popover. Every format is always
+ * listed: an unavailable one is dimmed and states its reason, rather than
+ * disappearing or sitting there permanently greyed with no explanation.
+ */
+.parts-export {
+  position: relative;
+  display: inline-flex;
+}
+
+.parts-export__panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  min-width: 268px;
+  max-width: 340px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid #3a4350;
+  border-radius: 8px;
+  background: #0e141c;
+  box-shadow: 0 18px 38px rgb(4 8 14 / 46%);
+}
+
+.parts-export__panel[hidden] {
+  display: none;
+}
+
+.parts-export__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #f5f7fb;
+  font: inherit;
+  text-align: left;
+}
+
+.parts-export__item:not(:disabled) {
+  cursor: pointer;
+}
+
+.parts-export__item:hover:not(:disabled),
+.parts-export__item:focus-visible {
+  border-color: #4f8df7;
+  background: #17202b;
+}
+
+.parts-export__item:disabled {
+  cursor: not-allowed;
+  color: #9aa6b5;
+}
+
+.parts-export__label {
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.parts-export__reason {
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #9aa6b5;
+  white-space: normal;
+}
+
+.parts-export__item:disabled .parts-export__reason {
+  color: #c08a72;
+}
+
 .parts-link-button {
   margin-left: auto;
   border-color: #4f8df7;
@@ -333,7 +419,8 @@ output {
   accent-color: #1778ff;
 }
 
-.parts-resize-section {
+.parts-resize-section,
+.parts-inspector-subsection {
   display: grid;
   gap: 9px;
   padding: 10px;
@@ -342,7 +429,8 @@ output {
   background: #ffffff;
 }
 
-.parts-resize-section__title {
+.parts-resize-section__title,
+.parts-inspector-subsection__title {
   display: grid;
   gap: 5px;
 }
@@ -358,14 +446,19 @@ output {
   min-width: max-content;
 }
 
-.parts-resize-section__title span {
+.parts-resize-section__title span,
+.parts-inspector-subsection__title span {
   color: #202936;
   font-size: 0.78rem;
   font-weight: 850;
 }
 
 .parts-resize-section__title small,
-.parts-resize-note {
+.parts-inspector-subsection__title small,
+.parts-hardware-note,
+.parts-resize-note,
+.parts-compensation__note,
+.parts-bom__note {
   margin: 0;
   color: var(--parts-muted);
   font-size: 0.7rem;
@@ -762,6 +855,157 @@ output {
   grid-template-columns: 1fr;
 }
 
+/*
+ * A manufacturability finding is a report and never a gate, so an advisory one
+ * must not be dressed in the same red as a validation error. `info` gets its own
+ * neutral treatment; `warning` reuses the note styling; only a finding this page
+ * calls impossible - a laser-unsafe material, a pocket on a process with no
+ * pockets - keeps the red.
+ */
+.validation-list .validation-info {
+  grid-template-columns: 78px minmax(0, 1fr);
+  border-color: #cfdbe9;
+  background: #f5f9ff;
+  color: #24405f;
+}
+
+.validation-list .validation-info .validation-code {
+  color: #3c5a80;
+}
+
+/*
+ * The Documents lists.
+ *
+ * Their own class rather than `.validation-list`, and deliberately: a shared class is a
+ * shared locator, and cycle 09 broke a browser spec by giving a new paragraph an existing
+ * class that a `.first()` selector had been unambiguous about. Styling is shared through
+ * the rule list below; the hook is not.
+ *
+ * A BOM row is not a finding, so it does not wear the validation red. The only row that
+ * borrows `.validation-note` is one whose number is absent, which is the one place the
+ * reader does need to look twice.
+ */
+.parts-bom__list {
+  display: grid;
+  gap: 5px;
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.parts-bom__list li {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--parts-border, #d9e0ea);
+  border-radius: 5px;
+  background: var(--parts-surface, #fbfcfe);
+  color: var(--parts-text, #24303f);
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.parts-bom__list .validation-ok {
+  grid-template-columns: 1fr;
+  border-color: #bfe3d5;
+  background: #f1fbf7;
+  color: #0f5138;
+  font-weight: 750;
+}
+
+.parts-bom__list .validation-note {
+  border-color: #ecd1d1;
+  background: #fff7f7;
+  color: #53221f;
+}
+
+/*
+ * The drawing sheet frame.
+ *
+ * The sheet is an A3 SVG with a fixed 420 x 297 viewBox, so it scales to whatever width
+ * the inspector gives it and keeps its aspect ratio. Text sizes are in sheet millimetres
+ * for the same reason: a legend that grew with the panel would stop being to scale.
+ */
+.parts-sheet-frame {
+  overflow: auto;
+  border: 1px solid var(--rs-line, #cbd3df);
+  border-radius: 5px;
+  background: var(--rs-panel-strong, #ffffff);
+}
+
+.parts-sheet {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.parts-sheet .sheet-label {
+  font-size: 3.4px;
+  font-weight: 750;
+  fill: var(--rs-text, #141922);
+}
+
+.parts-sheet .sheet-note {
+  font-size: 3px;
+  fill: var(--rs-muted, #4f5b6b);
+}
+
+.parts-process-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: #3d4859;
+}
+
+.parts-process-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+  The drawn figure and the as-made figure, as a two-row pair.
+
+  Laid out as label-and-value rows rather than as one line with an arrow between them,
+  because an arrow invites a reader to treat the second number as a correction to the
+  first. They are two facts about the same feature and each carries its own label.
+*/
+.parts-compensation {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 2px;
+}
+
+.parts-compensation__pair {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: #3d4859;
+}
+
+.parts-compensation__label {
+  min-width: 0;
+}
+
+.parts-compensation output {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #1f2937;
+  white-space: nowrap;
+}
+
+/* The as-made figure is the one that differs from the drawing, so it is the one that
+   reads as a measurement rather than as a restatement. */
+#compensation-as-made {
+  color: #8a4b1f;
+}
+
 .validation-code {
   color: #8a2a22;
   font-weight: 850;
@@ -882,6 +1126,20 @@ output {
   white-space: nowrap;
 }
 
+/*
+ * The standards-hole note is the only place a refusal reason surfaces in the
+ * inspector, so a refusal has to read differently from a resolved diameter. It
+ * borrows `.validation-code`'s red rather than introducing a third warning colour.
+ */
+.hole-note {
+  padding-top: 6px;
+  border-top: 1px solid #e6eaf1;
+}
+
+.hole-note--refused {
+  color: #8a2a22;
+}
+
 .part-status {
   position: fixed;
   left: 50%;
@@ -989,19 +1247,6 @@ a:focus-visible {
 }
 
 /* CSS-only technical UI refinement: Component Builder */
-:root {
-  --parts-panel: #f4f6f9;
-  --parts-panel-strong: #ffffff;
-  --parts-line: #cbd3df;
-  --parts-line-strong: #aab5c4;
-  --parts-muted: #4f5b6b;
-  --parts-blue: #1268e8;
-  --parts-green: #0c7c59;
-  --parts-amber: #b7791f;
-  --parts-red: #b42318;
-  --parts-shadow: 0 10px 28px rgb(15 23 42 / 9%);
-  --parts-value-font: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
-}
 
 body,
 input,
@@ -1186,6 +1431,7 @@ output {
 
 .body-row__depth,
 .parts-resize-note,
+.parts-compensation__note,
 .parts-checkbox-row {
   color: var(--parts-muted);
 }
@@ -1253,6 +1499,7 @@ output {
 .parts-field-grid,
 .parts-checkbox-row,
 .parts-resize-note,
+.parts-compensation__note,
 .library-cloud__status,
 .validation-list,
 .body-row,
@@ -1274,7 +1521,8 @@ output,
 .library-row__name,
 .library-row__meta,
 .validation-code,
-.parts-resize-section__title small {
+.parts-resize-section__title small,
+.parts-inspector-subsection__title small {
   font-weight: 500;
 }
 
@@ -1291,6 +1539,7 @@ output,
 h1,
 h2,
 .parts-resize-section__title span,
+.parts-inspector-subsection__title span,
 .sketch-card__title {
   font-weight: 800;
 }
@@ -1437,122 +1686,8 @@ h2,
   margin-top: 0;
 }
 
-.collapsible-card__toggle,
-.shell-card__toggle {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 14px 22px;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 32px;
-  padding: 0 5px 0 12px;
-  border: 0;
-  border-bottom: 1px solid rgb(211 217 227 / 76%);
-  border-radius: 0;
-  background: linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%));
-  color: var(--parts-text);
-  text-align: left;
-}
-
-.shell-card__header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  min-height: 32px;
-  border-bottom: 1px solid rgb(211 217 227 / 76%);
-  background: linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%));
-}
-
-.shell-card__header .shell-card__toggle {
-  grid-template-columns: minmax(0, 1fr) 14px;
-  min-height: 32px;
-  border-bottom: 0;
-  background: transparent;
-}
-
 .shell-card__header .inspector-actions {
   padding-right: 6px;
-}
-
-.collapsible-card.is-collapsed > .collapsible-card__toggle,
-.collapsible-card.is-collapsed > .shell-card__toggle,
-.collapsible-card.is-collapsed > .shell-card__header {
-  border-bottom-color: transparent;
-}
-
-.collapsible-card__label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.collapsible-card__title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.76rem;
-  font-weight: 800;
-}
-
-.collapsible-card__meta {
-  flex: 0 1 auto;
-  max-width: 116px;
-  overflow: hidden;
-  color: var(--parts-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.66rem;
-  font-weight: 600;
-}
-
-.collapsible-card__chevron {
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid #657183;
-  border-bottom: 2px solid #657183;
-  transform: rotate(45deg) translateY(-2px);
-  transform-origin: center;
-  transition: transform 180ms ease;
-}
-
-.collapsible-card.is-collapsed .collapsible-card__chevron {
-  transform: rotate(-45deg);
-}
-
-.collapsible-card__dots {
-  justify-self: center;
-  width: 17px;
-  height: 22px;
-  border-radius: 4px;
-  background-image: radial-gradient(circle, #728093 1.05px, transparent 1.15px);
-  background-position: center;
-  background-size: 5px 5px;
-  opacity: 0.58;
-}
-
-.collapsible-card__content {
-  display: grid;
-  grid-template-rows: 1fr;
-  transition: grid-template-rows 180ms ease;
-}
-
-.collapsible-card.is-collapsed .collapsible-card__content {
-  grid-template-rows: 0fr;
-}
-
-.collapsible-card__inner {
-  display: grid;
-  gap: 8px;
-  min-height: 0;
-  overflow: hidden;
-  padding: 10px;
-}
-
-.collapsible-card.is-collapsed .collapsible-card__inner {
-  padding-bottom: 0;
 }
 
 .parts-sidebar,
@@ -1598,6 +1733,7 @@ h2,
 
 #body-properties > .parts-field:first-child,
 #body-properties > .parts-resize-section,
+#body-properties > .parts-inspector-subsection,
 #body-properties > .parts-field-grid,
 #body-properties > .advanced-summary,
 #body-properties > .empty-note {
@@ -1630,5 +1766,65 @@ h2,
 
   .page-link {
     width: 100%;
+  }
+}
+
+/* Screen-reader-only label. Matches the implementation in styles.css so the
+   two pages stay consistent until a shared stylesheet lands. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Touch targets. The Playwright matrix includes a 900x820 tablet project with
+   hasTouch, so the inspector and toolbar controls must be reachable by thumb. */
+@media (pointer: coarse) {
+  /* Component Builder only. Raising the shared default would grow the card
+     headers on the other four pages under the tablet Playwright project. */
+  :root {
+    --shell-card-toggle-min-height: 44px;
+  }
+
+  .parts-button,
+  .parts-primary-button,
+  .parts-icon-button,
+  .page-link,
+  .body-row {
+    min-height: 44px;
+  }
+
+  .parts-icon-button {
+    min-width: 44px;
+  }
+}
+
+/* The toolbar becomes a single-column grid below 640px, so the export menu and its
+   popover have to fill the column rather than sit at their natural width. */
+@media (max-width: 640px) {
+  .parts-export {
+    width: 100%;
+  }
+
+  .parts-export__panel {
+    right: auto;
+    left: 0;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

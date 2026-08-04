@@ -1,3 +1,5 @@
+import "./tokens.css";
+import "./shellCards.css";
 import "./circuits.css";
 import "./shellHeader.css";
 import { mountPageAssistant } from "./assistant/chatUi.js";
@@ -103,6 +105,7 @@ import {
 } from "./circuits/transactions.js";
 import { normalizeMechatronicsBinding, parseMechatronicsBindingJson, serializeMechatronicsBinding } from "./mechatronics/model.js";
 import { previewMechatronicsBindingSuggestions } from "./mechatronics/suggestions.js";
+import { createStatusChannel } from "./statusChannel.js";
 
 installMaterialSymbolsFallback(document);
 
@@ -368,14 +371,22 @@ function refreshDerived() {
   }
 }
 
-function showStatus(message, timeoutMs = 3600) {
-  statusEl.textContent = message;
-  if (!timeoutMs) return;
-  window.clearTimeout(showStatus.timeoutId);
-  showStatus.timeoutId = window.setTimeout(() => {
+// Circuit Lab already owns #circuit-live-region for interaction announcements,
+// so the status channel here does not announce; routing both through one region
+// would double-announce every commit and every block.
+const statusChannel = createStatusChannel({
+  element: statusEl,
+  defaultTimeoutMs: 3600,
+  announce: false,
+  cancelPendingOnPersistentMessage: false,
+  onIdle: () => {
     const summary = projectSummary(currentProject());
     statusEl.textContent = `${summary.name} / ${summary.componentCount} components / ${summary.connectionCount} wires`;
-  }, timeoutMs);
+  }
+});
+
+function showStatus(message, timeoutMs = 3600) {
+  statusChannel.show(message, timeoutMs);
 }
 
 function announceInteraction(message) {

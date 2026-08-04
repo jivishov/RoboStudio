@@ -10,11 +10,13 @@ import {
   CURRENT_CIRCUIT_LAB_PROJECT_KEY,
   CURRENT_DESIGN_KEY,
   CURRENT_MECHATRONICS_BINDING_KEY,
+  CURRENT_PART_PROJECT_KEY,
   CURRENT_SNAPSHOT_KEY,
   deleteWorkspaceValue,
   DESIGN_STORE_NAME,
   openWorkspaceDb,
   PART_LIBRARY_STORE_NAME,
+  PART_PROJECT_STORE_NAME,
   readAllWorkspaceValues,
   readWorkspaceValue,
   SNAPSHOT_STORE_NAME,
@@ -259,14 +261,81 @@ test("workspace opener creates all required stores for a fresh DB", async () => 
     CIRCUIT_DESIGN_STORE_NAME,
     DESIGN_STORE_NAME,
     PART_LIBRARY_STORE_NAME,
+    PART_PROJECT_STORE_NAME,
     SNAPSHOT_STORE_NAME
   ].sort());
   assert.equal(db.objectStoreNames.contains(SNAPSHOT_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(DESIGN_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(PART_LIBRARY_STORE_NAME), true);
   assert.equal(db.objectStoreNames.contains(CIRCUIT_DESIGN_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(PART_PROJECT_STORE_NAME), true);
   assert.equal(indexedDb.deleteCount, 0);
   db.close();
+});
+
+test("workspace DB version is 5", () => {
+  assert.equal(WORKSPACE_DB_VERSION, 5);
+});
+
+test("a version-4 DB upgrades to 5 with part-projects added and every prior entry readable", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const snapshot = { savedAt: "2026-07-27T09:00:00.000Z", glb: "binary", parts: [{ id: "base" }] };
+  const design = { version: 1, name: "Version four design" };
+  const circuitDesign = { version: 1, units: "mm", name: "Version four circuit" };
+  const circuitLabProject = { kind: "CircuitLabProject", version: 1, units: "mm", name: "Version four lab" };
+  const binding = { kind: "MechatronicsBinding", version: 1, actuatorBindings: [] };
+  const firstLibraryItem = { version: 1, id: "saved_base", name: "Saved base" };
+  const secondLibraryItem = { version: 1, id: "saved_link", name: "Saved link" };
+  indexedDb.seed(WORKSPACE_DB_NAME, 4, {
+    [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, snapshot]],
+    [DESIGN_STORE_NAME]: [[CURRENT_DESIGN_KEY, design]],
+    [PART_LIBRARY_STORE_NAME]: [
+      [firstLibraryItem.id, firstLibraryItem],
+      [secondLibraryItem.id, secondLibraryItem]
+    ],
+    [CIRCUIT_DESIGN_STORE_NAME]: [
+      [CURRENT_CIRCUIT_DESIGN_KEY, circuitDesign],
+      [CURRENT_CIRCUIT_LAB_PROJECT_KEY, circuitLabProject],
+      [CURRENT_MECHATRONICS_BINDING_KEY, binding]
+    ]
+  });
+
+  const db = await openWorkspaceDb({ indexedDb });
+
+  assert.equal(db.objectStoreNames.contains(PART_PROJECT_STORE_NAME), true);
+  // An upgrade must never take the destructive repair path, which is what would lose data.
+  assert.equal(indexedDb.deleteCount, 0);
+  assert.equal(indexedDb.records.get(WORKSPACE_DB_NAME).version, 5);
+  db.close();
+
+  assert.deepEqual(await readWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, { indexedDb }), snapshot);
+  assert.deepEqual(await readWorkspaceValue(DESIGN_STORE_NAME, CURRENT_DESIGN_KEY, { indexedDb }), design);
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_CIRCUIT_DESIGN_KEY, { indexedDb }), circuitDesign);
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_CIRCUIT_LAB_PROJECT_KEY, { indexedDb }), circuitLabProject);
+  assert.deepEqual(await readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_MECHATRONICS_BINDING_KEY, { indexedDb }), binding);
+  assert.deepEqual(await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, { indexedDb }), [firstLibraryItem, secondLibraryItem]);
+  assert.equal(await readWorkspaceValue(PART_PROJECT_STORE_NAME, CURRENT_PART_PROJECT_KEY, { indexedDb }), null);
+});
+
+test("workspace repair recreates part-projects and preserves a saved part project", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const savedProject = { version: 1, units: "mm", bodies: [], selectedBodyId: null, updatedAt: "2026-07-27T10:00:00.000Z" };
+  // A version-5 DB missing circuit-designs is malformed and must be repaired, not upgraded.
+  indexedDb.seed(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION, {
+    [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, { savedAt: "now" }]],
+    [PART_PROJECT_STORE_NAME]: [[CURRENT_PART_PROJECT_KEY, savedProject]]
+  });
+
+  const db = await openWorkspaceDb({ indexedDb });
+
+  assert.equal(db.objectStoreNames.contains(PART_PROJECT_STORE_NAME), true);
+  assert.equal(db.objectStoreNames.contains(CIRCUIT_DESIGN_STORE_NAME), true);
+  assert.equal(indexedDb.deleteCount, 1);
+  db.close();
+  assert.deepEqual(
+    await readWorkspaceValue(PART_PROJECT_STORE_NAME, CURRENT_PART_PROJECT_KEY, { indexedDb }),
+    savedProject
+  );
 });
 
 test("workspace opener upgrades a version-2 DB and preserves the current snapshot", async () => {
@@ -323,7 +392,8 @@ test("workspace opener leaves a valid current DB intact", async () => {
     [SNAPSHOT_STORE_NAME]: [[CURRENT_SNAPSHOT_KEY, { savedAt: "now" }]],
     [DESIGN_STORE_NAME]: [[CURRENT_DESIGN_KEY, design]],
     [PART_LIBRARY_STORE_NAME]: [[libraryItem.id, libraryItem]],
-    [CIRCUIT_DESIGN_STORE_NAME]: [[CURRENT_CIRCUIT_DESIGN_KEY, circuitDesign]]
+    [CIRCUIT_DESIGN_STORE_NAME]: [[CURRENT_CIRCUIT_DESIGN_KEY, circuitDesign]],
+    [PART_PROJECT_STORE_NAME]: []
   });
 
   const db = await openWorkspaceDb({ indexedDb });
@@ -376,6 +446,58 @@ test("WorkspaceStore wraps current workspace and part library operations", async
 
   await store.deletePartLibraryItem(libraryItem.id);
   assert.deepEqual(await store.listPartLibraryItems(), []);
+});
+
+test("WorkspaceStore round trips the current part project and keeps it out of the package", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const store = createWorkspaceStore({ indexedDb });
+  const project = {
+    version: 1,
+    units: "mm",
+    bodies: [{ id: "base_plate", name: "Base plate", extrudeDepthMm: 4 }],
+    selectedBodyId: "base_plate",
+    updatedAt: "2026-07-27T11:00:00.000Z"
+  };
+
+  await store.writeCurrentPartProject(project);
+
+  const saved = await store.readCurrentPartProject();
+  assert.equal(saved.version, 1);
+  assert.equal(saved.units, "mm");
+  assert.equal(saved.bodies.length, 1);
+  assert.equal(saved.bodies[0].id, "base_plate");
+  assert.equal(saved.selectedBodyId, "base_plate");
+  assert.equal(saved.updatedAt, "2026-07-27T11:00:00.000Z");
+
+  const workspace = await store.readWorkspace();
+  assert.equal(Object.hasOwn(workspace, "currentPartProject"), false);
+
+  await store.deleteCurrentPartProject();
+  assert.equal(await store.readCurrentPartProject(), null);
+});
+
+test("WorkspaceStore strips history stacks and unknown fields from the saved part project", async () => {
+  const indexedDb = new FakeIndexedDB();
+  const store = createWorkspaceStore({ indexedDb });
+
+  await store.writeCurrentPartProject({
+    version: 1,
+    units: "mm",
+    bodies: [{ id: "plate", name: "Plate", futureField: "from a newer build" }],
+    selectedBodyId: "plate",
+    updatedAt: "2026-07-27T11:30:00.000Z",
+    undoStack: [{ bodies: [] }],
+    redoStack: [{ bodies: [] }],
+    history: { undoStack: [], redoStack: [] }
+  });
+
+  // Inspect the persisted record rather than trusting the writer.
+  const saved = await readWorkspaceValue(PART_PROJECT_STORE_NAME, CURRENT_PART_PROJECT_KEY, { indexedDb });
+  assert.deepEqual(Object.keys(saved).sort(), ["bodies", "selectedBodyId", "units", "updatedAt", "version"]);
+  const serialized = JSON.stringify(saved);
+  assert.equal(serialized.includes("undoStack"), false);
+  assert.equal(serialized.includes("redoStack"), false);
+  assert.equal(serialized.includes("futureField"), false);
 });
 
 test("WorkspaceStore keeps Circuit Lab custom components local-only", async () => {

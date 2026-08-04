@@ -5,20 +5,40 @@ import {
   SKETCH_EXTRUDE_KIND,
   SPUR_GEAR_KIND,
   asFiniteNumber,
+  asPositiveNumber,
   cloneJson,
   createDefaultTransform
 } from "./contracts.js";
+import { spurGearModuleForTipDiameterMm, spurGearTipDiameterMm } from "./gears.js";
+import { profileSizeIsLocked } from "./holes.js";
 import { profileCenter, profileSize } from "./sketch.js";
 
 const AXIS_COUNT = 3;
 const MIN_SIZE_MM = 0.001;
 const NON_UNIFORM_TOLERANCE = 0.001;
 
+/**
+ * A positive number, or `fallback`.
+ *
+ * Not a second implementation of `asPositiveNumber` - it is that function, bound to
+ * the two things this module needs and the shared defaults cannot carry. The fallback
+ * is `MIN_SIZE_MM` rather than 1, because a size that fails to resolve here is a
+ * degenerate dimension, not a unit one. And the threshold is passed as `0` rather than
+ * left at `Number.EPSILON`, so a legitimately sub-epsilon size is scaled rather than
+ * silently replaced.
+ */
 function positiveNumber(value, fallback = MIN_SIZE_MM) {
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : fallback;
+  return asPositiveNumber(value, fallback, 0);
 }
 
+/**
+ * Three positive numbers.
+ *
+ * Vector-shaped, so `contracts.js` has no equivalent - `normalizeVector` builds on
+ * `asFiniteNumber` and would admit a zero or negative axis, which here is a degenerate
+ * body rather than a resize. The per-axis coercion is `positiveNumber` above, and
+ * therefore `asPositiveNumber`.
+ */
 function positiveVector(value, fallback = [1, 1, 1]) {
   const source = Array.isArray(value) ? value : [];
   return Array.from({ length: AXIS_COUNT }, (_item, index) => positiveNumber(source[index], fallback[index] ?? 1));
@@ -26,10 +46,9 @@ function positiveVector(value, fallback = [1, 1, 1]) {
 
 function targetVector(value, currentSize) {
   const source = Array.isArray(value) ? value : [];
-  return Array.from({ length: AXIS_COUNT }, (_item, index) => {
-    const number = Number(source[index]);
-    return Number.isFinite(number) && number > 0 ? number : positiveNumber(currentSize[index], MIN_SIZE_MM);
-  });
+  return Array.from({ length: AXIS_COUNT }, (_item, index) =>
+    positiveNumber(source[index], positiveNumber(currentSize[index], MIN_SIZE_MM))
+  );
 }
 
 function transformPoint(value, center, scale) {
@@ -82,11 +101,32 @@ function scaleProfileDimensions(profile, scaleX, scaleZ) {
   return copy;
 }
 
+/**
+ * Whether this profile's own dimensions may be scaled.
+ *
+ * Landmine three lived one function down: `scaleProfileDimensions` multiplies a
+ * circle's radius by `sqrt(|scaleX * scaleZ|)`, which is right for a decorative
+ * circle and wrong for an M3 clearance hole. Doubling a plate does not make the
+ * screws thicker.
+ *
+ * There is deliberately **one** control and one override rather than two competing
+ * toggles. The inspector's "Keep hole sizes" checkbox is the body-wide default for
+ * cuts that have no opinion, and it arrives here as `options.scaleDimensions`. A
+ * profile carrying a locked `hole` has an opinion, and it wins in both directions:
+ * unchecking "Keep hole sizes" scales the decorative cuts and still leaves the
+ * standards holes at their standard diameter.
+ */
+function profileMayScaleDimensions(profile, options) {
+  if (profileSizeIsLocked(profile)) return false;
+  return options.scaleDimensions !== false;
+}
+
 function scaleProfileAround(profile, centerX, centerZ, scaleX, scaleZ, options = {}) {
-  const copy = scaleProfileDimensions(profile, options.scaleDimensions === false ? 1 : scaleX, options.scaleDimensions === false ? 1 : scaleZ);
+  const scaleDimensions = profileMayScaleDimensions(profile, options);
+  const copy = scaleProfileDimensions(profile, scaleDimensions ? scaleX : 1, scaleDimensions ? scaleZ : 1);
 
   if (copy.type === "polyline") {
-    if (options.scaleDimensions === false) {
+    if (!scaleDimensions) {
       const [currentX, currentZ] = profileCenterForResize(copy);
       return moveProfileCenter(copy, transformPoint(currentX, centerX, scaleX), transformPoint(currentZ, centerZ, scaleZ));
     }
@@ -123,9 +163,16 @@ function revolveProfileBounds(revolve) {
   };
 }
 
+/**
+ * Outside diameter of a gear, from `gears.js` rather than from a formula here.
+ *
+ * This was `(z + 2) m`, which is the tip diameter of an unshifted full-depth tooth
+ * and was correct only because nothing could shift the profile. A profile shift moves
+ * the tip, and a pointed tooth clamps it, so a second copy of the arithmetic in this
+ * file would have reported a size the compiled solid does not have.
+ */
 function gearOutsideDiameter(gear) {
-  const toothCount = Math.max(1, Math.round(positiveNumber(gear?.toothCount, 24)));
-  return (toothCount + 2) * positiveNumber(gear?.moduleMm, 2);
+  return positiveNumber(spurGearTipDiameterMm(gear), 0);
 }
 
 function advancedRecipeSourceSize(recipe) {
@@ -289,10 +336,15 @@ function resizeSpurGearBody(body, targetSizeMm, options = {}) {
   const currentEffectiveSize = effectiveSizeFromSource(next, currentSourceSize);
   const targetSize = targetVector(targetSizeMm, currentEffectiveSize);
   const targetSourceSize = targetSize.map((value, index) => value / scale[index]);
-  const toothCount = Math.max(1, Math.round(positiveNumber(next.gear?.toothCount, 24)));
   const radialTarget = (targetSourceSize[0] + targetSourceSize[2]) / 2;
 
-  next.gear.moduleMm = positiveNumber(radialTarget / (toothCount + 2), next.gear?.moduleMm ?? 2);
+  // Every radius in a gear profile is proportional to the module at a fixed tooth
+  // count, pressure angle and shift, so `gears.js` inverts the outside diameter
+  // exactly. This file states the target and nothing about tooth geometry.
+  next.gear.moduleMm = positiveNumber(
+    spurGearModuleForTipDiameterMm(next.gear, radialTarget),
+    next.gear?.moduleMm ?? 2
+  );
   next.gear.thicknessMm = positiveNumber(targetSourceSize[1], next.gear?.thicknessMm ?? next.extrudeDepthMm);
   next.extrudeDepthMm = next.gear.thicknessMm;
 

@@ -1,3 +1,4 @@
+import "./shellCards.css";
 import "./electronics.css";
 import "./shellHeader.css";
 import * as THREE from "three";
@@ -35,6 +36,7 @@ import {
 import { createFirmwareProjectZip, firmwareArchiveName, generateCircuitFirmware } from "./electronics/codegen.js";
 import { runDrc, suggestSafePin } from "./electronics/drc.js";
 import { endpointLabel, resolvePin } from "./electronics/pins.js";
+import { createStatusChannel } from "./statusChannel.js";
 
 const statusEl = document.querySelector("#electronics-status");
 const circuitNameInput = document.querySelector("#circuit-name");
@@ -100,14 +102,19 @@ const uiState = {
 let storageHydrationFinished = false;
 let userEditedBeforeStorageHydration = false;
 
-function showStatus(message, timeoutMs = 3600) {
-  statusEl.textContent = message;
-  if (!timeoutMs) return;
-  window.clearTimeout(showStatus.timeoutId);
-  showStatus.timeoutId = window.setTimeout(() => {
+const statusChannel = createStatusChannel({
+  element: statusEl,
+  defaultTimeoutMs: 3600,
+  cancelPendingOnPersistentMessage: false,
+  onIdle: () => {
     const summary = circuitSummary(currentDesign());
     statusEl.textContent = `${summary.name} / ${summary.componentCount} components / ${summary.netCount} nets`;
-  }, timeoutMs);
+  },
+  liveRegionId: "electronics-live-region"
+});
+
+function showStatus(message, timeoutMs = 3600) {
+  statusChannel.show(message, timeoutMs);
 }
 
 function currentDesign() {

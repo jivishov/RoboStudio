@@ -4,16 +4,19 @@ import {
   CURRENT_CIRCUIT_LAB_PROJECT_KEY,
   CURRENT_DESIGN_KEY,
   CURRENT_MECHATRONICS_BINDING_KEY,
+  CURRENT_PART_PROJECT_KEY,
   CURRENT_SNAPSHOT_KEY,
   deleteWorkspaceValue,
   DESIGN_STORE_NAME,
   PART_LIBRARY_STORE_NAME,
+  PART_PROJECT_STORE_NAME,
   readAllWorkspaceValues,
   readWorkspaceValue,
   SNAPSHOT_STORE_NAME,
   writeWorkspaceBatch,
   writeWorkspaceValue
 } from "./workspaceDb.js";
+import { normalizePartProject } from "./parts/projectState.js";
 import {
   CIRCUIT_LAB_KIND,
   CIRCUIT_LAB_UNITS,
@@ -118,6 +121,26 @@ export class WorkspaceStore {
     return deleteWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_MECHATRONICS_BINDING_KEY, this.options);
   }
 
+  readCurrentPartProject() {
+    return readWorkspaceValue(PART_PROJECT_STORE_NAME, CURRENT_PART_PROJECT_KEY, this.options);
+  }
+
+  // Normalizing on the way in is what keeps session-only UI state out of storage: the
+  // normalizer rebuilds the project from a fixed key set, so an undo/redo stack or any
+  // other extra field on the caller's object cannot reach IndexedDB (AGENTS.md:16).
+  writeCurrentPartProject(project) {
+    return writeWorkspaceValue(
+      PART_PROJECT_STORE_NAME,
+      CURRENT_PART_PROJECT_KEY,
+      normalizePartProject(project),
+      this.options
+    );
+  }
+
+  deleteCurrentPartProject() {
+    return deleteWorkspaceValue(PART_PROJECT_STORE_NAME, CURRENT_PART_PROJECT_KEY, this.options);
+  }
+
   listPartLibraryItems() {
     return readAllWorkspaceValues(PART_LIBRARY_STORE_NAME, this.options);
   }
@@ -131,6 +154,9 @@ export class WorkspaceStore {
     return deleteWorkspaceValue(PART_LIBRARY_STORE_NAME, itemId, this.options);
   }
 
+  // The Component Builder autosave record is deliberately absent here, as the Circuit Lab
+  // custom component library is: it is local working state, not part of the portable
+  // RoboStudioProject package. Export/import must not move it between devices.
   async readWorkspace() {
     const [
       currentAssemblySnapshot,

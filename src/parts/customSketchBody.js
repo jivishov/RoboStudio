@@ -8,13 +8,20 @@ import {
   sanitizePartId,
   uniquePartId
 } from "./contracts.js";
-import { CUT_PROFILE_TYPES, OUTER_PROFILE_TYPES } from "./sketch.js";
+import { createIssue as issue } from "./issues.js";
+import { resolveHole } from "./holes.js";
+import { CUT_PROFILE_TYPES, OUTER_PROFILE_TYPES, circleHoleFields } from "./sketch.js";
 import { validateBody } from "./validation.js";
 
-function issue(code, message, path, severity = "error") {
-  return { code, message, path, severity };
-}
-
+/**
+ * A number, the caller's default for an omitted field, or the original value untouched.
+ *
+ * Deliberately not `asFiniteNumber` (`contracts.js`), which substitutes the fallback for
+ * anything non-finite. This module builds a body that `validateBody` then judges, so a
+ * garbage `radius: "wide"` has to survive coercion in order to be *reported*. Replacing
+ * it with a plausible default here would hand the gate a valid body and lose the finding.
+ * `undefined` alone means "field omitted", and only that takes the fallback.
+ */
 function finiteOrDefault(value, fallback) {
   if (value === undefined) return fallback;
   const numeric = Number(value);
@@ -48,13 +55,30 @@ function normalizeCustomProfile(profile, options, issues) {
 
   const id = normalizeProfileId(profile, options.fallbackId, options.existingIds);
   if (type === "circle") {
-    return {
-      id,
-      type,
-      x: finiteOrDefault(profile.x, 0),
-      z: finiteOrDefault(profile.z, 0),
-      radius: finiteOrDefault(profile.radius, 10)
-    };
+    // `hole` is registered here as well as in `createCircleProfile`, because this is a
+    // second circle-profile whitelist: the assistant's custom-sketch path never goes
+    // through `sketch.js`, so an assistant asked for "a plate with M3 clearance holes"
+    // would otherwise get free radii and no indication that the standard was dropped.
+    // The standards rule itself lives in `circleHoleFields`, so only the radius
+    // default is local.
+    const { hole, radius } = circleHoleFields(profile, finiteOrDefault(profile.radius, 10));
+    const resolved = resolveHole(profile.hole);
+    if (resolved && !resolved.ok) {
+      // Refused loudly rather than persisted: the assistant sees the reason and can
+      // correct itself, where a stored refusal only resurfaces later as a warning.
+      issues.push(issue("unresolvable-hole-standard", resolved.reason, `${path}.hole`));
+    }
+    const circle = { id, type, x: finiteOrDefault(profile.x, 0), z: finiteOrDefault(profile.z, 0), radius };
+    if (hole) circle.hole = hole;
+    return circle;
+  }
+
+  if (profile.hole !== undefined) {
+    issues.push(issue(
+      "unsupported-hole-profile",
+      `A fastener standard can only be attached to a circular cut profile, not to a ${type}.`,
+      `${path}.hole`
+    ));
   }
 
   if (type === "roundedSlot") {

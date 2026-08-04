@@ -1,8 +1,57 @@
 :root {
-  color-scheme: dark;
+  --circuit-bg: var(--rs-surface);
+  --circuit-panel: var(--rs-panel);
+  --circuit-panel-strong: var(--rs-panel-strong);
+  --circuit-line: var(--rs-line);
+  --circuit-line-strong: var(--rs-line-strong);
+  --circuit-text: var(--rs-text);
+  --circuit-muted: var(--rs-muted);
+  --circuit-soft: var(--rs-soft);
+  --circuit-blue: var(--rs-blue);
+  --circuit-blue-dark: #075bd8;
+  --circuit-green: var(--rs-green);
+  --circuit-amber: var(--rs-amber);
+  --circuit-red: var(--rs-red);
+  --circuit-shadow: var(--rs-shadow);
+  --circuit-value-font: var(--rs-value-font);
+
+  /* src/shellCards.css hooks. */
+  --shell-card-toggle-columns: minmax(0, 1fr) 14px;
+  --shell-card-toggle-justify: space-between;
+  --shell-card-toggle-padding-end: 10px;
+  --shell-card-toggle-hover-background: #f3f7fc;
+  --shell-card-toggle-color: var(--circuit-text);
+  --shell-card-title-flex: 0 1 auto;
+  --shell-card-title-min-width: auto;
+  --shell-card-title-line-height: 1.2;
+  --shell-card-meta-flex: 0 0 auto;
+  --shell-card-meta-max-width: 118px;
+  --shell-card-meta-overflow: visible;
+  --shell-card-meta-padding: 2px 7px;
+  --shell-card-meta-border: 1px solid #d7dee9;
+  --shell-card-meta-radius: 999px;
+  --shell-card-meta-background: #ffffff;
+  --shell-card-meta-color: var(--circuit-muted);
+  --shell-card-meta-text-overflow: clip;
+  --shell-card-meta-white-space: normal;
+  --shell-card-meta-line-height: 1.2;
+  --shell-card-chevron-idle-border: medium none #657183;
+  --shell-card-chevron-transition: all 0s ease 0s;
+  /* Circuit Lab hard-toggles the card body instead of animating a grid row. */
+  --shell-card-content-display: block;
+  --shell-card-content-rows: none;
+  --shell-card-content-transition: all 0s ease 0s;
+  --shell-card-content-collapsed-display: none;
+  --shell-card-content-collapsed-rows: none;
+  --shell-card-inner-overflow: visible;
+  --shell-card-inner-collapsed-padding-bottom: 10px;
+
+  color-scheme: light;
+  color: var(--circuit-text);
+  background: var(--circuit-bg);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background: #101316;
-  color: #edf2f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 
 * {
@@ -128,78 +177,6 @@ html.circuit-material-symbols-fallback .material-symbols-rounded.app-icon--page:
   border-color: #22b8aa;
   background: #0f3937;
   color: #ecfeff;
-}
-
-.collapsible-card {
-  overflow: hidden;
-  border: 1px solid #303b43;
-  border-radius: 6px;
-  background: #171d21;
-  box-shadow: 0 16px 32px rgb(0 0 0 / 18%);
-}
-
-.collapsible-card__toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 42px;
-  padding: 0 12px;
-  border: 0;
-  border-bottom: 1px solid #2a353d;
-  background: #1a2227;
-  color: #f8fafc;
-  text-align: left;
-}
-
-.collapsible-card__label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.collapsible-card__title {
-  overflow: hidden;
-  font-size: 0.76rem;
-  font-weight: 760;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.collapsible-card__meta {
-  flex: 0 0 auto;
-  padding: 2px 6px;
-  border: 1px solid #3a4852;
-  border-radius: 4px;
-  color: #bfccd4;
-  font-size: 0.68rem;
-  font-weight: 720;
-  line-height: 1.2;
-}
-
-.collapsible-card__chevron {
-  width: 9px;
-  height: 9px;
-  border-right: 2px solid #8795a3;
-  border-bottom: 2px solid #8795a3;
-  transform: rotate(45deg);
-}
-
-.collapsible-card.is-collapsed .collapsible-card__chevron {
-  transform: rotate(-45deg);
-}
-
-.collapsible-card.is-collapsed .collapsible-card__content {
-  display: none;
-}
-
-.collapsible-card__inner {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
 }
 
 .circuit-field {
@@ -1716,28 +1693,6 @@ button:focus-visible {
 }
 
 /* Workbench theme alignment: match Component Builder and Robotics Workbench shells. */
-:root {
-  --circuit-bg: #edf1f6;
-  --circuit-panel: #f4f6f9;
-  --circuit-panel-strong: #ffffff;
-  --circuit-line: #cbd3df;
-  --circuit-line-strong: #aab5c4;
-  --circuit-text: #141922;
-  --circuit-muted: #4f5b6b;
-  --circuit-soft: #7d8795;
-  --circuit-blue: #1268e8;
-  --circuit-blue-dark: #075bd8;
-  --circuit-green: #0c7c59;
-  --circuit-amber: #b7791f;
-  --circuit-red: #b42318;
-  --circuit-shadow: 0 10px 28px rgb(15 23 42 / 10%);
-  --circuit-value-font: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
-  color-scheme: light;
-  color: var(--circuit-text);
-  background: var(--circuit-bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-}
 
 body {
   background: var(--circuit-bg);
@@ -1822,62 +1777,11 @@ strong {
 
 .collapsible-card,
 .shell-card {
-  border-color: var(--circuit-line);
+  overflow: hidden;
+  border: 1px solid var(--circuit-line);
   border-radius: 4px;
   background: var(--circuit-panel-strong);
   box-shadow: none;
-}
-
-.collapsible-card__toggle,
-.shell-card__toggle {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 14px;
-  align-items: center;
-  gap: 7px;
-  min-height: 32px;
-  padding: 0 10px 0 12px;
-  border-bottom-color: rgb(211 217 227 / 76%);
-  background: linear-gradient(180deg, rgb(255 255 255 / 88%), rgb(246 248 251 / 92%));
-  color: var(--circuit-text);
-}
-
-.collapsible-card.is-collapsed > .collapsible-card__toggle,
-.collapsible-card.is-collapsed > .shell-card__toggle {
-  border-bottom-color: transparent;
-}
-
-.collapsible-card__toggle:hover,
-.shell-card__toggle:hover {
-  background: #f3f7fc;
-}
-
-.collapsible-card__title {
-  font-size: 0.76rem;
-  font-weight: 800;
-  text-transform: none;
-}
-
-.collapsible-card__meta {
-  max-width: 118px;
-  padding: 2px 7px;
-  border-color: #d7dee9;
-  border-radius: 999px;
-  background: #ffffff;
-  color: var(--circuit-muted);
-  font-size: 0.66rem;
-  font-weight: 600;
-}
-
-.collapsible-card__chevron {
-  width: 8px;
-  height: 8px;
-  border-color: #657183;
-  transform: rotate(45deg) translateY(-2px);
-}
-
-.collapsible-card__inner {
-  gap: 8px;
-  padding: 10px;
 }
 
 .circuit-field {
@@ -1909,8 +1813,7 @@ strong {
 #circuit-source-file:focus,
 .circuit-json-editor:focus,
 button:focus-visible,
-a:focus-visible,
-.collapsible-card__toggle:focus-visible {
+a:focus-visible {
   outline: 2px solid rgb(18 104 232 / 72%);
   outline-offset: 2px;
 }
@@ -2074,6 +1977,12 @@ a:focus-visible,
   padding: 0;
   counter-reset: bringup-step;
   list-style: none;
+}
+
+/* This list doubles as a `.collapsible-card__inner`, so it has to outrank the
+   shared collapsed padding rule to keep its zero padding. */
+.collapsible-card.is-collapsed .collapsible-card__inner.bringup-list {
+  padding-bottom: 0;
 }
 
 .bringup-list li {

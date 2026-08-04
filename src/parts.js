@@ -1,3 +1,5 @@
+import "./tokens.css";
+import "./shellCards.css";
 import "./parts.css";
 import "./shellHeader.css";
 import { mountPageAssistant } from "./assistant/chatUi.js";
@@ -19,13 +21,49 @@ import {
 } from "./parts/advancedCadRecipe.js";
 import {
   BOOLEAN_OPERATIONS,
+  FULL_REVOLVE_ANGLE_DEG,
   createBooleanOperationBody,
   createCircularPatternProfiles,
   createLinearPatternProfiles,
   createRevolveBodyFromPreset,
   listRevolvePresets
 } from "./parts/featureOps.js";
-import { createSpurGearBody } from "./parts/gears.js";
+import {
+  MAX_ABS_HELIX_ANGLE_DEG,
+  MAX_ABS_PROFILE_SHIFT,
+  MAX_PRESSURE_ANGLE_DEG,
+  MAX_TOOTH_COUNT,
+  MIN_PRESSURE_ANGLE_DEG,
+  MIN_TOOTH_COUNT,
+  createSpurGearBody,
+  spurGearGeometry
+} from "./parts/gears.js";
+import { spurGearPairReport } from "./parts/gearPair.js";
+import { ABSENT_OUTPUT, formatOutput } from "./parts/format.js";
+import { ISO_53_PROFILE_ANGLE_DEG, listBasicRackProfiles } from "./parts/standards/gears.js";
+import {
+  applyCompileOutcome,
+  compileCacheErrors,
+  compileCacheResults,
+  compileCacheWarnings,
+  createCompileCache,
+  planBodyCompile,
+  pruneCompileCache
+} from "./parts/compileCache.js";
+import { bodyCompensationReport } from "./parts/cadCompile.js";
+import { CAD_COMPILE_URL, createCadBackendProbe, describeCadBackend } from "./parts/cadBackend.js";
+import { exactBodyCompileRequest, exactBodyUnavailableReason } from "./parts/backendPayload.js";
+import { scaleGeometryProperties } from "./parts/massProperties.js";
+import {
+  EXPORT_FORMATS,
+  EXPORT_FORMAT_3MF,
+  EXPORT_FORMAT_ASCII_STL,
+  EXPORT_FORMAT_STEP,
+  bodyExportAvailabilities,
+  bodyExportAvailability
+} from "./parts/exportFormats.js";
+import { NON_WATERTIGHT_CODE } from "./parts/watertight.js";
+import { getMaterial, listMaterials, massGramsForVolume } from "./parts/materials.js";
 import {
   addBody,
   commitProject,
@@ -41,6 +79,8 @@ import {
   updateBody
 } from "./parts/projectState.js";
 import { parsePartProjectJson, serializePartProject } from "./parts/serialization.js";
+import { createStatusChannel } from "./statusChannel.js";
+import { createHistoryShortcutHandler } from "./shortcuts.js";
 import {
   CUT_PROFILE_TYPES,
   OUTER_PROFILE_TYPES,
@@ -52,6 +92,7 @@ import {
   profileSize
 } from "./parts/sketch.js";
 import { createBodyFromTemplate, listPartTemplates } from "./parts/templates.js";
+import { appendHardwarePatternToSketch, getHardwareEntry, listHardwareEntries } from "./parts/hardware.js";
 import { createCustomSketchBodyFromArgs, replaceSketchBodyFromArgs } from "./parts/customSketchBody.js";
 import {
   addPartLibraryItemToProject,
@@ -77,19 +118,36 @@ import {
 } from "./parts/resize.js";
 import { SKETCH_MOUSE_RESIZE_MIN_MM, targetSizeFromSketchResize } from "./parts/sketchResize.js";
 import {
-  CURRENT_SNAPSHOT_KEY,
-  PART_LIBRARY_STORE_NAME,
-  SNAPSHOT_STORE_NAME,
-  deleteWorkspaceValue,
-  readAllWorkspaceValues,
-  writeWorkspaceValue
-} from "./workspaceDb.js";
+  HOLE_FACES,
+  HOLE_POCKET_STYLES,
+  HOLE_PROCESSES,
+  HOLE_STANDARDS,
+  HOLE_STYLES,
+  describeHole,
+  holeDerivedRadiusMm,
+  normalizeHoleSpec,
+  resolveHole
+} from "./parts/holes.js";
+import { CLEARANCE_FITS, FASTENER_SIZES } from "./parts/standards/fasteners.js";
+import { bodyProcessId, projectManufacturabilityIssues } from "./parts/dfm.js";
+import { describeMinimumLength, describePurchased, projectBom } from "./parts/bom.js";
+import { projectPrintPrep } from "./parts/printPrep.js";
+import { bodyDrawingSheet } from "./parts/drawings/sheet.js";
+import { describeProcess, getProcessProfile, listProcessProfiles, normalizeProcessId } from "./parts/process.js";
+import { createWorkspaceStore } from "./workspaceStore.js";
+import { createPartProjectAutosave } from "./parts/autosave.js";
 import { mountShellCardToggles } from "./shellCards.js";
+
+/** The size a hole starts at when a standard is first chosen for a profile. */
+const DEFAULT_HOLE_SIZE = "M3";
 
 const templateSelect = document.querySelector("#template-select");
 const addTemplateButton = document.querySelector("#add-template");
 const addLinearPatternButton = document.querySelector("#add-linear-pattern");
 const addCircularPatternButton = document.querySelector("#add-circular-pattern");
+const hardwareEntrySelect = document.querySelector("#hardware-entry-select");
+const applyHardwarePatternButton = document.querySelector("#apply-hardware-pattern");
+const hardwareEntryNote = document.querySelector("#hardware-entry-note");
 const revolvePresetSelect = document.querySelector("#revolve-preset-select");
 const addRevolveBodyButton = document.querySelector("#add-revolve-body");
 const addSpurGearButton = document.querySelector("#add-spur-gear");
@@ -111,18 +169,36 @@ const bodyProperties = document.querySelector("#body-properties");
 const outerProfileFields = document.querySelector("#outer-profile-fields");
 const cutProfileFields = document.querySelector("#cut-profile-fields");
 const sketchPreview = document.querySelector("#sketch-preview");
+const massProperties = document.querySelector("#mass-properties");
+const massSummary = document.querySelector("#mass-summary");
 const selectedBodySummary = document.querySelector("#selected-body-summary");
 const projectUpdatedAt = document.querySelector("#project-updated-at");
 const validationCount = document.querySelector("#validation-count");
 const validationList = document.querySelector("#validation-list");
+const dfmCount = document.querySelector("#dfm-count");
+const dfmList = document.querySelector("#dfm-list");
+const documentsSummary = document.querySelector("#documents-summary");
+const bomTotalMass = document.querySelector("#bom-total-mass");
+const bomPartsList = document.querySelector("#bom-parts-list");
+const bomPurchasedList = document.querySelector("#bom-purchased-list");
+const bomNote = document.querySelector("#bom-note");
+const printPrepSummary = document.querySelector("#print-prep-summary");
+const printPrepList = document.querySelector("#print-prep-list");
+const drawingSummary = document.querySelector("#drawing-summary");
+const drawingSheet = document.querySelector("#drawing-sheet");
+const processSelect = document.querySelector("#process-select");
+const compensationNominal = document.querySelector("#compensation-nominal");
+const compensationAsMade = document.querySelector("#compensation-as-made");
+const compensationNote = document.querySelector("#compensation-note");
 const newProjectButton = document.querySelector("#new-project");
 const saveProjectButton = document.querySelector("#save-project");
 const openProjectButton = document.querySelector("#open-project");
 const projectFileInput = document.querySelector("#project-file-input");
 const undoButton = document.querySelector("#undo-project");
 const redoButton = document.querySelector("#redo-project");
-const exportStlButton = document.querySelector("#export-stl");
-const exportStepButton = document.querySelector("#export-step");
+const exportMenu = document.querySelector("#export-menu");
+const exportMenuToggle = document.querySelector("#export-menu-toggle");
+const exportMenuPanel = document.querySelector("#export-menu-panel");
 const sendAssemblyButton = document.querySelector("#send-assembly");
 const duplicateBodyButton = document.querySelector("#duplicate-body");
 const deleteBodyButton = document.querySelector("#delete-body");
@@ -136,37 +212,242 @@ const compileList = document.querySelector("#compile-list");
 
 const CAD_COMPILE_TIMEOUT_MS = 15000;
 const history = createProjectHistory();
+const workspaceStore = createWorkspaceStore();
 let cadWorker = null;
 const previewScene = createPartPreviewScene(modelPreview);
 const SVG_NS = "http://www.w3.org/2000/svg";
-let statusTimer = null;
 let compileTimer = null;
 let compileTimeoutTimer = null;
 let workerRequestId = 0;
-let activeCompileRequestId = null;
-let pendingCompileSignature = null;
-let lastCompletedCompileSignature = null;
+// One request is in flight at a time. `activeCompileRequest` carries the body IDs it
+// covers and the signatures they were posted at, so its result can be folded into the
+// per-body cache and a superseded request can be abandoned without losing track of
+// which bodies still need building.
+let activeCompileRequest = null;
+const compileCache = createCompileCache();
 let compileResults = new Map();
 let compileErrors = [];
+let compileWarnings = [];
+// A worker-level failure belongs to no body, so it is held separately from the
+// per-body errors the cache owns.
+let compileWorkerError = null;
 let compiling = false;
+let cadWorkerMessageCount = 0;
+const compileRequestLog = [];
 let resizeUniform = true;
 let resizeKeepCutSizes = true;
+// Which gear the mesh check compares against. A pair is a derived report rather than
+// a persisted entity, so this is presentation state and never reaches the project.
+let gearPairPartnerId = null;
 let sketchResizeDrag = null;
-const pendingStlExports = new Map();
-const compileRequestSignatures = new Map();
+const pendingExports = new Map();
 let partLibraryItems = [];
 const authController = createAuthSessionController();
 let authState = authController.getState();
 let libraryCloudBusy = false;
 let lastSyncedUserId = null;
 
+const statusChannel = createStatusChannel({
+  element: statusElement,
+  defaultTimeoutMs: 2400,
+  reveal: true,
+  liveRegionId: "part-live-region"
+});
+
 function showStatus(message, timeout = 2400) {
-  clearTimeout(statusTimer);
-  statusElement.textContent = message;
-  statusElement.hidden = false;
-  statusTimer = setTimeout(() => {
-    statusElement.hidden = true;
-  }, timeout);
+  statusChannel.show(message, timeout);
+}
+
+// Persistence. `history` is session-only UI state; only `history.current` is ever written.
+let persistenceReady = false;
+let savedProjectGeneration = 0;
+let savedProjectUnreadable = false;
+
+const projectAutosave = createPartProjectAutosave({
+  serialize: (project) => serializePartProject(project),
+  // Every mutation, including a bare re-selection, re-timestamps the project. A new timestamp
+  // over identical geometry is not work worth a write, so it is excluded from the comparison.
+  fingerprint: (project) => serializePartProject({ ...project, updatedAt: "" }),
+  write: (serialized) => workspaceStore.writeCurrentPartProject(JSON.parse(serialized)),
+  onWritten: () => {
+    savedProjectGeneration += 1;
+  },
+  onError: (error) => {
+    console.error("Component Builder autosave failed", error);
+    showStatus("Project could not be saved to this browser. Save JSON to keep your work.", 6200);
+  }
+});
+
+function scheduleProjectAutosave() {
+  if (!persistenceReady) return;
+  projectAutosave.schedule(history.current);
+}
+
+function flushProjectAutosave() {
+  if (!persistenceReady) return Promise.resolve({ written: false, reason: "not-ready" });
+  return projectAutosave.flush();
+}
+
+async function restoreSavedProject() {
+  let savedRecord = null;
+  try {
+    savedRecord = await workspaceStore.readCurrentPartProject();
+  } catch (error) {
+    console.warn("Saved Component Builder project could not be read", error);
+    savedProjectUnreadable = true;
+    showStatus("Saved project storage is unavailable. Starting a new project.", 6200);
+    return false;
+  }
+  if (savedRecord == null) return false;
+
+  try {
+    // Restore through the shared parser so a project written by a build with extra fields
+    // loads here with those fields dropped rather than throwing (meta_plan landmine two).
+    const project = parsePartProjectJson(
+      typeof savedRecord === "string" ? savedRecord : JSON.stringify(savedRecord)
+    );
+    resetProjectHistory(history, project);
+    render();
+    projectAutosave.markSaved(history.current);
+    const count = history.current.bodies.length;
+    showStatus(`Restored saved project with ${count} bod${count === 1 ? "y" : "ies"}`);
+    return true;
+  } catch (error) {
+    // The unreadable record is deliberately left in place: it is the user's only copy of
+    // whatever was there, and autosave stays idle until they make a real edit.
+    console.warn("Saved Component Builder project could not be restored", error);
+    savedProjectUnreadable = true;
+    showStatus("Saved project could not be read and was left untouched. Starting a new project.", 6200);
+    return false;
+  }
+}
+
+async function bootstrapProjectPersistence() {
+  await restoreSavedProject();
+  persistenceReady = true;
+  installNavigationGuards();
+  return { savedProjectUnreadable };
+}
+
+function installNavigationGuards() {
+  // In-app page links can wait for the write, so they never need to interrupt the user.
+  for (const link of document.querySelectorAll(".shell-header__page-link")) {
+    link.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+      if (!projectAutosave.isDirty()) return;
+      event.preventDefault();
+      const href = link.href;
+      void flushProjectAutosave().finally(() => {
+        window.location.href = href;
+      });
+    });
+  }
+
+  // Reload and tab close cannot await a write, so an unflushed project has to prompt.
+  window.addEventListener("beforeunload", (event) => {
+    if (!projectAutosave.isDirty()) return;
+    void flushProjectAutosave();
+    event.preventDefault();
+    event.returnValue = "";
+  });
+
+  // Backgrounding the tab is the last reliable point to persist without a prompt.
+  window.addEventListener("pagehide", () => {
+    void flushProjectAutosave();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void flushProjectAutosave();
+  });
+}
+
+function installPersistenceInstrumentation() {
+  window.__partsPersistence = Object.freeze({
+    ready: () => persistenceReady,
+    generation: () => savedProjectGeneration,
+    dirty: () => projectAutosave.isDirty(),
+    stats: () => projectAutosave.stats(),
+    flush: () => flushProjectAutosave(),
+    savedProjectUnreadable: () => savedProjectUnreadable,
+    project: () => JSON.parse(serializePartProject(history.current)),
+    historyDepth: () => ({ undo: history.undoStack.length, redo: history.redoStack.length })
+  });
+}
+
+/**
+ * Compile instrumentation for the browser suite.
+ *
+ * Two claims this cycle makes are only worth making if they are observable: that
+ * editing one body recompiles that body alone, and that changing a material posts
+ * no worker message at all. Both are read from here.
+ */
+function installCompileInstrumentation() {
+  window.__partsCompile = Object.freeze({
+    requests: () => compileRequestLog.map((entry) => ({ requestId: entry.requestId, bodyIds: [...entry.bodyIds] })),
+    lastRequest: () => {
+      const entry = compileRequestLog[compileRequestLog.length - 1];
+      return entry ? { requestId: entry.requestId, bodyIds: [...entry.bodyIds] } : null;
+    },
+    workerMessages: () => cadWorkerMessageCount,
+    compiling: () => compiling,
+    resultBodyIds: () => [...compileResults.keys()],
+    warnings: () => compileWarnings.map((warning) => ({ ...warning })),
+    geometryProperties: (bodyId) => {
+      const properties = compileResults.get(bodyId)?.geometryProperties ?? null;
+      return properties ? JSON.parse(JSON.stringify(properties)) : null;
+    },
+    massGrams: (bodyId) => {
+      const body = history.current.bodies.find((item) => item.id === bodyId) ?? null;
+      return body ? bodyMassGrams(body) : null;
+    }
+  });
+}
+
+/**
+ * Manufacturability instrumentation for the browser suite.
+ *
+ * The claim worth observing from a real page is that these findings never gate:
+ * a body with findings still validates, still builds and still offers its exports.
+ * The spec reads the findings from here and the gate from `validateBody` beside it.
+ */
+function installDfmInstrumentation() {
+  window.__partsDfm = Object.freeze({
+    processId: (bodyId) => {
+      const body = history.current.bodies.find((item) => item.id === bodyId) ?? null;
+      return body ? bodyProcessId(body) : null;
+    },
+    findings: () =>
+      projectManufacturabilityIssues(history.current).map((issue) => ({
+        bodyId: issue.bodyId,
+        code: issue.code,
+        severity: issue.severity,
+        message: issue.message
+      })),
+    validationIssues: () => validatePartProject(history.current).map((issue) => issue.code)
+  });
+}
+
+/**
+ * Backend-probe instrumentation for the browser suite.
+ *
+ * The claim worth observing from a real page is that the export menu **agrees with the
+ * probe in both directions**: STEP is offered when the bridge answered and refused with
+ * the bridge's own sentence when it did not. A spec that only ever ran on a machine
+ * without build123d would assert one branch and pass on a tree where the other is
+ * unreachable, which is audit A3 - so the spec reads the state from here and asserts the
+ * row against it, and is correct on either kind of machine.
+ */
+function installCadBackendInstrumentation() {
+  window.__partsCadBackend = Object.freeze({
+    snapshot: () => ({ ...cadBackendProbe.snapshot() }),
+    available: () => cadBackendProbe.available(),
+    probe: async () => ({ ...(await cadBackendProbe.probe()) }),
+    reset: () => cadBackendProbe.reset(),
+    exportAvailability: (formatId) => {
+      const body = selectedProjectBody();
+      const entry = bodyExportAvailability(body, formatId, exportMenuContext(body));
+      return { available: entry.available, reason: entry.reason ?? null, note: entry.note ?? null };
+    }
+  });
 }
 
 function downloadBlob(content, fileName, type) {
@@ -214,21 +495,22 @@ function compileResultCount(project) {
   return project.bodies.filter((body) => compileResults.has(body.id)).length;
 }
 
-function bodyCompileSignature(body) {
-  return {
-    id: body.id,
-    source: body.source,
-    sketch: body.sketch,
-    extrudeDepthMm: body.extrudeDepthMm,
-    revolve: body.revolve,
-    gear: body.gear,
-    boolean: body.boolean,
-    advancedCadRecipe: body.advancedCadRecipe
-  };
+/**
+ * What still needs compiling, given the per-body cache and the request in flight.
+ *
+ * Change detection lives in `compileCache.js` and is deliberately separate from the
+ * autosave fingerprint: a rename must save without recompiling, and a material
+ * change must do neither.
+ */
+function currentCompilePlan(project = history.current) {
+  return planBodyCompile(project.bodies, compileCache, activeCompileRequest?.signatures ?? new Map());
 }
 
-function projectCompileSignature(project) {
-  return JSON.stringify(project.bodies.map(bodyCompileSignature));
+function syncCompileViews(project = history.current) {
+  compileResults = compileCacheResults(compileCache, project.bodies);
+  compileWarnings = compileCacheWarnings(compileCache, project.bodies);
+  const bodyErrors = compileCacheErrors(compileCache, project.bodies);
+  compileErrors = compileWorkerError ? [compileWorkerError, ...bodyErrors] : bodyErrors;
 }
 
 function compileFailure(code, message, bodyId = null) {
@@ -249,7 +531,7 @@ function clearCompileTimeout() {
 function startCompileTimeout(requestId) {
   clearCompileTimeout();
   compileTimeoutTimer = setTimeout(() => {
-    if (requestId !== activeCompileRequestId) return;
+    if (requestId !== activeCompileRequest?.requestId) return;
     handleCadWorkerFailure(
       compileFailure("worker-timeout", "Generated solid build timed out. The CAD worker was restarted.")
     );
@@ -269,21 +551,22 @@ function ensureCadWorker() {
 function handleCadWorkerMessage(event) {
   const message = event.data ?? {};
   if (message.type === "compileBodiesResult") handleCompileResult(message);
-  if (message.type === "exportStlResult") handleStlExportResult(message);
-  if (message.type === "exportStlError") handleStlExportError(message);
+  if (message.type === "exportBodyResult") handleExportResult(message);
+  if (message.type === "exportBodyError") handleExportError(message);
 }
 
 function handleCadWorkerFailure(error) {
   clearTimeout(compileTimer);
+  compileTimer = null;
   clearCompileTimeout();
-  activeCompileRequestId = null;
-  pendingCompileSignature = null;
-  lastCompletedCompileSignature = null;
+  activeCompileRequest = null;
   compiling = false;
-  compileRequestSignatures.clear();
-  pendingStlExports.clear();
-  compileResults = new Map();
-  compileErrors = [error];
+  pendingExports.clear();
+  // The worker is being replaced, so nothing cached can be trusted to match what the
+  // next worker would produce.
+  compileCache.clear();
+  compileWorkerError = error;
+  syncCompileViews(history.current);
   updateGeneratedPreview(history.current);
   renderCompileStatus(history.current);
   showStatus("Generated solid build failed. Edit the body or try again.", 5200);
@@ -318,12 +601,10 @@ function createCadWorker() {
 function renderCompileStatus(project = history.current) {
   const resultCount = compileResultCount(project);
   const total = project.bodies.length;
-  const hasSelectedResult = Boolean(selectedCompileResult());
   const hasHandoffResult = resultCount > 0;
   const selected = selectedProjectBody();
 
-  exportStlButton.disabled = !hasSelectedResult || compiling;
-  if (exportStepButton) exportStepButton.disabled = !isAdvancedCadRecipeBody(selected) || compiling;
+  renderExportMenu(selected);
   sendAssemblyButton.disabled = !hasHandoffResult || compiling;
   compileCount.textContent = compiling ? "Building" : total ? `${resultCount}/${total}` : "Idle";
   buildCount.textContent = compileErrors.length ? `${compileErrors.length}` : resultCount ? "OK" : "Idle";
@@ -350,6 +631,7 @@ function renderCompileStatus(project = history.current) {
     item.className = "validation-ok";
     item.textContent = `${resultCount} generated solid${resultCount === 1 ? "" : "s"} ready`;
     compileList.append(item);
+    appendCompileWarnings();
     return;
   }
 
@@ -363,99 +645,276 @@ function renderCompileStatus(project = history.current) {
     item.append(code, message);
     compileList.append(item);
   }
+
+  appendCompileWarnings();
+}
+
+/**
+ * Whether the selected body's built surface is closed.
+ *
+ * Read from the compile result's warnings rather than from `geometryProperties`,
+ * because the warning is produced from the solid the exporters will serialize
+ * while the exact 2D mass path never looks at that solid at all. `null` means
+ * unknown - nothing has built yet - which is not the same as open.
+ */
+function bodyWatertightVerdict(body) {
+  const result = body ? compileResults.get(body.id) : null;
+  if (!result) return null;
+  return !(result.warnings ?? []).some((warning) => warning.code === NON_WATERTIGHT_CODE);
+}
+
+/**
+ * The optional local build123d bridge, asked at most once and never from a render.
+ *
+ * `renderExportMenu` runs on every render, so it reads `snapshot()` - synchronous, cached,
+ * and `unknown` until something has actually asked. `probe()` is fired when the export
+ * menu is opened and when a STEP export is attempted, which is the only two moments the
+ * answer changes what the user sees.
+ */
+const cadBackendProbe = createCadBackendProbe();
+
+function refreshCadBackendProbe() {
+  const before = cadBackendProbe.snapshot().state;
+  void cadBackendProbe.probe().then((snapshot) => {
+    // Re-render only when the answer actually moved, so a probe that confirms what the
+    // menu already showed does not churn the DOM under an open menu.
+    if (snapshot.state !== before) renderExportMenu();
+  });
+}
+
+function exportMenuContext(body) {
+  const backend = cadBackendProbe.snapshot();
+  return {
+    built: Boolean(body && compileResults.has(body.id)),
+    valid: Boolean(body) && validateBody(body).length === 0,
+    watertight: bodyWatertightVerdict(body),
+    compiling,
+    // Three states, not two: `null` is "not yet asked" and must never render as "absent".
+    // `cadBackend.js` carries the bridge's own refusal code through, so the menu can say
+    // *which* of its outcomes it saw instead of flattening them into "unavailable".
+    backendAvailable: cadBackendProbe.available(),
+    backendReason: backend.state === "unavailable" ? describeCadBackend(backend) : null
+  };
+}
+
+function setExportMenuOpen(open) {
+  const expanded = open && !exportMenuToggle.disabled;
+  exportMenuToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  exportMenuPanel.hidden = !expanded;
+}
+
+function isExportMenuOpen() {
+  return exportMenuToggle.getAttribute("aria-expanded") === "true";
+}
+
+/**
+ * The export menu, rebuilt from the format table on every render.
+ *
+ * Every format is always listed. An unavailable one is disabled and carries the
+ * sentence `exportFormats.js` produced, which is what `AGENTS.md:112` asks for -
+ * "unavailable with a reason" rather than a control that is permanently dead and
+ * silent about why.
+ */
+function renderExportMenu(body = selectedProjectBody()) {
+  const availabilities = bodyExportAvailabilities(body, exportMenuContext(body));
+  const availableCount = availabilities.filter((entry) => entry.available).length;
+
+  exportMenuToggle.disabled = availableCount === 0 || pendingExports.size > 0;
+  exportMenuToggle.textContent = pendingExports.size
+    ? "Exporting..."
+    : availableCount
+      ? `Export (${availableCount})`
+      : "Export";
+  if (exportMenuToggle.disabled) setExportMenuOpen(false);
+
+  exportMenuPanel.replaceChildren();
+  for (const entry of availabilities) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "parts-export__item";
+    item.dataset.exportFormat = entry.formatId;
+    item.setAttribute("role", "menuitem");
+    item.disabled = !entry.available;
+
+    const label = document.createElement("span");
+    label.className = "parts-export__label";
+    label.textContent = entry.format.label;
+    const reason = document.createElement("span");
+    reason.className = "parts-export__reason";
+    // ⚠ `note` is not decoration. An available format may still carry something the user
+    // needs - "the local build123d backend has not answered yet" is the difference between
+    // a question nobody has asked and a negative answer, and dropping it here would put
+    // the A2 three-state distinction into a field the page never renders.
+    reason.textContent = entry.available ? entry.note ?? entry.format.hint : entry.reason;
+    item.append(label, reason);
+    exportMenuPanel.append(item);
+  }
+}
+
+/**
+ * Compile warnings are reports, not gates. A disconnected body still compiles,
+ * exports and hands off; the Build panel says so and nothing blocks.
+ */
+function appendCompileWarnings() {
+  for (const warning of compileWarnings.slice(0, 6)) {
+    const item = document.createElement("li");
+    item.className = "validation-note";
+    const code = document.createElement("span");
+    code.className = "validation-code";
+    code.textContent = warning.bodyId ?? warning.code;
+    const message = document.createElement("span");
+    message.textContent = warning.message;
+    item.append(code, message);
+    compileList.append(item);
+  }
 }
 
 function updateGeneratedPreview(project = history.current, options = {}) {
   previewScene.updateBodies(project.bodies, compileResults, project.selectedBodyId, options);
 }
 
-function requestCadCompile(project = history.current) {
-  const signature = projectCompileSignature(project);
+function postCadWorkerMessage(message, transfers = undefined) {
+  const worker = ensureCadWorker();
+  if (transfers) worker.postMessage(message, transfers);
+  else worker.postMessage(message);
+  cadWorkerMessageCount += 1;
+}
 
-  if (!compiling && signature === lastCompletedCompileSignature) {
-    updateGeneratedPreview(project, { fitCamera: false });
+function requestCadCompile(project = history.current) {
+  pruneCompileCache(compileCache, project.bodies);
+
+  if (!project.bodies.length) {
+    clearTimeout(compileTimer);
+    compileTimer = null;
+    clearCompileTimeout();
+    activeCompileRequest = null;
+    compiling = false;
+    compileWorkerError = null;
+    syncCompileViews(project);
+    updateGeneratedPreview(project);
     renderCompileStatus(project);
     return;
   }
 
-  if (compiling && signature === pendingCompileSignature) {
+  const { staleBodyIds } = currentCompilePlan(project);
+  syncCompileViews(project);
+
+  // Nothing stale and nothing queued: every body is already cached or in flight, so
+  // this render costs no compile at all.
+  if (!staleBodyIds.length) {
+    if (!activeCompileRequest && !compileTimer) compiling = false;
     updateGeneratedPreview(project, { fitCamera: false });
     renderCompileStatus(project);
     return;
   }
 
   clearTimeout(compileTimer);
+  compiling = true;
+  renderCompileStatus(project);
+  compileTimer = setTimeout(postCompileRequest, 180);
+}
 
-  if (!project.bodies.length) {
-    clearCompileTimeout();
-    activeCompileRequestId = null;
-    pendingCompileSignature = null;
-    lastCompletedCompileSignature = signature;
+function postCompileRequest() {
+  compileTimer = null;
+  const project = history.current;
+  // A queued request supersedes whatever was in flight. Dropping the in-flight
+  // signatures first is what stops a body being masked as "already building" by a
+  // request whose result will now be discarded.
+  activeCompileRequest = null;
+  const { signatures, staleBodyIds } = currentCompilePlan(project);
+
+  if (!staleBodyIds.length) {
     compiling = false;
-    compileRequestSignatures.clear();
-    compileResults = new Map();
-    compileErrors = [];
-    updateGeneratedPreview(project);
+    syncCompileViews(project);
+    updateGeneratedPreview(project, { fitCamera: false });
     renderCompileStatus(project);
     return;
   }
 
-  compiling = true;
-  pendingCompileSignature = signature;
-  activeCompileRequestId = null;
-  clearCompileTimeout();
-  renderCompileStatus(project);
+  const requestId = nextWorkerRequestId();
+  activeCompileRequest = {
+    requestId,
+    bodyIds: staleBodyIds,
+    signatures: new Map(staleBodyIds.map((bodyId) => [bodyId, signatures.get(bodyId)]))
+  };
+  compileRequestLog.push({ requestId, bodyIds: [...staleBodyIds] });
 
-  compileTimer = setTimeout(() => {
-    const requestId = nextWorkerRequestId();
-    activeCompileRequestId = requestId;
-    compileRequestSignatures.set(requestId, signature);
-    try {
-      ensureCadWorker().postMessage({
-        type: "compileBodies",
-        requestId,
-        bodies: project.bodies
-      });
-      startCompileTimeout(requestId);
-    } catch (error) {
-      handleCadWorkerFailure(
-        compileFailure("worker-post-message-error", `Unable to start generated solid build: ${error.message}`)
-      );
-    }
-  }, 180);
+  try {
+    // The whole body list travels with every request even when one body is being
+    // rebuilt, because boolean operands must be resolvable (`AGENTS.md:38`).
+    postCadWorkerMessage({
+      type: "compileBodies",
+      requestId,
+      bodies: project.bodies,
+      compileBodyIds: staleBodyIds
+    });
+    startCompileTimeout(requestId);
+  } catch (error) {
+    handleCadWorkerFailure(
+      compileFailure("worker-post-message-error", `Unable to start generated solid build: ${error.message}`)
+    );
+  }
 }
 
 function handleCompileResult(message) {
-  if (message.requestId !== activeCompileRequestId) {
-    compileRequestSignatures.delete(message.requestId);
-    return;
-  }
+  if (!activeCompileRequest || message.requestId !== activeCompileRequest.requestId) return;
+
   clearCompileTimeout();
-  compiling = false;
-  lastCompletedCompileSignature = compileRequestSignatures.get(message.requestId) ?? pendingCompileSignature;
-  pendingCompileSignature = null;
-  compileRequestSignatures.delete(message.requestId);
-  compileResults = new Map((message.results ?? []).map((result) => [result.bodyId, result]));
-  compileErrors = message.errors ?? [];
+  const request = activeCompileRequest;
+  activeCompileRequest = null;
+  compiling = Boolean(compileTimer);
+  compileWorkerError = null;
+
+  const { unassignedErrors } = applyCompileOutcome(compileCache, {
+    signatures: request.signatures,
+    bodyIds: request.bodyIds,
+    results: message.results,
+    errors: message.errors
+  });
+  compileWorkerError = unassignedErrors[0] ?? null;
+  // A body deleted while its compile was in flight would otherwise leave an entry
+  // behind for a body that no longer exists.
+  pruneCompileCache(compileCache, history.current.bodies);
+
+  syncCompileViews(history.current);
   updateGeneratedPreview();
   renderCompileStatus();
+  renderMassProperties(selectedProjectBody());
+  // The bill of materials weighs every body, not just the selected one, so it is the one
+  // panel a compile can change without the selection changing. Re-rendered here rather
+  // than in `render()` alone, which runs on edits and not on results arriving - without
+  // this every BOM row read "this body has not been built yet" forever.
+  renderDocuments(history.current);
 }
 
-function handleStlExportResult(message) {
-  if (!pendingStlExports.has(message.requestId)) return;
-  pendingStlExports.delete(message.requestId);
-  exportStlButton.disabled = false;
-  downloadBlob(message.stl, message.fileName, "model/stl");
-  showStatus("STL export started");
-  renderCompileStatus();
+function exportFormatLabel(formatId) {
+  return EXPORT_FORMATS.find((format) => format.id === formatId)?.label ?? "Export";
 }
 
-function handleStlExportError(message) {
-  if (!pendingStlExports.has(message.requestId)) return;
-  pendingStlExports.delete(message.requestId);
-  exportStlButton.disabled = false;
-  showStatus(message.error?.message ?? "STL export failed", 5200);
+function handleExportResult(message) {
+  const pending = pendingExports.get(message.requestId);
+  if (!pending) return;
+  pendingExports.delete(message.requestId);
   renderCompileStatus();
+  downloadBlob(message.data, message.fileName, message.mimeType);
+
+  const label = exportFormatLabel(message.formatId);
+  // An export warning is a statement about the file that was produced, not a
+  // failure, so it replaces the confirmation rather than suppressing the download.
+  const warning = message.warnings?.[0]?.message;
+  if (warning) showStatus(`${label} exported. ${warning}`, 8200);
+  else showStatus(`${label} export started`);
+  pending.resolve?.(message);
+}
+
+function handleExportError(message) {
+  const pending = pendingExports.get(message.requestId);
+  if (!pending) return;
+  pendingExports.delete(message.requestId);
+  renderCompileStatus();
+  const text = message.error?.message ?? `${exportFormatLabel(pending.formatId)} export failed`;
+  showStatus(text, 6200);
+  pending.reject?.(new Error(text));
 }
 
 function sleep(ms) {
@@ -466,8 +925,8 @@ async function waitForCadReady(timeoutMs = 6000) {
   requestCadCompile(history.current);
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const signature = projectCompileSignature(history.current);
-    if (!compiling && signature === lastCompletedCompileSignature) {
+    const { staleBodyIds } = currentCompilePlan(history.current);
+    if (!compiling && !compileTimer && !activeCompileRequest && !staleBodyIds.length) {
       renderCompileStatus(history.current);
       return;
     }
@@ -525,6 +984,24 @@ function renderAdvancedOptions() {
       return option;
     })
   );
+  hardwareEntrySelect.replaceChildren(
+    ...listHardwareEntries().map((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.id;
+      option.textContent = `${entry.category}: ${entry.label}`;
+      // The summary is the entry's own sentence rather than one written here, so the
+      // tooltip cannot describe a pattern the catalogue does not resolve.
+      option.title = entry.summary;
+      return option;
+    })
+  );
+  renderHardwareEntryNote();
+}
+
+/** The selected entry's summary, so the user knows what a click will cut. */
+function renderHardwareEntryNote() {
+  const entry = getHardwareEntry(hardwareEntrySelect.value);
+  hardwareEntryNote.textContent = entry ? entry.summary : "";
 }
 
 function sortLibraryItems(items) {
@@ -566,7 +1043,7 @@ function cloudStatusText() {
 
 async function persistLocalLibraryItems(items) {
   for (const item of items) {
-    await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id, item);
+    await workspaceStore.writePartLibraryItem(item);
   }
 }
 
@@ -589,7 +1066,7 @@ async function syncLibraryToSupabase(options = {}) {
 
 async function loadPartLibrary() {
   try {
-    const storedItems = await readAllWorkspaceValues(PART_LIBRARY_STORE_NAME);
+    const storedItems = await workspaceStore.listPartLibraryItems();
     const normalizedItems = [];
     for (const item of storedItems) {
       try {
@@ -615,7 +1092,7 @@ async function saveSelectedPartToLibrary() {
   const item = createPartLibraryItem(history.current, body.id, {
     existingIds: new Set(partLibraryItems.map((entry) => entry.id))
   });
-  await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id, item);
+  await workspaceStore.writePartLibraryItem(item);
   partLibraryItems = sortLibraryItems([item, ...partLibraryItems]);
   if (signedInSession()) {
     try {
@@ -638,7 +1115,7 @@ function addLibraryItemToCurrentProject(itemId) {
 
 async function deleteLibraryItem(itemId) {
   const item = libraryItemById(itemId);
-  await deleteWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id);
+  await workspaceStore.deletePartLibraryItem(item.id);
   partLibraryItems = partLibraryItems.filter((entry) => entry.id !== item.id);
   if (signedInSession()) {
     try {
@@ -661,9 +1138,7 @@ function exportLibraryJson() {
 async function importPartLibraryJson(source) {
   const bundle = parsePartLibraryBundleJson(source);
   const importedItems = bundle.items.map((item) => normalizePartLibraryItem(item));
-  for (const item of importedItems) {
-    await writeWorkspaceValue(PART_LIBRARY_STORE_NAME, item.id, item);
-  }
+  await persistLocalLibraryItems(importedItems);
   partLibraryItems = sortLibraryItems(mergePartLibraryItems(partLibraryItems, importedItems));
   if (signedInSession()) {
     for (const item of importedItems) {
@@ -766,16 +1241,32 @@ function commitSelectedBody(mutator, message = "Body updated") {
   commit(updateBody(history.current, body.id, mutator), message);
 }
 
+/**
+ * For an `<input>`'s `value`, where the control has to hold something parseable and a
+ * dash would be a value the user then has to clear. Never use it for a rendered output
+ * cell: the `"0"` below is a fabricated number, which is what `formatOutput` exists to
+ * refuse.
+ */
 function formatNumber(value, digits = 1) {
   return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "0";
 }
 
+/**
+ * A number, or a thrown error naming the field.
+ *
+ * The fourth answer, and the reason this is not `contracts.js`'s `isFiniteNumber` or
+ * `asFiniteNumber`: those two serve code that has a sensible response to a bad number,
+ * and the assistant action catalog has none. An action arrives as parsed JSON from a
+ * model, so a non-finite depth is a malformed request, not a value to coerce - the
+ * caller needs the field name in the rejection, which is what `label` carries.
+ */
 function finiteNumber(value, label) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) throw new Error(`${label} must be a finite number.`);
   return numeric;
 }
 
+/** Positive, or a thrown error naming the field. See `finiteNumber` for why not `contracts.js`. */
 function positiveNumber(value, label) {
   const numeric = finiteNumber(value, label);
   if (numeric <= 0) throw new Error(`${label} must be positive.`);
@@ -848,10 +1339,16 @@ function findCutIndex(body, args = {}) {
 
 function profileSummary(profile, index = null) {
   if (!profile) return null;
+  const resolved = resolveHole(profile.hole);
   return {
     id: profile.id,
     type: profile.type,
     index,
+    hole: profile.hole ?? null,
+    // Reported so the assistant can see a refusal instead of reading a radius that
+    // silently did not change.
+    holeStatus: resolved ? (resolved.ok ? "resolved" : resolved.code) : null,
+    holeReason: resolved?.ok === false ? resolved.reason : null,
     x: profile.x,
     z: profile.z,
     radius: profile.radius,
@@ -874,6 +1371,12 @@ function assistantBodySummary(body) {
     effectiveSizeMm: currentBodySize(body),
     compileReady: compileResults.has(body.id),
     valid: validateBody(body).length === 0,
+    materialId: body.materialId,
+    processId: bodyProcessId(body),
+    // Null rather than absent when the body has not built yet: the assistant must not
+    // be able to read a stale or invented mass.
+    massG: bodyMassGrams(body),
+    volumeMm3: scaledBodyGeometryProperties(body)?.volumeMm3 ?? null,
     advancedCadRecipe: isAdvancedCadRecipeBody(body)
       ? {
           version: body.advancedCadRecipe?.version,
@@ -897,6 +1400,10 @@ function partsAssistantContext() {
   const selected = selectedProjectBody();
   const resultCount = compileResultCount(project);
   const issues = validatePartProject(project);
+  // Computed once: the truncated list below and the count beside it must be two
+  // views of the same array, not two independent calls that a re-render could make
+  // disagree.
+  const manufacturabilityIssues = projectManufacturabilityIssues(project);
   return {
     page: "Robotic Component Builder",
     ready: true,
@@ -910,6 +1417,7 @@ function partsAssistantContext() {
       bodies: project.bodies.length,
       compiledBodies: resultCount,
       validationIssues: issues.length,
+      manufacturabilityIssues: manufacturabilityIssues.length,
       compileErrors: compileErrors.length
     },
     controls: {
@@ -950,6 +1458,24 @@ function partsAssistantContext() {
     selection: selected ? assistantBodySummary(selected) : null,
     bodies: project.bodies.map(assistantBodySummary),
     validation: issues.slice(0, 12),
+    // Reported separately from `validation` and never merged into it, so the
+    // assistant cannot mistake "this wall is too thin to print" for "this body
+    // will not compile". The first is advice; only the second stops anything.
+    //
+    // Capped at twelve like the list beside it, and the true total is in
+    // `counts.manufacturabilityIssues` for the same reason `validationIssues` is
+    // there: the panel can show a count badge above a truncated list, this payload
+    // cannot, so an assistant reading twelve findings would otherwise report twelve
+    // as the total. A truncated list that reads as complete is the same class of
+    // dishonesty as a fabricated zero.
+    manufacturability: manufacturabilityIssues
+      .slice(0, 12)
+      .map((issue) => ({
+        bodyId: issue.bodyId,
+        code: issue.code,
+        severity: issue.severity,
+        message: issue.message
+      })),
     compile: {
       compiling,
       status: compileCount.textContent,
@@ -957,7 +1483,20 @@ function partsAssistantContext() {
       selectedReady: Boolean(selectedCompileResult()),
       exportReady: Boolean(selectedCompileResult()) && !compiling,
       handoffReady: resultCount > 0 && !compiling,
-      errors: compileErrors.slice(0, 8)
+      errors: compileErrors.slice(0, 8),
+      warnings: compileWarnings.slice(0, 8).map((warning) => ({
+        bodyId: warning.bodyId,
+        code: warning.code,
+        message: warning.message
+      })),
+      // Stated per format so the assistant reports what a user can actually do
+      // instead of inferring it from a body kind.
+      exportFormats: bodyExportAvailabilities(selected, exportMenuContext(selected)).map((entry) => ({
+        formatId: entry.formatId,
+        label: entry.format.label,
+        available: entry.available,
+        reason: entry.reason
+      }))
     }
   };
 }
@@ -969,6 +1508,19 @@ function setBodyPropertiesForAssistant(args = {}) {
     if (typeof args.color === "string") {
       if (!/^#[0-9a-f]{6}$/i.test(args.color)) throw new Error("Color must be a six-digit hex value.");
       draft.color = args.color;
+    }
+    if (args.materialId !== undefined) {
+      // Refuse an unknown material rather than silently normalizing it to PLA: the
+      // caller would otherwise be told a mass for a material it did not ask for.
+      if (!getMaterial(args.materialId)) throw new Error(`Unknown materialId: ${args.materialId}.`);
+      draft.materialId = args.materialId;
+    }
+    if (args.processId !== undefined) {
+      // Refused rather than normalized for the same reason as the material: a
+      // caller told "process set" while the page silently kept FDM would then be
+      // handed FDM's thresholds and believe they were a laser's.
+      if (!getProcessProfile(args.processId)) throw new Error(`Unknown processId: ${args.processId}.`);
+      draft.processId = args.processId;
     }
     if (args.extrudeDepthMm !== undefined) {
       if (!isSketchBody(draft)) throw new Error("Only sketch bodies expose extrusion depth.");
@@ -1001,6 +1553,28 @@ function resizeBodyForAssistant(args = {}) {
   return `${body.name} resized to ${targetSize.map((value) => formatNumber(value, 1)).join(" x ")} mm.`;
 }
 
+/**
+ * Attach a fastener standard to a profile on the assistant's behalf.
+ *
+ * Refuses loudly rather than writing an unresolvable hole, because the assistant's
+ * caller sees a thrown message and can correct itself, whereas a persisted refusal
+ * only surfaces later as a Build-panel warning. The refusal reason from
+ * `holes.js` is passed through verbatim: it already names the combination.
+ */
+function applyHoleArgument(profile, hole) {
+  if (hole === null) {
+    delete profile.hole;
+    return;
+  }
+  if (profile.type !== "circle") {
+    throw new Error("A fastener standard can only be attached to a circular cut profile.");
+  }
+  const resolved = resolveHole(hole);
+  if (!resolved) throw new Error("A hole needs a fastener size, such as M3.");
+  if (!resolved.ok) throw new Error(resolved.reason);
+  profile.hole = resolved.spec;
+}
+
 function applyProfileArguments(profile, args = {}) {
   for (const prop of ["x", "z"]) {
     if (args[prop] !== undefined) profile[prop] = finiteNumber(args[prop], prop);
@@ -1009,6 +1583,8 @@ function applyProfileArguments(profile, args = {}) {
     if (args[prop] !== undefined) profile[prop] = positiveNumber(args[prop], prop);
   }
   if (args.cornerRadius !== undefined) profile.cornerRadius = Math.max(0, finiteNumber(args.cornerRadius, "cornerRadius"));
+  if (args.clearHole === true) delete profile.hole;
+  if (args.hole !== undefined) applyHoleArgument(profile, args.hole);
   if (args.points !== undefined) {
     if (profile.type !== "polyline") throw new Error("Only polyline profiles expose editable points.");
     if (!Array.isArray(args.points) || args.points.length < 3) throw new Error("Polyline profiles need at least three points.");
@@ -1235,13 +1811,14 @@ async function replaceAdvancedCadBodyForAssistant(args = {}) {
 
 function addCutProfileForAssistant(args = {}) {
   selectedSketchBodyForAssistant(args.bodyId);
-  const cut = createCutProfile(args.type);
+  const cut = createCutProfile(args.type, { x: args.x, z: args.z, hole: args.hole });
   if (!cut) throw new Error("Unable to create a cut profile for the selected body.");
   commitSelectedBody((draft) => {
     draft.sketch.cutProfiles.push(cut);
     return draft;
   }, args.type === "slot" ? "Slotted hole added" : "Circular hole added");
-  return `${cut.id} added.`;
+  const label = describeHole(cut.hole);
+  return label ? `${cut.id} added as a ${label} at diameter ${formatNumber(cut.radius * 2, 2)} mm.` : `${cut.id} added.`;
 }
 
 function removeCutProfileForAssistant(args = {}) {
@@ -1276,13 +1853,14 @@ function createField(labelText, input) {
   return label;
 }
 
-function createInput({ value, type = "number", step = "1", min = null, dataset = {}, disabled = false }) {
+function createInput({ value, type = "number", step = "1", min = null, max = null, dataset = {}, disabled = false }) {
   const input = document.createElement("input");
   input.type = type;
   input.value = String(value ?? "");
   input.disabled = disabled;
   if (step != null) input.step = step;
   if (min != null) input.min = min;
+  if (max != null) input.max = max;
   for (const [key, dataValue] of Object.entries(dataset)) {
     input.dataset[key] = dataValue;
   }
@@ -1361,7 +1939,7 @@ function createResizeSection(body) {
   currentLabel.textContent = "Current size (mm)";
   currentGrid.append(currentLabel);
   for (const [index, axis] of ["X", "Y", "Z"].entries()) {
-    currentGrid.append(createOutputField(axis, formatNumber(currentSize[index], 2)));
+    currentGrid.append(createOutputField(axis, formatOutput(currentSize[index], 2)));
   }
 
   const targetGrid = document.createElement("div");
@@ -1392,10 +1970,13 @@ function createResizeSection(body) {
 
   const note = document.createElement("p");
   note.className = "parts-resize-note";
+  // The note has to say what the checkbox does *not* control: a cut profile with a
+  // locked standards hole keeps its diameter either way, so unchecking the box does
+  // not quietly turn an M3 clearance hole into whatever the scale factor makes it.
   note.textContent = isSketchBody(body) && resizeKeepCutSizes
-    ? "Hole centers move with the body; screw and bearing clearances stay fixed."
+    ? "Hole centers move with the body; every cut keeps its size."
     : isSketchBody(body)
-      ? "Cut profiles scale with the body footprint."
+      ? "Cut profiles scale with the body footprint, except holes locked to a fastener standard."
       : "Boolean bodies fall back to placement scale when their operands cannot be source-resized safely.";
 
   section.append(title, currentGrid, targetGrid, options, note);
@@ -1452,6 +2033,7 @@ function renderBodyProperties(body) {
   addSlottedHoleButton.disabled = !sketchEditable;
   addLinearPatternButton.disabled = !sketchEditable;
   addCircularPatternButton.disabled = !sketchEditable;
+  applyHardwarePatternButton.disabled = !sketchEditable;
   addBooleanBodyButton.disabled = history.current.bodies.length < 2;
 
   if (!body) {
@@ -1488,7 +2070,278 @@ function renderBodyProperties(body) {
     );
   } else {
     bodyProperties.append(createAdvancedBodySummary(body));
+    if (bodySourceKind(body) === REVOLVE_KIND) bodyProperties.append(createRevolveAngleField(body));
+    if (bodySourceKind(body) === SPUR_GEAR_KIND) {
+      bodyProperties.append(createGearToothSection(body), createGearMeshSection(body));
+    }
   }
+}
+
+/** A titled block of inspector fields, styled like the resize section beside it. */
+function createInspectorSubsection(title, hint) {
+  const section = document.createElement("div");
+  section.className = "parts-inspector-subsection";
+  const heading = document.createElement("div");
+  heading.className = "parts-inspector-subsection__title";
+  const label = document.createElement("span");
+  label.textContent = title;
+  heading.append(label);
+  if (hint) {
+    const small = document.createElement("small");
+    small.textContent = hint;
+    heading.append(small);
+  }
+  section.append(heading);
+  return section;
+}
+
+function createFieldGrid(title, fields) {
+  const grid = document.createElement("div");
+  grid.className = "parts-field-grid";
+  if (title) {
+    const label = document.createElement("span");
+    label.textContent = title;
+    grid.append(label);
+  }
+  grid.append(...fields);
+  return grid;
+}
+
+/**
+ * The gear tooth form.
+ *
+ * `pressureAngleDeg` was editable nowhere before this cycle, which was consistent
+ * with it having no effect. Now every field here reaches geometry, so each one is
+ * exposed - including the three the cycle added, whose defaults reproduce the
+ * nominal gear exactly.
+ */
+function createGearToothSection(body) {
+  const gear = body.gear ?? {};
+  const geometry = spurGearGeometry(gear);
+  // The rack is only *the* ISO 53 rack at a 20 degree profile angle. This page lets
+  // the angle run 10 to 35 because the involute is exact at any of them, but the
+  // proportions at any other angle are a generalisation of the standard, so the
+  // heading says which of the two the reader is looking at rather than claiming ISO
+  // 53 for a tooth that is not one. `standards/gears.js` has always been able to
+  // answer this; before, nothing asked.
+  const section = createInspectorSubsection(
+    "Tooth form",
+    `${geometry.rackDeviatesFromStandard ? "ISO 53 basic rack proportions, generalised to this profile angle" : "ISO 53 basic rack"}, involute flank. Pitch ${formatNumber(geometry.pitchRadiusMm * 2, 2)} mm, base ${formatNumber(geometry.baseRadiusMm * 2, 2)} mm, root ${formatNumber(geometry.rootRadiusMm * 2, 2)} mm, tip ${formatNumber(geometry.tipRadiusMm * 2, 2)} mm diameter.`
+  );
+
+  if (geometry.rackDeviatesFromStandard) {
+    const note = document.createElement("p");
+    note.className = "parts-resize-note";
+    note.dataset.gearRackDeviation = "1";
+    note.textContent = `ISO 53 fixes the profile angle at ${formatNumber(ISO_53_PROFILE_ANGLE_DEG, 0)} degrees, so the ${formatNumber(geometry.pressureAngleDeg, 1)} degree tooth below uses the rack's addendum, dedendum and tip radius scaled to this angle. The involute flank is exact; the proportions are this page's generalisation and not a quotation from the standard.`;
+    section.append(note);
+  }
+
+  section.append(
+    createFieldGrid("Teeth and size", [
+      createField(
+        "Teeth",
+        createInput({
+          value: String(gear.toothCount ?? 24),
+          step: "1",
+          min: String(MIN_TOOTH_COUNT),
+          max: String(MAX_TOOTH_COUNT),
+          dataset: { bodyProp: "gearToothCount" }
+        })
+      ),
+      createField(
+        "Module (mm)",
+        createInput({
+          value: formatNumber(gear.moduleMm, 3),
+          step: "0.25",
+          min: "0.01",
+          dataset: { bodyProp: "gearModuleMm" }
+        })
+      ),
+      createField(
+        "Pressure angle (deg)",
+        createInput({
+          value: formatNumber(gear.pressureAngleDeg, 1),
+          step: "0.5",
+          min: String(MIN_PRESSURE_ANGLE_DEG),
+          max: String(MAX_PRESSURE_ANGLE_DEG),
+          dataset: { bodyProp: "gearPressureAngleDeg" }
+        })
+      ),
+      createField(
+        "Thickness (Y mm)",
+        createInput({
+          value: formatNumber(gear.thicknessMm, 2),
+          step: "0.5",
+          min: "0.1",
+          dataset: { bodyProp: "gearThicknessMm" }
+        })
+      ),
+      createField(
+        "Bore (mm)",
+        createInput({
+          value: formatNumber(gear.boreDiameterMm, 2),
+          step: "0.5",
+          min: "0",
+          dataset: { bodyProp: "gearBoreDiameterMm" }
+        })
+      ),
+      createField(
+        "Helix angle (deg)",
+        createInput({
+          value: formatNumber(gear.helixAngleDeg, 1),
+          step: "1",
+          min: String(-MAX_ABS_HELIX_ANGLE_DEG),
+          max: String(MAX_ABS_HELIX_ANGLE_DEG),
+          dataset: { bodyProp: "gearHelixAngleDeg" }
+        })
+      )
+    ])
+  );
+
+  const { field: rackField } = createSelectField(
+    "Basic rack",
+    listBasicRackProfiles().map((entry) => ({ value: entry.id, label: entry.label })),
+    gear.rackProfileId ?? "A",
+    { bodyProp: "gearRackProfileId" }
+  );
+
+  const filletInput = createInput({
+    // Blank means "follow the rack profile", which is what the placeholder states.
+    value: gear.rootFilletFactor == null ? "" : formatNumber(gear.rootFilletFactor, 3),
+    step: "0.02",
+    min: "0",
+    dataset: { bodyProp: "gearRootFilletFactor" }
+  });
+  filletInput.placeholder = formatNumber(geometry.rack.filletRadiusFactor, 2);
+
+  section.append(
+    rackField,
+    createFieldGrid("Allowances", [
+      createField(
+        "Profile shift x",
+        createInput({
+          value: formatNumber(gear.profileShiftCoefficient, 3),
+          step: "0.05",
+          min: String(-MAX_ABS_PROFILE_SHIFT),
+          max: String(MAX_ABS_PROFILE_SHIFT),
+          dataset: { bodyProp: "gearProfileShiftCoefficient" }
+        })
+      ),
+      createField(
+        "Backlash (mm)",
+        createInput({
+          value: formatNumber(gear.backlashMm, 3),
+          step: "0.02",
+          min: "0",
+          dataset: { bodyProp: "gearBacklashMm" }
+        })
+      ),
+      createField("Root fillet / m", filletInput)
+    ]),
+    createFieldGrid("Measured tooth", [
+      createOutputField("Root land (mm)", formatOutput(geometry.rootLandWidthMm, 3)),
+      createOutputField("Top land (mm)", formatOutput(geometry.tipLandWidthMm, 3)),
+      createOutputField("Fillet (mm)", formatOutput(geometry.rootFilletRadiusMm, 3))
+    ])
+  );
+
+  if (geometry.helical) {
+    section.append(
+      createFieldGrid("Normal plane", [
+        createOutputField("Normal module", formatOutput(geometry.normalModuleMm, 3)),
+        createOutputField("Normal angle (deg)", formatOutput(geometry.normalPressureAngleDeg, 2)),
+        createOutputField(
+          "Twist (deg)",
+          formatOutput(geometry.twistAngleRad == null ? null : (geometry.twistAngleRad * 180) / Math.PI, 2)
+        )
+      ])
+    );
+  }
+
+  return section;
+}
+
+/**
+ * Does this gear mesh with another one in the project?
+ *
+ * A pair is a derived report and not a persisted entity - `PartProject` has bodies
+ * and no relationships - so which partner is selected is session-only presentation
+ * state, held in `gearPairPartnerId` beside the other inspector toggles and never
+ * written to the project. Picking a partner therefore neither saves nor recompiles.
+ */
+function createGearMeshSection(body) {
+  const partners = history.current.bodies.filter(
+    (candidate) => candidate.id !== body.id && bodySourceKind(candidate) === SPUR_GEAR_KIND
+  );
+  const section = createInspectorSubsection(
+    "Mesh check",
+    "Contact ratio and centre distance against another gear. A derived report; nothing here is saved."
+  );
+
+  if (!partners.length) {
+    section.append(emptyMessage("Add a second gear to check a pair"));
+    return section;
+  }
+
+  const selectedId = partners.some((candidate) => candidate.id === gearPairPartnerId)
+    ? gearPairPartnerId
+    : partners[0].id;
+  const { field } = createSelectField(
+    "Meshes with",
+    partners.map((candidate) => ({ value: candidate.id, label: candidate.name })),
+    selectedId,
+    { gearPairPartner: "1" }
+  );
+  section.append(field);
+
+  const partner = partners.find((candidate) => candidate.id === selectedId);
+  const report = spurGearPairReport(body.gear, partner.gear);
+
+  if (!report.ok && report.centreDistanceMm == null) {
+    for (const issue of report.issues) section.append(gearMeshNote(issue));
+    return section;
+  }
+
+  section.append(
+    createFieldGrid("Pair", [
+      createOutputField("Centre distance (mm)", formatOutput(report.centreDistanceMm, 3)),
+      createOutputField("Contact ratio", formatOutput(report.contactRatio, 3)),
+      createOutputField("Ratio", `${report.toothCountB}:${report.toothCountA}`)
+    ]),
+    createFieldGrid("Allowance", [
+      createOutputField("Backlash (mm)", formatOutput(report.circumferentialBacklashMm, 3)),
+      createOutputField("Tip-root gap (mm)", formatOutput(report.tipRootClearanceMm, 3)),
+      createOutputField(
+        report.helical ? "Total contact ratio" : "Operating angle (deg)",
+        report.helical
+          ? formatOutput(report.totalContactRatio, 3)
+          : formatOutput(report.operatingPressureAngleDeg, 2)
+      )
+    ])
+  );
+
+  for (const issue of report.issues) section.append(gearMeshNote(issue));
+  return section;
+}
+
+function gearMeshNote(issue) {
+  const note = document.createElement("p");
+  note.className = issue.severity === "error" ? "empty-note" : "parts-resize-note";
+  note.textContent = issue.message;
+  return note;
+}
+
+function createRevolveAngleField(body) {
+  return createField(
+    "Revolve angle (deg)",
+    createInput({
+      value: formatNumber(body.revolve?.angleDeg ?? FULL_REVOLVE_ANGLE_DEG, 1),
+      step: "15",
+      min: "1",
+      dataset: { bodyProp: "revolveAngleDeg" }
+    })
+  );
 }
 
 function createAdvancedBodySummary(body) {
@@ -1501,7 +2354,7 @@ function createAdvancedBodySummary(body) {
   if (kind === REVOLVE_KIND) {
     value.textContent = `${body.revolve?.presetId ?? "lathe"} / ${body.revolve?.segments ?? 0} segments`;
   } else if (kind === SPUR_GEAR_KIND) {
-    value.textContent = `${body.gear?.toothCount ?? 0} teeth / module ${body.gear?.moduleMm ?? 0}`;
+    value.textContent = `${body.gear?.toothCount ?? 0} teeth / module ${body.gear?.moduleMm ?? 0} / ${body.gear?.pressureAngleDeg ?? 0} deg`;
   } else if (kind === BOOLEAN_OPERATION_KIND) {
     value.textContent = `${body.boolean?.operation ?? "boolean"} / ${(body.boolean?.operandBodyIds ?? []).join(", ")}`;
   } else if (kind === ADVANCED_CAD_RECIPE_KIND) {
@@ -1511,6 +2364,123 @@ function createAdvancedBodySummary(body) {
   }
   summary.append(title, value);
   return summary;
+}
+
+function createSelectField(labelText, options, selectedValue, dataset = {}) {
+  const select = document.createElement("select");
+  for (const [key, value] of Object.entries(dataset)) {
+    select.dataset[key] = value;
+  }
+  for (const option of options) {
+    const element = document.createElement("option");
+    element.value = option.value;
+    element.textContent = option.label;
+    element.selected = option.value === selectedValue;
+    select.append(element);
+  }
+  return { field: createField(labelText, select), select };
+}
+
+/**
+ * Density-free geometry properties for a body, with its placement scale applied.
+ *
+ * The worker result is scale-free on purpose - the compile signature ignores the
+ * transform - so the scale is folded in here rather than by recompiling.
+ *
+ * The Mass card, the assistant context and the bill of materials all read this one
+ * function. That matters more than it looks: a BOM that fell back to `bodyGeometryProperties`
+ * for an unbuilt sketch body would show a mass in the Documents card and a dash in the
+ * Mass card for the same body at the same moment, which is a second mass path wearing
+ * the first one's clothes.
+ */
+function scaledBodyGeometryProperties(body) {
+  if (!body) return null;
+  const properties = compileResults.get(body.id)?.geometryProperties ?? null;
+  if (!properties) return null;
+  return scaleGeometryProperties(properties, body.transform?.scale ?? [1, 1, 1]);
+}
+
+function bodyMassGrams(body) {
+  const properties = scaledBodyGeometryProperties(body);
+  if (!properties) return null;
+  return massGramsForVolume(properties.volumeMm3, body.materialId);
+}
+
+/** A dash, never an interpolated number. */
+function massText(grams) {
+  return grams == null ? ABSENT_OUTPUT : `${formatNumber(grams, grams < 10 ? 2 : 1)} g`;
+}
+
+function renderMassProperties(body) {
+  massProperties.replaceChildren();
+
+  if (!body) {
+    massSummary.textContent = ABSENT_OUTPUT;
+    massProperties.append(emptyMessage("No body selected"));
+    return;
+  }
+
+  const material = getMaterial(body.materialId);
+  const { field: materialField } = createSelectField(
+    "Material",
+    listMaterials().map((entry) => ({ value: entry.id, label: entry.label })),
+    body.materialId,
+    { bodyProp: "materialId" }
+  );
+  massProperties.append(materialField);
+
+  const properties = scaledBodyGeometryProperties(body);
+  const grams = properties ? massGramsForVolume(properties.volumeMm3, body.materialId) : null;
+  massSummary.textContent = massText(grams);
+
+  const printedMass = createOutputField("Printed mass", massText(grams));
+  printedMass.querySelector("output").id = "body-mass-value";
+  // The unit conversion has to happen after the absence check, not before: `null / 1000`
+  // is `0`, so an absent volume would reach `formatOutput` as a perfectly finite zero -
+  // a fabricated number in the one card whose contract is to show a dash instead of a
+  // guess. Same class of defect as cycle 04's `finiteOrNull`.
+  const volume = createOutputField(
+    "Volume (cm3)",
+    formatOutput(properties?.volumeMm3 == null ? null : properties.volumeMm3 / 1000, 3)
+  );
+  volume.querySelector("output").id = "body-volume-value";
+  const area = createOutputField(
+    "Surface area (cm2)",
+    formatOutput(properties?.surfaceAreaMm2 == null ? null : properties.surfaceAreaMm2 / 100, 2)
+  );
+  area.querySelector("output").id = "body-area-value";
+  massProperties.append(printedMass, volume, area);
+
+  if (properties?.centroidMm) {
+    const grid = document.createElement("div");
+    grid.className = "parts-field-grid";
+    const title = document.createElement("span");
+    title.textContent = "Centroid (mm)";
+    grid.append(title);
+    for (const [index, axis] of ["X", "Y", "Z"].entries()) {
+      const value = properties.centroidMm[index];
+      grid.append(createOutputField(axis, formatOutput(value, 2)));
+    }
+    massProperties.append(grid);
+  }
+
+  const note = document.createElement("p");
+  note.className = "parts-resize-note";
+  note.id = "mass-method-note";
+  if (!properties) {
+    note.textContent = "Mass appears once this body has built a solid.";
+  } else if (properties.volumeUnavailableReason) {
+    // Task-critical honesty: the divergence theorem returns a number for an open
+    // surface, and that number means nothing, so the dash is the answer.
+    note.textContent = properties.volumeUnavailableReason;
+  } else if (grams == null) {
+    note.textContent = `${material?.label ?? "This material"} has no published density, so no mass is stated.`;
+  } else {
+    note.textContent = properties.method === "exact-2d"
+      ? `Exact profile integral at ${material.densityGcm3} g/cm3. Material changes never rebuild the solid.`
+      : `Measured from the built mesh at ${material.densityGcm3} g/cm3, so it follows the tessellation.`;
+  }
+  massProperties.append(note);
 }
 
 function profileField(label, value, prop, scope, options = {}) {
@@ -1525,6 +2495,128 @@ function profileField(label, value, prop, scope, options = {}) {
   );
 }
 
+function holeSelectOptions(values, labels = {}) {
+  return values.map((value) => ({ value, label: labels[value] ?? value }));
+}
+
+/**
+ * The fastener-standards picker for one cut profile.
+ *
+ * Only the controls that mean something for the chosen style are rendered: a
+ * process column exists only for a counterbore, and a face only for a style that
+ * cuts a pocket. Showing a disabled "cut from" selector on a plain through hole
+ * would imply the page had an opinion about a face it never touches.
+ *
+ * The radius is rendered as an output rather than an input whenever the hole is
+ * resolved and locked, because in that state the standard owns the number: the
+ * field is not disabled to be difficult, it is disabled because typing in it would
+ * be overwritten by the next normalization and that would be a lie.
+ */
+function appendHoleFields(container, profile, scope) {
+  const spec = normalizeHoleSpec(profile.hole);
+  const resolved = resolveHole(profile.hole);
+
+  const { field: standardField } = createSelectField(
+    "Hole standard",
+    [{ value: "", label: "None (free radius)" }, ...holeSelectOptions(HOLE_STANDARDS)],
+    spec?.standard ?? "",
+    { profileScope: scope, holeProp: "standard" }
+  );
+  container.append(standardField);
+  if (!spec) return;
+
+  const { field: sizeField } = createSelectField(
+    "Fastener size",
+    holeSelectOptions(FASTENER_SIZES),
+    spec.size,
+    { profileScope: scope, holeProp: "size" }
+  );
+  const { field: styleField } = createSelectField(
+    "Hole style",
+    holeSelectOptions(HOLE_STYLES, {
+      through: "through",
+      counterbore: "counterbore",
+      countersink: "countersink",
+      tapped: "tapped (tap drill)",
+      heatSetInsert: "heat-set insert",
+      nutTrap: "nut trap"
+    }),
+    spec.style,
+    { profileScope: scope, holeProp: "style" }
+  );
+  const { field: fitField } = createSelectField(
+    "Clearance fit",
+    holeSelectOptions(CLEARANCE_FITS),
+    spec.fit,
+    { profileScope: scope, holeProp: "fit" }
+  );
+  container.append(sizeField, styleField, fitField);
+
+  if (spec.style === "counterbore") {
+    const { field: processField } = createSelectField(
+      "Counterbore process",
+      holeSelectOptions(HOLE_PROCESSES, { fdm: "printed (FDM)", machined: "machined (DIN 974-1)" }),
+      spec.process,
+      { profileScope: scope, holeProp: "process" }
+    );
+    container.append(processField);
+  }
+
+  if (HOLE_POCKET_STYLES.includes(spec.style)) {
+    const { field: faceField } = createSelectField(
+      "Cut pocket from",
+      holeSelectOptions(HOLE_FACES, { top: "top face (+Y)", bottom: "bottom face (-Y)" }),
+      spec.fromFace,
+      { profileScope: scope, holeProp: "fromFace" }
+    );
+    container.append(faceField);
+  }
+
+  container.append(
+    createCheckboxRow("Lock to standard diameter", spec.lockSize, { profileScope: scope, holeProp: "lockSize" })
+  );
+
+  const note = document.createElement("p");
+  note.className = `parts-resize-note hole-note${resolved?.ok ? "" : " hole-note--refused"}`;
+  note.dataset.holeNote = scope;
+  if (!resolved?.ok) {
+    note.textContent = resolved?.reason ?? "This hole cannot be resolved.";
+  } else {
+    const pocket = resolved.pocket;
+    const pocketText = pocket
+      ? ` ${pocket.style} pocket ${formatNumber(pocket.depthMm, 2)} mm deep from the ${pocket.fromFace} face.`
+      : "";
+    const unverified = resolved.unverifiedDimensions.length
+      ? ` Flagged as unverified against a published standard: ${resolved.unverifiedDimensions.join(", ")}.`
+      : "";
+    // Both numbers at the exact place cycle 09's plan points at: a hole the user asked
+    // for at 3.4 mm and a printer that will produce 3.32. The drawn figure keeps its
+    // "from the fastener table" attribution and the as-made figure names the process, so
+    // neither sentence can be mistaken for the other - and where the process publishes
+    // no compensation there is one sentence rather than the same number twice.
+    const compensationMm = selectedBodyCompensationMm();
+    const asMade = compensationMm === null
+      ? ""
+      : ` It will measure about ${formatNumber(resolved.pilotDiameterMm - 2 * compensationMm, 2)} mm `
+        + `once ${describeProcess(bodyProcessId(selectedProjectBody()))} has made it.`;
+    note.textContent = `Pilot diameter ${formatNumber(resolved.pilotDiameterMm, 2)} mm from the fastener table, as drawn.${asMade}${pocketText}${unverified}`;
+  }
+  container.append(note);
+}
+
+/**
+ * The selected body's signed compensation, or `null` where its process publishes none.
+ *
+ * A thin read of `bodyCompensationReport` rather than a second calculation, so the
+ * inspector's sentence and the Manufacturability card's pair can never state different
+ * compensations for the same body - and `null` stays `null` all the way to the caller,
+ * which is what stops "no compensation" rendering as a second number equal to the first.
+ */
+function selectedBodyCompensationMm() {
+  const body = selectedProjectBody();
+  return body ? bodyCompensationReport(body).compensationMm : null;
+}
+
 function renderProfileFields(container, profile, scope) {
   container.replaceChildren();
   if (!profile) {
@@ -1533,11 +2625,17 @@ function renderProfileFields(container, profile, scope) {
   }
 
   if (profile.type === "circle") {
+    const derivedRadius = holeDerivedRadiusMm(profile.hole);
     container.append(
       profileField("Center X", profile.x, "x", scope),
       profileField("Center Z", profile.z, "z", scope),
-      profileField("Radius", profile.radius, "radius", scope, { min: "0.1" })
+      derivedRadius == null
+        ? profileField("Radius", profile.radius, "radius", scope, { min: "0.1" })
+        : createOutputField("Radius (from standard)", formatOutput(profile.radius, 2))
     );
+    // A standards hole is a hole in a plate, so the picker belongs on cut profiles
+    // only. An outer profile is the part's own outline and has no fastener.
+    if (String(scope).startsWith("cut:")) appendHoleFields(container, profile, scope);
     return;
   }
 
@@ -1595,7 +2693,7 @@ function renderCutProfiles(body) {
     const header = document.createElement("div");
     header.className = "cut-card__header";
     const title = document.createElement("strong");
-    title.textContent = `${profile.id} / ${profile.type}`;
+    title.textContent = `${profile.id} / ${describeHole(profile.hole) ?? profile.type}`;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "parts-icon-button parts-icon-button--danger";
@@ -1957,6 +3055,280 @@ function renderValidation(project) {
   }
 }
 
+const DFM_SEVERITY_CLASS = {
+  error: "",
+  warning: "validation-note",
+  info: "validation-info"
+};
+
+/**
+ * Manufacturability, as its own section rather than folded into Build.
+ *
+ * The two lists answer different questions and arrive by different routes. Build
+ * carries compile warnings: statements about the solid the worker built, arriving
+ * asynchronously with every worker message. These are statements about the design
+ * against a process the user picked, computed synchronously on this thread from
+ * the sketch alone. Merging them would also put a `<select>` inside a list that a
+ * worker message rebuilds, which is a race waiting to be found.
+ *
+ * The picker writes the **selected body's** `processId`, because that is where it
+ * is persisted; the list covers the whole project, so a laser-cut plate and a
+ * printed bracket are each checked against their own process at once.
+ */
+/**
+ * The drawing and the part, stated as two numbers that cannot be read as one.
+ *
+ * Cycle 09's whole point. A hole the user asked for at 3.4 mm and a printer that will
+ * produce 3.32 are two facts, and a card showing one number has thrown away the
+ * information - so both are rendered, each under its own label, and the as-made figure
+ * is never shown without the drawn figure beside it.
+ *
+ * The smallest hole is the one shown because it is the one a compensation decides: a
+ * fixed 0.08 mm is a rounding error on a 20 mm bore and a fifth of a 0.8 mm pilot. When
+ * a body has no circular cut the pair falls back to the outline perimeter, which every
+ * body has, so the card never goes blank while still having something to say.
+ *
+ * `formatOutput` rather than `toFixed`, and an explicit sentence rather than a zero,
+ * for audit A2: a process that publishes no compensation has no second number, and
+ * rendering "0.000" for that would tell the reader the page had measured a machine.
+ */
+function renderCompensation(body) {
+  if (!body) {
+    compensationNominal.textContent = ABSENT_OUTPUT;
+    compensationAsMade.textContent = ABSENT_OUTPUT;
+    compensationNote.textContent = "Select a body to see what its process will make of it.";
+    return;
+  }
+
+  const report = bodyCompensationReport(body);
+  const smallest = report.holes.length
+    ? report.holes.reduce((min, hole) => (hole.nominalDiameterMm < min.nominalDiameterMm ? hole : min))
+    : null;
+  const label = smallest ? "Smallest hole" : "Outline perimeter";
+  const nominalMm = smallest ? smallest.nominalDiameterMm : report.nominal?.perimeterMm ?? null;
+  const asMadeMm = smallest ? smallest.asMadeDiameterMm : report.asMade?.perimeterMm ?? null;
+
+  for (const [element, suffix] of [[compensationNominal, "as drawn"], [compensationAsMade, "as made"]]) {
+    element.parentElement.querySelector(".parts-compensation__label").textContent = `${label}, ${suffix} (mm)`;
+  }
+  compensationNominal.textContent = formatOutput(nominalMm, 3);
+  compensationAsMade.textContent = formatOutput(asMadeMm, 3);
+
+  if (!report.compensationText) {
+    compensationNote.textContent =
+      `${report.processLabel} publishes no compensation here, so the part is drawn and made at the same size. `
+      + "That is not a measurement of zero - it is the absence of one.";
+    return;
+  }
+  // A feature smaller than the compensation has no as-made size, and the reason is worth
+  // more than the dash: this is a body the chosen process cannot make, said plainly.
+  if (report.asMadeUnavailableReason) {
+    compensationNote.textContent = `${report.processLabel}: ${report.asMadeUnavailableReason}`;
+    return;
+  }
+  if (!report.nominal) {
+    compensationNote.textContent =
+      `${report.processLabel}: ${report.compensationText} This body's geometry does not come from a sketch, `
+      + "so there is no drawn profile here to compare it against.";
+    return;
+  }
+  compensationNote.textContent = `${report.processLabel}: ${report.compensationText}`;
+}
+
+function renderManufacturability(project) {
+  const body = selectedProjectBody();
+  const selectedProcessId = body ? bodyProcessId(body) : normalizeProcessId(null);
+
+  processSelect.replaceChildren();
+  for (const entry of listProcessProfiles()) {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.label;
+    option.selected = entry.id === selectedProcessId;
+    processSelect.append(option);
+  }
+  processSelect.disabled = !body;
+  // The profile's own confidence note, so the reader can see that these are shop
+  // practice rather than a standard before they trust a threshold.
+  processSelect.title = body
+    ? getProcessProfile(selectedProcessId)?.note ?? ""
+    : "Select a body to choose how it is made.";
+
+  renderCompensation(body);
+
+  const issues = projectManufacturabilityIssues(project);
+  dfmCount.textContent = issues.length ? `${issues.length}` : "OK";
+  dfmList.replaceChildren();
+
+  if (!project.bodies.length) {
+    const note = document.createElement("li");
+    note.className = "validation-note";
+    note.textContent = "Add a body to check it against a process.";
+    dfmList.append(note);
+    return;
+  }
+
+  if (!issues.length) {
+    const ok = document.createElement("li");
+    ok.className = "validation-ok";
+    ok.textContent = "Every feature is makeable by the chosen process";
+    dfmList.append(ok);
+    return;
+  }
+
+  for (const issue of issues.slice(0, 12)) {
+    const row = document.createElement("li");
+    row.className = DFM_SEVERITY_CLASS[issue.severity] ?? "";
+    row.dataset.dfmCode = issue.code;
+    row.dataset.dfmSeverity = issue.severity;
+    const code = document.createElement("span");
+    code.className = "validation-code";
+    code.textContent = issue.bodyId ?? issue.code;
+    const message = document.createElement("span");
+    message.textContent = issue.message;
+    row.append(code, message);
+    dfmList.append(row);
+  }
+}
+
+/** One list row: a short code chip and a sentence, the shape every other list here uses. */
+function documentRow(code, text, className = "") {
+  const row = document.createElement("li");
+  if (className) row.className = className;
+  const chip = document.createElement("span");
+  chip.className = "validation-code";
+  chip.textContent = code;
+  const message = document.createElement("span");
+  message.textContent = text;
+  row.append(chip, message);
+  return row;
+}
+
+/**
+ * The bill of materials and the print-prep report.
+ *
+ * ⚠ Every derived number goes through `formatOutput`, and that is the point of the panel
+ * rather than a detail of it. This is a table of derived numbers several of which are
+ * legitimately absent, and the absent-not-zero defect has shipped three times in this
+ * project - always caught in review, never by a test. A row whose mass the page does not
+ * hold shows a dash **and** the reason, and it still appears: dropping the row would be
+ * the same lie told by omission, and a reader counting rows would have nothing to tell
+ * them so.
+ *
+ * `validateManufacturability` is unmemoized and runs on every render, and print prep calls
+ * it once per body - so this panel re-derives with the project rather than with every
+ * pointer move, which is what `render()` already is. Cycle 06 measured the rule set well
+ * under a millisecond for the templates and named a fifty-body project as where it would
+ * show; that is still where it would show, and it is recorded rather than pre-optimised.
+ */
+function renderDocuments(project) {
+  const bom = projectBom(project, {
+    geometryPropertiesById: new Map(
+      project.bodies
+        .map((body) => [body.id, scaledBodyGeometryProperties(body)])
+        .filter(([, properties]) => properties)
+    ),
+    watertightById: new Map(project.bodies.map((body) => [body.id, bodyWatertightVerdict(body)]))
+  });
+
+  bomPartsList.replaceChildren();
+  bomPurchasedList.replaceChildren();
+  printPrepList.replaceChildren();
+
+  if (!project.bodies.length) {
+    documentsSummary.textContent = ABSENT_OUTPUT;
+    bomTotalMass.textContent = ABSENT_OUTPUT;
+    bomNote.textContent = "Add a body to produce a bill of materials.";
+    printPrepSummary.textContent = ABSENT_OUTPUT;
+    return;
+  }
+
+  for (const part of bom.parts) {
+    const mass = formatOutput(part.massGrams, 2);
+    const row = documentRow(
+      part.name,
+      part.massGrams == null
+        ? `${mass} g - ${part.massUnavailableReason}`
+        : `${mass} g of ${part.materialLabel}, ${part.processLabel}`,
+      part.massGrams == null ? "validation-note" : ""
+    );
+    row.dataset.bomBodyId = part.bodyId;
+    row.dataset.bomMass = mass;
+    bomPartsList.append(row);
+  }
+
+  for (const entry of bom.purchased) {
+    const row = documentRow(
+      `${entry.quantity} x`,
+      [describePurchased(entry), describeMinimumLength(entry)].filter(Boolean).join(" - ")
+    );
+    row.dataset.bomPurchased = entry.key;
+    bomPurchasedList.append(row);
+  }
+  if (!bom.purchased.length) {
+    bomPurchasedList.append(documentRow("Buy", "No hole in this project resolves to a fastener.", "validation-ok"));
+  }
+
+  // Null, not a partial sum presented as the answer. A reader takes a total to cover the
+  // rows above it, so a total missing a row is absent and says how short it is.
+  bomTotalMass.textContent = `${formatOutput(bom.totals.massGrams, 2)} g`;
+  bomNote.textContent = bom.totals.massUnavailableReason
+    ? `${bom.totals.massUnavailableReason} The bodies that could be weighed come to ${formatOutput(bom.totals.knownMassGrams, 2)} g.`
+    : "";
+  documentsSummary.textContent = `${bom.totals.partCount} made / ${bom.totals.purchasedCount} bought`;
+
+  renderDrawingSheet(selectedProjectBody());
+
+  const prep = projectPrintPrep(project);
+  const needingSupport = prep.filter((entry) => entry.supports.required);
+  printPrepSummary.textContent = needingSupport.length ? `${needingSupport.length} need support` : "No supports";
+  for (const entry of prep) {
+    const row = documentRow(
+      entry.name,
+      [
+        entry.supports.summary,
+        entry.orientation.recommendation ? `Orientation: ${entry.orientation.recommendation}` : entry.orientation.why,
+        entry.stock.matches === false ? entry.stock.reason : null
+      ]
+        .filter(Boolean)
+        .join(" "),
+      entry.supports.required ? "validation-note" : ""
+    );
+    row.dataset.printPrepBodyId = entry.bodyId ?? "";
+    row.dataset.printPrepSupports = String(entry.supports.required);
+    printPrepList.append(row);
+  }
+}
+
+/**
+ * The drawing sheet for the selected body.
+ *
+ * ⚠ `innerHTML`, and the one place on this page that uses it. `bodyDrawingSheet` returns
+ * markup it built itself from numbers, and every string it interpolates goes through its
+ * own `escapeXml` - there is no path from a project field to unescaped markup. Building
+ * several hundred SVG nodes through `createElement` per render would be the alternative,
+ * and it would put the drawing's structure in two places: the string the tests parse and
+ * the DOM the user sees.
+ *
+ * The mesh is passed for the isometric only. It is the compiled result the page already
+ * holds, never a recompile, and a body with no result yet gets a sheet whose isometric
+ * says so rather than a blank frame.
+ */
+function renderDrawingSheet(body) {
+  if (!body) {
+    drawingSheet.replaceChildren();
+    drawingSummary.textContent = ABSENT_OUTPUT;
+    return;
+  }
+  const result = compileResults.get(body.id) ?? null;
+  drawingSheet.innerHTML = bodyDrawingSheet(body, {
+    mesh: result ? { vertices: result.vertices, triangleCount: result.triangleCount, bounds: result.bounds } : null,
+    materialLabel: getMaterial(body.materialId)?.label ?? body.materialId,
+    processLabel: describeProcess(bodyProcessId(body)) ?? bodyProcessId(body)
+  });
+  drawingSummary.textContent = isSketchBody(body) ? "A3, dimensioned" : "A3, isometric only";
+}
+
 function render() {
   history.current = normalizePartProject(history.current);
   const project = history.current;
@@ -1981,9 +3353,54 @@ function render() {
   }
   renderCutProfiles(body);
   renderSketchPreview(body);
+  renderMassProperties(body);
   renderValidation(project);
+  renderManufacturability(project);
+  renderDocuments(project);
   previewScene.setSelectedBodyId(project.selectedBodyId);
   requestCadCompile(project);
+  scheduleProjectAutosave();
+}
+
+function profileForScope(draft, scope) {
+  return scope === "outer" ? draft.sketch.outerProfile : draft.sketch.cutProfiles[Number(scope.split(":")[1])];
+}
+
+/**
+ * Apply one standards-picker change to a cut profile's `hole`.
+ *
+ * Clearing the standard removes the whole `hole` object rather than leaving an
+ * empty one behind, so "None" really does return the profile to a plain circle
+ * with the author's own radius. Every other change writes one field and lets
+ * `normalizeProfile` re-derive the radius on commit, which is why there is no
+ * radius arithmetic here: one place owns that, and it is `createCircleProfile`.
+ */
+function updateProfileHoleFromInput(input) {
+  const scope = input.dataset.profileScope;
+  const prop = input.dataset.holeProp;
+
+  commitSelectedBody((draft) => {
+    const profile = profileForScope(draft, scope);
+    if (!profile) return draft;
+
+    if (prop === "standard") {
+      if (!input.value) {
+        delete profile.hole;
+        return draft;
+      }
+      // A first standard selection needs a size to become a hole at all, because a
+      // hole with no size is indistinguishable from no hole.
+      profile.hole = { ...(profile.hole ?? {}), standard: input.value, size: profile.hole?.size ?? DEFAULT_HOLE_SIZE };
+      return draft;
+    }
+
+    if (!profile.hole) return draft;
+    profile.hole = {
+      ...profile.hole,
+      [prop]: prop === "lockSize" ? input.checked : input.value
+    };
+    return draft;
+  }, "Hole standard updated");
 }
 
 function updateProfileFromInput(input) {
@@ -1996,10 +3413,7 @@ function updateProfileFromInput(input) {
   if (!Number.isFinite(value)) return;
 
   commitSelectedBody((draft) => {
-    const profile =
-      scope === "outer"
-        ? draft.sketch.outerProfile
-        : draft.sketch.cutProfiles[Number(scope.split(":")[1])];
+    const profile = profileForScope(draft, scope);
     if (!profile) return draft;
 
     if (prop === "point") {
@@ -2018,8 +3432,39 @@ function handleBodyPropertyInput(input) {
     if (prop === "name") draft.name = input.value.trim() || draft.name;
     if (prop === "color") draft.color = input.value;
     if (prop === "extrudeDepthMm") draft.extrudeDepthMm = Number(input.value);
+    // Material is source of truth for mass and nothing else: it is absent from the
+    // compile signature, so changing it saves the project without rebuilding a solid.
+    if (prop === "materialId") draft.materialId = input.value;
+    if (prop === "revolveAngleDeg" && draft.revolve) draft.revolve.angleDeg = Number(input.value);
+    applyGearPropertyInput(draft, prop, input);
     return draft;
   });
+}
+
+/**
+ * Gear fields, all of which reach geometry.
+ *
+ * `normalizeSpurGearSpec` clamps every one of these and re-derives `extrudeDepthMm`
+ * from the thickness, so this writes the raw value and lets the whitelist decide -
+ * which is also why an out-of-range entry snaps back on the next render rather than
+ * producing an uncompilable body.
+ */
+function applyGearPropertyInput(draft, prop, input) {
+  if (!draft.gear || !prop.startsWith("gear")) return;
+  if (prop === "gearToothCount") draft.gear.toothCount = Math.round(Number(input.value));
+  if (prop === "gearModuleMm") draft.gear.moduleMm = Number(input.value);
+  if (prop === "gearPressureAngleDeg") draft.gear.pressureAngleDeg = Number(input.value);
+  if (prop === "gearThicknessMm") draft.gear.thicknessMm = Number(input.value);
+  if (prop === "gearBoreDiameterMm") draft.gear.boreDiameterMm = Number(input.value);
+  if (prop === "gearHelixAngleDeg") draft.gear.helixAngleDeg = Number(input.value);
+  if (prop === "gearProfileShiftCoefficient") draft.gear.profileShiftCoefficient = Number(input.value);
+  if (prop === "gearBacklashMm") draft.gear.backlashMm = Number(input.value);
+  if (prop === "gearRackProfileId") draft.gear.rackProfileId = input.value;
+  // An empty fillet field means "follow the rack profile", which the normalizer
+  // stores as null rather than resolving, so switching rack still moves the fillet.
+  if (prop === "gearRootFilletFactor") {
+    draft.gear.rootFilletFactor = String(input.value).trim() === "" ? null : Number(input.value);
+  }
 }
 
 function handleTransformInput(input) {
@@ -2075,7 +3520,21 @@ function handleResizeTargetInput(input) {
 
 function handleInspectorChange(event) {
   const input = event.target;
-  if (!(input instanceof HTMLInputElement)) return;
+  if (!(input instanceof HTMLInputElement) && !(input instanceof HTMLSelectElement)) return;
+  // Hole controls carry `profileScope` too, so they are dispatched first and the
+  // handler returns: they are not numeric profile fields and must not fall through
+  // to `updateProfileFromInput`.
+  if (input.dataset.holeProp) {
+    updateProfileHoleFromInput(input);
+    return;
+  }
+  // The mesh partner is session-only presentation state, so it re-renders the
+  // inspector and neither commits the project nor triggers a compile.
+  if (input.dataset.gearPairPartner) {
+    gearPairPartnerId = input.value;
+    window.setTimeout(() => renderBodyProperties(selectedProjectBody()), 0);
+    return;
+  }
   if (input.dataset.resizeOption) handleResizeOptionInput(input);
   if (input.dataset.resizeTargetAxis) handleResizeTargetInput(input);
   if (input.dataset.bodyProp) handleBodyPropertyInput(input);
@@ -2083,10 +3542,12 @@ function handleInspectorChange(event) {
   if (input.dataset.profileScope) updateProfileFromInput(input);
 }
 
-function createCutProfile(type) {
+function createCutProfile(type, options = {}) {
   const body = selectedProjectBody();
   if (!isSketchBody(body) || !body?.sketch?.outerProfile) return null;
-  const [centerX, centerZ] = profileCenter(body.sketch.outerProfile);
+  const [defaultX, defaultZ] = profileCenter(body.sketch.outerProfile);
+  const centerX = Number.isFinite(Number(options.x)) ? Number(options.x) : defaultX;
+  const centerZ = Number.isFinite(Number(options.z)) ? Number(options.z) : defaultZ;
   const size = profileSize(body.sketch.outerProfile);
   const existingIds = new Set([
     body.sketch.outerProfile.id,
@@ -2094,6 +3555,7 @@ function createCutProfile(type) {
   ]);
 
   if (type === "slot") {
+    if (options.hole) throw new Error("A fastener standard can only be attached to a circular cut profile.");
     return createSlottedHole({
       id: uniquePartId("slot_hole", existingIds, "slot_hole"),
       x: centerX,
@@ -2103,12 +3565,20 @@ function createCutProfile(type) {
     });
   }
 
-  return createCircularHole({
+  const profile = createCircularHole({
     id: uniquePartId("hole", existingIds, "hole"),
     x: centerX,
     z: centerZ,
     radius: Math.max(2, Math.min(size.width, size.height) * 0.06)
   });
+  if (!options.hole) return profile;
+
+  // Validated through the same refusal path the assistant's profile editor uses,
+  // rather than a second copy of it, then rebuilt so the returned profile already
+  // carries its derived radius. Without the rebuild the caller would report the
+  // placeholder diameter in its status message and only the commit would correct it.
+  applyHoleArgument(profile, options.hole);
+  return createCircularHole(profile);
 }
 
 function selectedProfileIds(body) {
@@ -2166,6 +3636,38 @@ function addCircularHolePattern() {
     draft.sketch.cutProfiles.push(...holes);
     return draft;
   }, "Bolt circle added");
+}
+
+/**
+ * Resolve the chosen hardware entry against the selected body and append its cuts.
+ *
+ * Deliberately the same shape as the two pattern buttons above: resolve, then one
+ * `commitSelectedBody`. That is what makes an applied hardware pattern
+ * indistinguishable from hand-authored cuts - it goes through `normalizeSketch` and
+ * `normalizeProfile` like every other mutation, nothing about it is persisted beyond
+ * the profiles themselves, and undo takes it back in one step.
+ *
+ * The pattern is centred on the outer profile's centre rather than on the origin,
+ * because a sketch whose plate is off-centre is the case where the difference shows.
+ */
+function applyHardwarePattern(entryId = hardwareEntrySelect.value) {
+  const body = selectedProjectBody();
+  if (!isSketchBody(body) || !body?.sketch?.outerProfile) return;
+  const [centerX, centerZ] = profileCenter(body.sketch.outerProfile);
+  const applied = appendHardwarePatternToSketch(body.sketch, entryId, { centerX, centerZ });
+
+  if (!applied.ok) {
+    // A refusal is reported and changes nothing, exactly as an unresolvable hole does.
+    // It is a status message rather than a validation issue because there is no body
+    // state to be invalid: the geometry the user had is the geometry they still have.
+    showStatus(applied.resolved.reason, 6400);
+    return;
+  }
+
+  commitSelectedBody((draft) => {
+    draft.sketch.cutProfiles.push(...applied.resolved.profiles);
+    return draft;
+  }, applied.resolved.label);
 }
 
 function addRevolvedBody(presetId = revolvePresetSelect.value) {
@@ -2227,28 +3729,87 @@ function addBooleanBody(operation = booleanOperationSelect.value, options = {}) 
   return body;
 }
 
-async function exportSelectedStl(options = {}) {
+/**
+ * Export the selected body to one format through the CAD worker.
+ *
+ * The availability table is consulted here as well as in the menu, because the
+ * assistant and the browser suite can reach this without going through a button,
+ * and a refusal has to state the same reason either way.
+ */
+async function exportSelectedFormat(formatId, options = {}) {
   if (options.waitForCompile) await waitForCadReady();
   const body = selectedProjectBody();
-  if (!body || !compileResults.has(body.id)) {
-    showStatus("Build a generated body before exporting STL.", 4200);
-    if (options.throwOnInvalid) throw new Error("Build a generated body before exporting STL.");
-    return;
+  const availability = bodyExportAvailability(body, formatId, exportMenuContext(body));
+  if (!availability.available) {
+    showStatus(availability.reason, 5200);
+    if (options.throwOnInvalid) throw new Error(availability.reason);
+    return null;
   }
 
+  if (formatId === EXPORT_FORMAT_STEP) return exportSelectedStep(options);
+  if (formatId === EXPORT_FORMAT_3MF) return exportSelected3mf(body, options);
+
   const requestId = nextWorkerRequestId();
-  pendingStlExports.set(requestId, body.id);
-  exportStlButton.disabled = true;
-  showStatus("Preparing STL...", 8000);
+  const label = exportFormatLabel(formatId);
+  let settled = null;
+  const finished = new Promise((resolve, reject) => {
+    settled = { resolve, reject };
+  });
+  pendingExports.set(requestId, { formatId, bodyId: body.id, ...settled });
+  renderCompileStatus();
+  showStatus(`Preparing ${label}...`, 8000);
+
   try {
-    ensureCadWorker().postMessage({ type: "exportStl", requestId, body, bodies: history.current.bodies });
+    postCadWorkerMessage({
+      type: "exportBody",
+      requestId,
+      formatId,
+      body,
+      bodies: history.current.bodies
+    });
   } catch (error) {
-    pendingStlExports.delete(requestId);
-    exportStlButton.disabled = false;
+    pendingExports.delete(requestId);
+    renderCompileStatus();
     handleCadWorkerFailure(
-      compileFailure("worker-post-message-error", `Unable to start STL export: ${error.message}`, body.id)
+      compileFailure("worker-post-message-error", `Unable to start ${label} export: ${error.message}`, body.id)
     );
-    if (options.throwOnInvalid) throw new Error("Unable to start STL export.");
+    if (options.throwOnInvalid) throw new Error(`Unable to start ${label} export.`);
+    return null;
+  }
+
+  if (options.throwOnInvalid) return finished;
+  // Nothing is awaiting this one, and an export failure is already reported through
+  // `showStatus`, so the rejection is absorbed rather than left unhandled.
+  finished.catch(() => {});
+  return null;
+}
+
+function exportSelectedStl(options = {}) {
+  return exportSelectedFormat(EXPORT_FORMAT_ASCII_STL, options);
+}
+
+/**
+ * 3MF, built here rather than in the worker.
+ *
+ * The mesh is already in the compile cache, so this needs no worker round trip and
+ * no second compile - and it keeps JSZip out of the worker bundle, which Vite
+ * would otherwise inline into the preview startup path (`AGENTS.md:48`).
+ */
+async function exportSelected3mf(body, options = {}) {
+  showStatus("Preparing 3MF...", 8000);
+  try {
+    const { exportBodyMeshTo3mf } = await import("./parts/exporters/threeMf.js");
+    const result = await exportBodyMeshTo3mf(body, compileResults.get(body.id), {
+      watertight: bodyWatertightVerdict(body)
+    });
+    downloadBlob(result.data, result.fileName, result.mimeType);
+    showStatus("3MF export started");
+    return result;
+  } catch (error) {
+    const message = error?.message ?? "3MF export failed.";
+    showStatus(message, 6200);
+    if (options.throwOnInvalid) throw new Error(message);
+    return null;
   }
 }
 
@@ -2261,25 +3822,50 @@ function bytesFromBase64(value) {
   return bytes;
 }
 
+/**
+ * STEP for **any** body kind, through the optional local bridge.
+ *
+ * ⚠ This used to refuse everything but an `advancedCadRecipe` body, because the bridge
+ * read `body.advancedCadRecipe` and nothing else. `backendPayload.js` now builds a
+ * declarative payload per kind - a sketch's profiles, a revolve's polygon, a gear's
+ * transverse outline, a boolean's operand closure - so the remaining question about STEP
+ * is whether a bridge is there to answer it, which is what the probe is for.
+ *
+ * The request asks for **no mesh and no STL**. The STEP is OCCT's own BREP from
+ * `export_step` and has never touched the ASCII STL; keeping `includeMesh` false is what
+ * makes that true rather than merely intended.
+ */
 async function exportSelectedStep(options = {}) {
   const body = selectedProjectBody();
-  if (!body || !isAdvancedCadRecipeBody(body)) {
-    showStatus("Select an advanced CAD recipe body before exporting STEP.", 4200);
-    if (options.throwOnInvalid) throw new Error("Select an advanced CAD recipe body before exporting STEP.");
+  if (!body) {
+    showStatus("Select a body before exporting STEP.", 4200);
+    if (options.throwOnInvalid) throw new Error("Select a body before exporting STEP.");
+    return;
+  }
+
+  // Asked before the round trip, so a body with no exact representation - a sketch with
+  // no outer profile, a boolean whose operand is gone - is refused for the reason that is
+  // true about the body rather than being blamed on a missing backend.
+  const unavailable = exactBodyUnavailableReason(body, { bodies: history.current.bodies });
+  if (unavailable) {
+    showStatus(unavailable, 5200);
+    if (options.throwOnInvalid) throw new Error(unavailable);
     return;
   }
 
   try {
     showStatus("Preparing STEP with local CAD backend...", 10000);
-    const response = await fetch("/api/cad/compile", {
+    const response = await fetch(CAD_COMPILE_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        body,
-        includeStep: true,
-        includeMesh: false,
-        includeStl: false
-      })
+      body: JSON.stringify(
+        exactBodyCompileRequest(body, {
+          bodies: history.current.bodies,
+          includeStep: true,
+          includeStl: false,
+          includeMesh: false
+        })
+      )
     });
     let result = null;
     try {
@@ -2293,13 +3879,23 @@ async function exportSelectedStep(options = {}) {
 
     downloadBlob(
       bytesFromBase64(result.stepBase64),
-      `${sanitizePartId(body.name ?? body.id, "advanced_cad_part")}.step`,
+      `${sanitizePartId(body.name ?? body.id, "part")}.step`,
       "model/step"
     );
-    showStatus("STEP export started");
+    // A gear's involute flanks are a sampled point list at the page's chord tolerance, and
+    // the payload declares it. Saying so beats letting a tier called "exact" imply more
+    // than it delivered.
+    showStatus(
+      result.fidelity === "sampled"
+        ? "STEP export started. Curved flanks in this body are sampled to the page's chord tolerance."
+        : "STEP export started"
+    );
   } catch (error) {
     const message = error?.message ?? "STEP export failed.";
     showStatus(message, 6200);
+    // The bridge just told us something the cached probe may not know. Asking again keeps
+    // the menu's next sentence consistent with what actually happened.
+    refreshCadBackendProbe();
     if (options.throwOnInvalid) throw new Error(message);
   }
 }
@@ -2330,7 +3926,9 @@ async function sendGeneratedAssembly(options = {}) {
       compileResults: snapshotCompileResults,
       matrixWorldById
     });
-    await writeWorkspaceValue(SNAPSHOT_STORE_NAME, CURRENT_SNAPSHOT_KEY, snapshot);
+    await workspaceStore.writeCurrentAssemblySnapshot(snapshot);
+    // The handoff navigates away, so the project must be on disk before the page unloads.
+    await flushProjectAutosave();
     window.location.href = `${import.meta.env.BASE_URL}?fromParts=1`;
   } catch (error) {
     console.error("Component Builder handoff failed", error);
@@ -2391,7 +3989,8 @@ function mountPartsAssistant() {
         await sendGeneratedAssembly({ waitForCompile: true, throwOnInvalid: true });
         return "Assembly Studio handoff started.";
       },
-      parts_open_assembly_studio: () => {
+      parts_open_assembly_studio: async () => {
+        await flushProjectAutosave();
         window.location.href = import.meta.env.BASE_URL;
         return "Assembly Studio is opening.";
       },
@@ -2477,11 +4076,16 @@ addTemplateButton.addEventListener("click", () => {
 
 addLinearPatternButton.addEventListener("click", addLinearHolePattern);
 addCircularPatternButton.addEventListener("click", addCircularHolePattern);
+hardwareEntrySelect.addEventListener("change", renderHardwareEntryNote);
+applyHardwarePatternButton.addEventListener("click", () => applyHardwarePattern());
 addRevolveBodyButton.addEventListener("click", () => addRevolvedBody());
 addSpurGearButton.addEventListener("click", addSpurGear);
 addBooleanBodyButton.addEventListener("click", () => addBooleanBody());
 
 newProjectButton.addEventListener("click", () => {
+  // The project is autosaved now, so New replaces stored work and not just the session.
+  // Same guard, and for the same reason, as Circuit Lab's new-project button.
+  if (history.current.bodies.length && !window.confirm("Start a new PartProject? The saved project will be replaced.")) return;
   resetProjectHistory(history);
   render();
   showStatus("New PartProject");
@@ -2558,26 +4162,16 @@ projectFileInput.addEventListener("change", () => {
   reader.readAsText(file);
 });
 
-function shortcutTargetIsTextEditable(target) {
-  return target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target?.isContentEditable === true;
-}
-
-function handleProjectHistoryShortcut(event) {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || shortcutTargetIsTextEditable(event.target)) return;
-  const key = event.key.toLowerCase();
-  if (key === "z" && !event.shiftKey) {
-    event.preventDefault();
+const handleProjectHistoryShortcut = createHistoryShortcutHandler({
+  undo: () => {
     undoProject(history);
     render();
-  } else if ((key === "z" && event.shiftKey) || key === "y") {
-    event.preventDefault();
+  },
+  redo: () => {
     redoProject(history);
     render();
   }
-}
+});
 
 undoButton.addEventListener("click", () => {
   undoProject(history);
@@ -2591,12 +4185,35 @@ redoButton.addEventListener("click", () => {
 
 document.addEventListener("keydown", handleProjectHistoryShortcut);
 
-exportStlButton.addEventListener("click", () => {
-  void exportSelectedStl();
+exportMenuToggle.addEventListener("click", () => {
+  const opening = !isExportMenuOpen();
+  setExportMenuOpen(opening);
+  // Opening the menu is the moment the answer starts to matter, and the only moment a
+  // user is waiting for it. The probe is cached, so this costs one subprocess per session
+  // and nothing on Pages after the first refusal expires.
+  if (opening) refreshCadBackendProbe();
 });
-exportStepButton?.addEventListener("click", () => {
-  void exportSelectedStep();
+
+exportMenuPanel.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-export-format]");
+  if (!item || item.disabled) return;
+  setExportMenuOpen(false);
+  void exportSelectedFormat(item.dataset.exportFormat);
 });
+
+// A popover that only closes by re-clicking its own trigger is a trap for a
+// keyboard user and a nuisance for everyone else.
+document.addEventListener("pointerdown", (event) => {
+  if (!isExportMenuOpen() || exportMenu.contains(event.target)) return;
+  setExportMenuOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !isExportMenuOpen()) return;
+  setExportMenuOpen(false);
+  exportMenuToggle.focus();
+});
+
 sendAssemblyButton.addEventListener("click", () => {
   void sendGeneratedAssembly();
 });
@@ -2629,7 +4246,18 @@ addSlottedHoleButton.addEventListener("click", () => {
   }, "Slotted hole added");
 });
 
+processSelect.addEventListener("change", () => {
+  const value = processSelect.value;
+  // Absent from `COMPILE_SIGNATURE_FIELDS`, so this saves the project and rebuilds
+  // nothing: a process is how the geometry is judged, never what it is.
+  commitSelectedBody((draft) => {
+    draft.processId = value;
+    return draft;
+  }, `Process set to ${getProcessProfile(value)?.label ?? value}`);
+});
+
 bodyProperties.addEventListener("change", handleInspectorChange);
+massProperties.addEventListener("change", handleInspectorChange);
 outerProfileFields.addEventListener("change", handleInspectorChange);
 cutProfileFields.addEventListener("change", handleInspectorChange);
 cutProfileFields.addEventListener("click", (event) => {
@@ -2656,6 +4284,11 @@ authController.subscribe((nextAuthState) => {
   if (!userId) lastSyncedUserId = null;
 });
 render();
+installPersistenceInstrumentation();
+installCompileInstrumentation();
+installDfmInstrumentation();
+installCadBackendInstrumentation();
+void bootstrapProjectPersistence();
 void loadPartLibrary();
 void authController.refresh();
 mountPartsAssistant();

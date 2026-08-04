@@ -1,28 +1,19 @@
-import { sanitizePartId } from "./contracts.js";
 import {
   ADVANCED_CAD_RECIPE_KIND,
   BOOLEAN_OPERATION_KIND,
   PART_BODY_SOURCE_KINDS,
   REVOLVE_KIND,
   SKETCH_EXTRUDE_KIND,
-  SPUR_GEAR_KIND
+  SPUR_GEAR_KIND,
+  isFiniteNumber as finite,
+  isPositiveNumber as positive,
+  sanitizePartId
 } from "./contracts.js";
+import { createIssue as issue } from "./issues.js";
 import { validateAdvancedCadRecipe } from "./advancedCadRecipe.js";
 import { validateBooleanFeature, validateRevolveFeature } from "./featureOps.js";
 import { validateSpurGearSpec } from "./gears.js";
 import { CUT_PROFILE_TYPES, OUTER_PROFILE_TYPES, profileBounds, profileIsClosed } from "./sketch.js";
-
-function issue(code, message, path, severity = "error") {
-  return { code, message, path, severity };
-}
-
-function finite(value) {
-  return Number.isFinite(Number(value));
-}
-
-function positive(value) {
-  return finite(value) && Number(value) > 0;
-}
 
 function validateStableId(value, path, issues) {
   if (!value || sanitizePartId(value) !== value) {

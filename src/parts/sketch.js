@@ -1,4 +1,5 @@
 import { asFiniteNumber, asPositiveNumber, sanitizePartId, uniquePartId } from "./contracts.js";
+import { holeDerivedRadiusMm, normalizeHoleSpec } from "./holes.js";
 
 export const OUTER_PROFILE_TYPES = Object.freeze(["rectangle", "circle", "roundedSlot", "polyline"]);
 export const CUT_PROFILE_TYPES = Object.freeze(["circle", "roundedSlot", "rectangle", "polyline"]);
@@ -17,14 +18,46 @@ export function createRectangleProfile(options = {}) {
   };
 }
 
+/**
+ * The one rule that decides a circle profile's `hole` and radius together.
+ *
+ * When the hole resolves and is locked, the **radius is derived from the standard
+ * rather than stored independently**. That is what makes the field mean something:
+ * a profile labelled M3 clearance cannot also be 6.4 mm in radius, because there
+ * is only one place the radius can come from. A refused or unlocked hole leaves
+ * the author's radius exactly as it was - see `holeDerivedRadiusMm`.
+ *
+ * Shared rather than inlined because there are two circle-profile whitelists in
+ * this page - this module's and the assistant's custom-sketch normalizer in
+ * `customSketchBody.js` - and they carry deliberately different radius defaults.
+ * The defaults stay theirs; the standards rule is owned here so the two cannot
+ * drift on the part that matters.
+ */
+export function circleHoleFields(source, fallbackRadiusMm) {
+  const hole = normalizeHoleSpec(source?.hole);
+  const derivedRadius = hole ? holeDerivedRadiusMm(hole) : null;
+  return { hole, radius: derivedRadius ?? fallbackRadiusMm };
+}
+
+/**
+ * A circle profile, optionally carrying a fastener-standards `hole`.
+ *
+ * `hole` is registered **here** because this object literal is the whitelist every
+ * mutation path rebuilds a profile from: `normalizeSketch` runs `normalizeProfile`
+ * on every commit and that is what reaches IndexedDB, so a field absent from this
+ * literal is silently dropped on the next edit.
+ */
 export function createCircleProfile(options = {}) {
-  return {
+  const { hole, radius } = circleHoleFields(options, asPositiveNumber(options.radius, 20));
+  const profile = {
     id: sanitizePartId(options.id ?? "circle", "circle"),
     type: "circle",
     x: asFiniteNumber(options.x, 0),
     z: asFiniteNumber(options.z, 0),
-    radius: asPositiveNumber(options.radius, 20)
+    radius
   };
+  if (hole) profile.hole = hole;
+  return profile;
 }
 
 export function createRoundedSlotProfile(options = {}) {

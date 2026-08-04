@@ -1,20 +1,25 @@
 export const WORKSPACE_DB_NAME = "stl-assembly-studio";
-export const WORKSPACE_DB_VERSION = 4;
+export const WORKSPACE_DB_VERSION = 5;
 export const SNAPSHOT_STORE_NAME = "snapshots";
 export const DESIGN_STORE_NAME = "robot-designs";
 export const PART_LIBRARY_STORE_NAME = "part-library";
 export const CIRCUIT_DESIGN_STORE_NAME = "circuit-designs";
+export const PART_PROJECT_STORE_NAME = "part-projects";
 export const CURRENT_SNAPSHOT_KEY = "current-assembly";
 export const CURRENT_DESIGN_KEY = "current-robot-design";
 export const CURRENT_CIRCUIT_DESIGN_KEY = "current-circuit-design";
 export const CURRENT_CIRCUIT_LAB_PROJECT_KEY = "current-circuit-lab-project";
 export const CURRENT_MECHATRONICS_BINDING_KEY = "current-mechatronics-binding";
+export const CURRENT_PART_PROJECT_KEY = "current-part-project";
 
-const REQUIRED_STORE_NAMES = Object.freeze([
+// Every opener and the repair path below derive their store set from this list, so a new
+// entry here is created on upgrade, preserved across a repair, and accepted by batch writes.
+export const REQUIRED_STORE_NAMES = Object.freeze([
   SNAPSHOT_STORE_NAME,
   DESIGN_STORE_NAME,
   PART_LIBRARY_STORE_NAME,
-  CIRCUIT_DESIGN_STORE_NAME
+  CIRCUIT_DESIGN_STORE_NAME,
+  PART_PROJECT_STORE_NAME
 ]);
 
 export class WorkspaceDbRepairBlockedError extends Error {

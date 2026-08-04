@@ -1,3 +1,5 @@
+import "./tokens.css";
+import "./shellCards.css";
 import "./styles.css";
 import "./shellHeader.css";
 import * as THREE from "three";
@@ -57,6 +59,8 @@ import { isShellCardOpen, mountShellCardToggles } from "./shellCards.js";
 import { commitHistory, createHistory, historyStatus, redoHistory, resetHistory, undoHistory } from "./history.js";
 import { mountPageAssistant } from "./assistant/chatUi.js";
 import { mountAssistantEvalPanel } from "./assistant/evalRunner.js";
+import { createStatusChannel } from "./statusChannel.js";
+import { createHistoryShortcutHandler } from "./shortcuts.js";
 
 const viewport = document.querySelector("#viewport");
 const stage = document.querySelector(".stage");
@@ -264,7 +268,6 @@ let poseState;
 let selectedPart = null;
 let studioMode = "hinge";
 let partFilter = "";
-let statusTimer = null;
 let importedColorIndex = 0;
 let layoutDirty = false;
 let featureWorker = null;
@@ -605,14 +608,20 @@ function filesContainStl(dataTransfer) {
   return [...(dataTransfer?.files ?? [])].some((file) => file.name.toLowerCase().endsWith(".stl"));
 }
 
-function showStatus(message, timeout = 2200) {
-  clearTimeout(statusTimer);
-  loading.textContent = message;
-  loading.hidden = false;
-
-  statusTimer = setTimeout(() => {
+const statusChannel = createStatusChannel({
+  element: loading,
+  defaultTimeoutMs: 2200,
+  reveal: true,
+  // The Assembly Studio banner stays up until an assembly exists, so the idle
+  // step is conditional rather than an unconditional hide.
+  onIdle: () => {
     if (assemblyGroup) loading.hidden = true;
-  }, timeout);
+  },
+  liveRegionId: "assembly-live-region"
+});
+
+function showStatus(message, timeout = 2200) {
+  statusChannel.show(message, timeout);
 }
 
 function fitCameraToObject(object) {
@@ -3121,24 +3130,10 @@ function updateOrientationGizmo() {
   }
 }
 
-function shortcutTargetIsTextEditable(target) {
-  return target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target?.isContentEditable === true;
-}
-
-function handleStudioHistoryShortcut(event) {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || shortcutTargetIsTextEditable(event.target)) return;
-  const key = event.key.toLowerCase();
-  if (key === "z" && !event.shiftKey) {
-    event.preventDefault();
-    undoStudioHistory();
-  } else if ((key === "z" && event.shiftKey) || key === "y") {
-    event.preventDefault();
-    redoStudioHistory();
-  }
-}
+const handleStudioHistoryShortcut = createHistoryShortcutHandler({
+  undo: () => undoStudioHistory(),
+  redo: () => redoStudioHistory()
+});
 
 function animate() {
   controls.update();

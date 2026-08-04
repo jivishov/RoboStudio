@@ -1,0 +1,49 @@
+/* Shared RoboStudio design tokens.
+ *
+ * The four light pages (Assembly Studio, Component Builder, Robotics Workbench,
+ * Circuit Lab) had each redeclared the same palette under a different prefix:
+ * --panel / --parts-panel / --circuit-panel all resolved to #f4f6f9, and the
+ * same held for the panel-strong, line, muted, blue, green, red and mono-font
+ * values. Four copies is how #0c7c59 becomes #0f9f6e on one page only.
+ *
+ * This file is the single source of those values. Each page keeps its own
+ * prefixed variable names and re-points them at the --rs-* tokens, so no
+ * selector is renamed and no computed value changes. Where a page genuinely
+ * differs it keeps its literal, and the difference is now visible as a literal
+ * sitting next to aliases instead of being buried in a wall of hex.
+ *
+ * Electronics Studio is a dark surface and shares none of the palette; it does
+ * not import this file.
+ *
+ * Known remaining deviations, left alone deliberately because changing them
+ * would be a visual change:
+ *   Assembly Studio  --text-soft #7b8491 (others #7d8795)
+ *                    --line-strong #aeb6c3 (others #aab5c4)
+ *                    --amber #f59e0b (others #b7791f; the status amber is
+ *                    carried separately as --status-warn #b7791f)
+ *                    body background #eef1f5 (others #edf1f6)
+ *                    --shadow at 11% (others 9-10%)
+ *   Component Builder --parts-shadow at 9% (others 10%)
+ *   Robotics Workbench --ink #111821 (others --text #141922)
+ *                    --amber #b7791f matches, but --green/--red are aliased
+ */
+
+:root {
+  --rs-surface: #edf1f6;
+  --rs-panel: #f4f6f9;
+  --rs-panel-strong: #ffffff;
+  --rs-line: #cbd3df;
+  --rs-line-strong: #aab5c4;
+  --rs-text: #141922;
+  --rs-muted: #4f5b6b;
+  --rs-soft: #7d8795;
+  --rs-blue: #1268e8;
+  --rs-blue-deep: #0d54c7;
+  --rs-green: #0c7c59;
+  --rs-amber: #b7791f;
+  --rs-red: #b42318;
+  --rs-dark: #0b1016;
+  --rs-dark-soft: #151b23;
+  --rs-shadow: 0 10px 28px rgb(15 23 42 / 10%);
+  --rs-value-font: "JetBrains Mono", "IBM Plex Mono", Consolas, monospace;
+}

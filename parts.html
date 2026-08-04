@@ -59,8 +59,18 @@
             <span class="shell-header__label shell-header__label--hint">Redo</span>
           </button>
           <span class="parts-toolbar__divider shell-header__divider" aria-hidden="true"></span>
-          <button id="export-stl" class="parts-button shell-header__button" type="button" disabled>Export STL</button>
-          <button id="export-step" class="parts-button shell-header__button" type="button" disabled>Export STEP</button>
+          <div class="parts-export" id="export-menu">
+            <button
+              id="export-menu-toggle"
+              class="parts-button shell-header__button"
+              type="button"
+              aria-haspopup="true"
+              aria-expanded="false"
+              aria-controls="export-menu-panel"
+              disabled
+            >Export</button>
+            <div id="export-menu-panel" class="parts-export__panel" role="menu" aria-labelledby="export-menu-toggle" hidden></div>
+          </div>
           <button id="send-assembly" class="parts-button shell-header__button" type="button" disabled>Send Assembly</button>
         </nav>
       </header>
@@ -99,6 +109,12 @@
                 <button id="add-linear-pattern" class="parts-button parts-button--light" type="button" disabled>Linear Holes</button>
                 <button id="add-circular-pattern" class="parts-button parts-button--light" type="button" disabled>Bolt Circle</button>
               </div>
+              <div class="parts-field">
+                <label for="hardware-entry-select">Hardware pattern</label>
+                <select id="hardware-entry-select"></select>
+              </div>
+              <button id="apply-hardware-pattern" class="parts-button parts-button--light" type="button" disabled>Apply Hardware Pattern</button>
+              <p id="hardware-entry-note" class="parts-hardware-note"></p>
               <div class="parts-field">
                 <label for="revolve-preset-select">Lathe body</label>
                 <select id="revolve-preset-select"></select>
@@ -188,6 +204,40 @@
             <output id="build-count">Idle</output>
           </div>
           <ul id="compile-list" class="validation-list"></ul>
+          <div class="parts-section-row">
+            <h2>Manufacturability</h2>
+            <output id="dfm-count">OK</output>
+          </div>
+          <div class="parts-process-row">
+            <label for="process-select">Process</label>
+            <select id="process-select"></select>
+          </div>
+          <!--
+            The drawing and the part, side by side and never merged into one figure.
+            `#compensation-nominal` is what the sketch says and `#compensation-as-made`
+            is what this process will produce; both are labelled in the markup so
+            neither can be read as the other, and a process that publishes no
+            compensation shows a sentence saying so rather than a pair of equal numbers.
+          -->
+          <div class="parts-compensation" id="compensation-panel">
+            <div class="parts-compensation__pair">
+              <span class="parts-compensation__label">Smallest hole, as drawn</span>
+              <output id="compensation-nominal">-</output>
+            </div>
+            <div class="parts-compensation__pair">
+              <span class="parts-compensation__label">Smallest hole, as made</span>
+              <output id="compensation-as-made">-</output>
+            </div>
+            <!--
+              Its own class rather than `parts-resize-note`. Reusing that one put this
+              paragraph ahead of the resize note in document order and broke a spec that
+              locates `.parts-resize-note` by `.first()` - a locator that was unambiguous
+              until a second element claimed the class. The styling is shared through the
+              rule beside it; the hook is not.
+            -->
+            <p class="parts-compensation__note" id="compensation-note"></p>
+          </div>
+          <ul id="dfm-list" class="validation-list"></ul>
         </section>
       </main>
 
@@ -212,6 +262,74 @@
           <div id="parts-body-card-content" class="collapsible-card__content">
             <div class="collapsible-card__inner">
               <div id="body-properties" class="inspector-stack"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="parts-panel-section collapsible-card shell-card" aria-labelledby="mass-heading" data-card-id="parts-mass-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-mass-card" aria-expanded="true" aria-controls="parts-mass-card-content">
+            <span class="collapsible-card__label">
+              <span id="mass-heading" class="collapsible-card__title">Mass</span>
+              <output id="mass-summary" class="collapsible-card__meta">-</output>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-mass-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div id="mass-properties" class="inspector-stack"></div>
+            </div>
+          </div>
+        </section>
+
+        <!--
+          Documents: what to buy and how to make it, for someone who is not the person
+          who drew it. The page could already state a mass and refuse an unmakeable
+          feature; what it could not do was hand anyone a list.
+
+          Every cell here is rendered through `formatOutput`, so a number the page does
+          not hold shows a dash and never a fabricated zero - and a row whose mass is
+          absent still appears, with the reason beside it, because omitting it is the
+          quieter version of the same lie.
+        -->
+        <section class="parts-panel-section collapsible-card shell-card" aria-labelledby="documents-heading" data-card-id="parts-documents-card">
+          <button class="collapsible-card__toggle shell-card__toggle" type="button" data-toggle-shell-card="parts-documents-card" aria-expanded="true" aria-controls="parts-documents-card-content">
+            <span class="collapsible-card__label">
+              <span id="documents-heading" class="collapsible-card__title">Documents</span>
+              <output id="documents-summary" class="collapsible-card__meta">-</output>
+            </span>
+            <span class="collapsible-card__chevron" aria-hidden="true"></span>
+            <span class="collapsible-card__dots" aria-hidden="true"></span>
+          </button>
+          <div id="parts-documents-card-content" class="collapsible-card__content">
+            <div class="collapsible-card__inner">
+              <div class="parts-section-row">
+                <h2>Bill of materials</h2>
+                <output id="bom-total-mass">-</output>
+              </div>
+              <ul id="bom-parts-list" class="parts-bom__list"></ul>
+              <ul id="bom-purchased-list" class="parts-bom__list"></ul>
+              <p class="parts-bom__note" id="bom-note"></p>
+              <div class="parts-section-row">
+                <h2>Print prep</h2>
+                <output id="print-prep-summary">-</output>
+              </div>
+              <ul id="print-prep-list" class="parts-bom__list"></ul>
+              <!--
+                The drawing sheet: A3, orthographic views, dimensions, a hole table and a
+                title block. Views derive from the sketch and never from the compiled mesh,
+                so a hole is a circle of its resolved diameter rather than a measurement of
+                a 32-sided approximation of one.
+
+                No line role is distinguished by colour alone - visible is solid, hidden is
+                dashed, centre is dash-dot, and the weights differ - because a drawing whose
+                hidden lines vanish on a black-and-white printer is not a drawing.
+              -->
+              <div class="parts-section-row">
+                <h2>Drawing</h2>
+                <output id="drawing-summary">-</output>
+              </div>
+              <div id="drawing-sheet" class="parts-sheet-frame"></div>
             </div>
           </div>
         </section>

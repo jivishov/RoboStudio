@@ -52,6 +52,14 @@ export function uniquePartId(value, existingIds = new Set(), fallback = "body") 
   return id;
 }
 
+export function isFiniteNumber(value) {
+  return Number.isFinite(Number(value));
+}
+
+export function isPositiveNumber(value) {
+  return isFiniteNumber(value) && Number(value) > 0;
+}
+
 export function asFiniteNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;

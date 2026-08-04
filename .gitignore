@@ -13,6 +13,10 @@ STL_files/
 *.rar
 artifacts/
 backups/
+# Where the Component Builder writes STEP/DXF exports. Build output, like STL_files/ - it
+# was untracked once already (8a04c5a) and came straight back, because `git add -- .` keeps
+# sweeping it in. Untracked without being ignored is a file somebody commits by accident.
+design_files/
 
 logs/
 test-results/
@@ -26,3 +30,4 @@ release_quality_plan_*/
 
 .DS_Store
 Thumbs.db
+!/AGENTS.md

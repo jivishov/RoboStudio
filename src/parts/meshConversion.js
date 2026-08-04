@@ -2,21 +2,23 @@ import jscad from "@jscad/modeling";
 
 const { geom3 } = jscad.geometries;
 
-function createBoundsTracker() {
+// Exported so mass properties track bounds the same way the mesh path does rather
+// than growing a second copy of the same three functions.
+export function createBoundsTracker() {
   return {
     min: [Infinity, Infinity, Infinity],
     max: [-Infinity, -Infinity, -Infinity]
   };
 }
 
-function includePoint(bounds, point) {
+export function includePoint(bounds, point) {
   for (let index = 0; index < 3; index += 1) {
     bounds.min[index] = Math.min(bounds.min[index], point[index]);
     bounds.max[index] = Math.max(bounds.max[index], point[index]);
   }
 }
 
-function finalizeBounds(bounds) {
+export function finalizeBounds(bounds) {
   if (!bounds.min.every(Number.isFinite) || !bounds.max.every(Number.isFinite)) {
     return {
       min: [0, 0, 0],

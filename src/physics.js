@@ -1,3 +1,5 @@
+import "./tokens.css";
+import "./shellCards.css";
 import "./physics.css";
 import "./shellHeader.css";
 import * as THREE from "three";
@@ -66,6 +68,8 @@ import { evaluateMechatronicsReadiness } from "./mechatronics/readiness.js";
 import { isAssemblyHandoffRequested } from "./studio/partsHandoff.js";
 import { resolveFirmwareChannelCommand } from "./mechatronics/runtimeBridge.js";
 import { createWorkspaceStore } from "./workspaceStore.js";
+import { createStatusChannel } from "./statusChannel.js";
+import { createHistoryShortcutHandler } from "./shortcuts.js";
 
 const viewport = document.querySelector("#physics-viewport");
 const physicsStage = document.querySelector(".physics-stage");
@@ -315,8 +319,15 @@ function downloadText(content, fileName, type) {
   URL.revokeObjectURL(url);
 }
 
+// The Workbench snapshot line is written once and left in place, so this
+// channel has no idle timeout.
+const statusChannel = createStatusChannel({
+  element: snapshotStatus,
+  liveRegionId: "workbench-live-region"
+});
+
 function showStatus(message) {
-  snapshotStatus.textContent = message;
+  statusChannel.show(message);
 }
 
 function cloneJsonValue(value) {
@@ -2994,24 +3005,10 @@ function setMode(mode) {
   renderAll();
 }
 
-function shortcutTargetIsTextEditable(target) {
-  return target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target?.isContentEditable === true;
-}
-
-function handleDesignHistoryShortcut(event) {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey || shortcutTargetIsTextEditable(event.target)) return;
-  const key = event.key.toLowerCase();
-  if (key === "z" && !event.shiftKey) {
-    event.preventDefault();
-    undoDesignHistory();
-  } else if ((key === "z" && event.shiftKey) || key === "y") {
-    event.preventDefault();
-    redoDesignHistory();
-  }
-}
+const handleDesignHistoryShortcut = createHistoryShortcutHandler({
+  undo: () => undoDesignHistory(),
+  redo: () => redoDesignHistory()
+});
 
 modeControls.addEventListener("click", (event) => {
   const target = event.target;

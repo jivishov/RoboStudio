@@ -68,7 +68,12 @@ test("advanced CAD middleware reports backend startup failures without throwing"
   const response = await runMiddleware(middleware, { body: { id: "advanced_body" } });
   const payload = JSON.parse(response.content);
 
-  assert.equal(response.statusCode, 503);
+  // ⚠ 200, not 503. The middleware ran and the child could not start; that is an outcome
+  // this endpoint reports, not a server failure. It answered 503 until cycle 10, and the
+  // cost was a browser console full of "Failed to load resource: 503" on every page where
+  // the optional bridge is correctly absent - a failed capability probe reported as an
+  // error. Callers have always read `ok` rather than the status.
+  assert.equal(response.statusCode, 200);
   assert.equal(payload.ok, false);
   assert.equal(payload.code, "advanced-cad-backend-unavailable");
 });

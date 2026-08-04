@@ -19,6 +19,8 @@ import {
 } from "./contracts.js";
 import { normalizeBooleanFeature, normalizeRevolveFeature, revolveLengthMm } from "./featureOps.js";
 import { normalizeSpurGearSpec } from "./gears.js";
+import { normalizeMaterialId } from "./materials.js";
+import { normalizeProcessId } from "./process.js";
 import { normalizeAdvancedCadRecipe } from "./advancedCadRecipe.js";
 import { normalizeProfile } from "./sketch.js";
 
@@ -61,7 +63,19 @@ export function normalizePartBody(body = {}, existingIds = new Set()) {
     transform: createDefaultTransform(body.transform),
     source,
     sketch: normalizeSketch(body.sketch),
-    extrudeDepthMm: asPositiveNumber(body.extrudeDepthMm, DEFAULT_EXTRUDE_DEPTH_MM)
+    extrudeDepthMm: asPositiveNumber(body.extrudeDepthMm, DEFAULT_EXTRUDE_DEPTH_MM),
+    // Registered here because this whitelist is what reaches IndexedDB: an
+    // unregistered field is silently dropped on the next mutation. The material is
+    // source of truth for mass, but the mass itself is derived and never stored.
+    materialId: normalizeMaterialId(body.materialId),
+    // Persisted for the same reason `materialId` is: how a part is made is a
+    // property of the part, not of the session. A project holding a laser-cut
+    // acrylic plate and a printed bracket has to be able to say so, and reopening
+    // it must not silently re-check both against the default process. Like
+    // `materialId` it is absent from `COMPILE_SIGNATURE_FIELDS`, so choosing a
+    // process saves the project and rebuilds nothing: manufacturability is a
+    // report about geometry, never an input to it.
+    processId: normalizeProcessId(body.processId)
   };
 
   if (source.kind === REVOLVE_KIND) {
