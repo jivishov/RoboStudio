@@ -43,6 +43,16 @@ function normalizeWorkspaceCircuitLabProject(project) {
   return normalizeCircuitLabProject(project);
 }
 
+function circuitDemoIsolationActive(options = {}) {
+  if (options.disableCircuitDemoIsolation === true) return false;
+  const location = options.location ?? globalThis.location;
+  if (!location?.search) return false;
+  const pathname = String(location.pathname ?? "");
+  if (pathname && !/(?:^|\/)circuits\.html$/i.test(pathname)) return false;
+  const params = new URLSearchParams(location.search);
+  return params.has("mission") || params.get("benchmark") === "1";
+}
+
 export class WorkspaceStore {
   constructor(options = {}) {
     this.options = options;
@@ -57,6 +67,7 @@ export class WorkspaceStore {
   }
 
   readCurrentRobotDesign() {
+    if (circuitDemoIsolationActive(this.options)) return Promise.resolve(null);
     return readWorkspaceValue(DESIGN_STORE_NAME, CURRENT_DESIGN_KEY, this.options);
   }
 
@@ -77,6 +88,7 @@ export class WorkspaceStore {
   }
 
   readCurrentCircuitLabProject() {
+    if (circuitDemoIsolationActive(this.options)) return Promise.resolve(null);
     return readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_CIRCUIT_LAB_PROJECT_KEY, this.options);
   }
 
@@ -110,6 +122,7 @@ export class WorkspaceStore {
   }
 
   readCurrentMechatronicsBinding() {
+    if (circuitDemoIsolationActive(this.options)) return Promise.resolve(null);
     return readWorkspaceValue(CIRCUIT_DESIGN_STORE_NAME, CURRENT_MECHATRONICS_BINDING_KEY, this.options);
   }
 
