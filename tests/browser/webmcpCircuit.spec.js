@@ -158,6 +158,8 @@ test("agent-destructive confirmation revalidates the staged transaction and comm
   expect((await callTool(page, "remove_connection", { expectedRevision: state.revision, connectionId: "unsafe_servo_power" })).code).toBe("pending_confirmation");
   await callTool(page, "show_circuit_issue", { issueId: issue.id });
   expect((await callTool(page, "get_circuit_state")).revision).toBe(state.revision);
+  await page.locator("#circuit-tab-agent").click();
+  await expect(page.locator("#webmcp-pending-card")).toBeVisible();
   await page.locator('[data-webmcp-pending-action="confirm"]').click();
   await expect(page.locator("#webmcp-pending-card")).toBeHidden();
   const after = await callTool(page, "get_circuit_state");
