@@ -1,5 +1,6 @@
 import { mountCircuitWebMcp as mountCircuitWebMcpCore } from "./circuitPageIntegrationCore.js";
 import { ORDINARY_WEBMCP_TOOL_COUNT, registerCircuitComponentEditTool } from "./componentEditTool.js";
+import { installCanonicalTerminalClickBridge } from "./wireCommitBridge.js";
 
 function hardHideUnavailableAssistant() {
   for (const root of document.querySelectorAll(".assistant-card")) {
@@ -45,8 +46,12 @@ async function mountOrdinaryComponentEditing(handle) {
 }
 
 export async function mountCircuitWebMcp(options = {}) {
+  const disposeWireCommitBridge = installCanonicalTerminalClickBridge();
   const handle = await mountCircuitWebMcpCore(options);
-  if (!handle || typeof document === "undefined") return handle;
+  if (!handle || typeof document === "undefined") {
+    disposeWireCommitBridge();
+    return handle;
+  }
 
   const componentEditRegistration = await mountOrdinaryComponentEditing(handle);
 
@@ -69,6 +74,7 @@ export async function mountCircuitWebMcp(options = {}) {
     pendingObserver?.disconnect();
     assistantObserver.disconnect();
     componentEditRegistration?.dispose?.();
+    disposeWireCommitBridge();
   }, { once: true });
 
   if (!componentEditRegistration?.registered) return handle;
