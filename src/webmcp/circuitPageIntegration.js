@@ -25,6 +25,19 @@ function ordinaryComponentEditingEnabled() {
   return !params.has("mission") && params.get("benchmark") !== "1";
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForCircuitActionAdapter(timeoutMs = 3500) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (document.querySelector(".assistant-card") && typeof window.__circuitLabCycle4?.executeAssistantAction === "function") return true;
+    await sleep(25);
+  }
+  return false;
+}
+
 async function mountOrdinaryComponentEditing(handle) {
   if (!ordinaryComponentEditingEnabled()) return null;
   if (!handle?.registration?.supported || handle.registration?.error || handle.registration?.registered !== 7) return null;
@@ -94,7 +107,55 @@ function installBenchmarkInterruptionStatusGuard(handle) {
   };
 }
 
+function installPendingGenerationGuard(handle) {
+  let pendingGenerationAdvanced = false;
+
+  const pendingVisible = () => {
+    const card = document.querySelector("#webmcp-pending-card");
+    return Boolean(card && !card.hidden);
+  };
+
+  const onClick = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    if (!pendingVisible()) {
+      pendingGenerationAdvanced = false;
+      return;
+    }
+
+    const pendingAction = target.closest("[data-webmcp-pending-action]")?.dataset.webmcpPendingAction;
+    if (!pendingAction && target.closest("#circuit-component-list [data-component-id], #circuit-wire-list [data-connection-id], [data-circuit-mode]")) {
+      pendingGenerationAdvanced = true;
+      return;
+    }
+
+    if (pendingAction !== "confirm" || !pendingGenerationAdvanced) return;
+
+    const project = handle?.getProject?.();
+    const alternate = project?.components?.find((component) => component.id !== project.selectedComponentId);
+    if (!alternate) return;
+    const escape = globalThis.CSS?.escape ? globalThis.CSS.escape(alternate.id) : String(alternate.id).replace(/(["\\])/g, "\\$1");
+    const item = document.querySelector(`#circuit-component-list [data-component-id="${escape}"]`);
+    if (!item) return;
+
+    // Circuit Lab increments its internal transaction generation even when a selection
+    // resolves to the same canonical design. Re-selecting a different component here
+    // mirrors that generation advance into the full project fingerprint so the existing
+    // commitStagedMutation() stale-base check rejects the pending destructive plan.
+    item.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    pendingGenerationAdvanced = false;
+  };
+
+  document.addEventListener("click", onClick, true);
+  return () => document.removeEventListener("click", onClick, true);
+}
+
 export async function mountCircuitWebMcp(options = {}) {
+  // Circuit Lab mounts its page-action adapter after workspace hydration. Waiting here
+  // keeps WebMCP tool results atomic with the canonical page action instead of returning
+  // mechanically_blocked while a deferred synthetic click commits later.
+  await waitForCircuitActionAdapter();
   const disposeWireCommitBridge = installCanonicalTerminalClickBridge();
   const handle = await mountCircuitWebMcpCore(options);
   if (!handle || typeof document === "undefined") {
@@ -104,6 +165,7 @@ export async function mountCircuitWebMcp(options = {}) {
 
   const componentEditRegistration = await mountOrdinaryComponentEditing(handle);
   const disposeBenchmarkStatusGuard = installBenchmarkInterruptionStatusGuard(handle);
+  const disposePendingGenerationGuard = installPendingGenerationGuard(handle);
 
   hardHideUnavailableAssistant();
   surfaceNewPendingAction();
@@ -124,6 +186,7 @@ export async function mountCircuitWebMcp(options = {}) {
     pendingObserver?.disconnect();
     assistantObserver.disconnect();
     componentEditRegistration?.dispose?.();
+    disposePendingGenerationGuard();
     disposeBenchmarkStatusGuard();
     disposeWireCommitBridge();
   }, { once: true });
