@@ -98,14 +98,22 @@ function pendingConfirmationVisible(documentRef = globalThis.document) {
   return Boolean((bench && !bench.hidden) || (agent && !agent.hidden));
 }
 
-async function pageActionBridge(runtime) {
-  if (typeof runtime.executePageAction === "function") return runtime.executePageAction;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+async function executePageAction(runtime, name, args) {
+  if (typeof runtime.executePageAction === "function") return runtime.executePageAction(name, args);
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     const execute = globalThis.__circuitLabCycle4?.executeAssistantAction;
-    if (typeof execute === "function") return (name, args) => execute(name, args);
+    if (typeof execute === "function") {
+      try {
+        return await execute(name, args);
+      } catch (error) {
+        if (!/assistant is not mounted yet/i.test(String(error?.message ?? ""))) throw error;
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  return null;
+  const error = new Error("Circuit Lab component-edit runtime is not ready.");
+  error.code = "runtime_not_ready";
+  throw error;
 }
 
 function componentSummary(component) {
@@ -202,21 +210,27 @@ export function createCircuitComponentEditTool(runtime = {}) {
 
       if (input.operation === "remove") {
         const component = beforeProject.components.find((item) => item.id === input.componentId);
+        const attachedConnectionIds = beforeProject.connections
+          .filter((connection) => connection.endpoints.some((endpoint) => endpoint.componentId === input.componentId))
+          .map((connection) => connection.id)
+          .slice(0, 20);
         const confirmRemoval = runtime.confirmRemoval ?? ((message) => globalThis.confirm?.(message) === true);
-        const approved = await confirmRemoval(`Remove ${component?.name ?? input.componentId} (${input.componentId}) from Circuit Lab? Attached wiring endpoints may also be removed.`);
+        const wiringNote = attachedConnectionIds.length
+          ? ` ${attachedConnectionIds.length} attached connection${attachedConnectionIds.length === 1 ? "" : "s"} will also be removed or detached.`
+          : "";
+        const approved = await confirmRemoval(`Remove ${component?.name ?? input.componentId} (${input.componentId}) from Circuit Lab?${wiringNote}`);
+        if (client.signal?.aborted) throw new DOMException("WebMCP execution aborted", "AbortError");
         if (!approved) return finish(result(false, "user_cancelled", beforeRevision, "Component removal was cancelled by the user.", { componentId: input.componentId, operation: input.operation }), [input.componentId]);
         if (circuitDesignRevision(normalizeProject(runtime.getProject())) !== beforeRevision) return finish(result(false, "stale_revision", circuitDesignRevision(normalizeProject(runtime.getProject())), "Circuit state changed while removal confirmation was open. Nothing was removed."), [input.componentId]);
       }
 
-      const executePageAction = await pageActionBridge(runtime);
-      if (!executePageAction) return finish(result(false, "runtime_not_ready", beforeRevision, "Circuit Lab component-edit runtime is not ready."), [input.componentId].filter(Boolean));
-
       const [actionName, actionArgs] = actionFor(input);
       let actionResult;
       try {
-        actionResult = await executePageAction(actionName, actionArgs);
+        actionResult = await executePageAction(runtime, actionName, actionArgs);
       } catch (error) {
-        return finish(result(false, "operation_failed", beforeRevision, sanitize(error?.message ?? "Component edit failed.", 220)), [input.componentId].filter(Boolean));
+        const code = error?.code === "runtime_not_ready" ? "runtime_not_ready" : "operation_failed";
+        return finish(result(false, code, beforeRevision, sanitize(error?.message ?? "Component edit failed.", 220)), [input.componentId].filter(Boolean));
       }
       if (client.signal?.aborted) throw new DOMException("WebMCP execution aborted", "AbortError");
 
