@@ -45,6 +45,55 @@ async function mountOrdinaryComponentEditing(handle) {
   return supplemental;
 }
 
+function installBenchmarkInterruptionStatusGuard(handle) {
+  const modelContext = document.modelContext;
+  const panel = document.querySelector("#circuit-agent-panel");
+  if (!panel || typeof modelContext?.addEventListener !== "function" || typeof modelContext?.getTools !== "function") {
+    return () => {};
+  }
+
+  let runActive = false;
+  const expectedToolNames = (handle?.tools ?? []).slice(0, 7).map((tool) => tool.name);
+
+  const onPanelClick = (event) => {
+    const action = event.target?.closest?.("[data-webmcp-action]")?.dataset.webmcpAction;
+    if (action === "start-run") {
+      queueMicrotask(() => {
+        runActive = document.querySelector("#webmcp-run-status")?.textContent?.startsWith("Active:") === true;
+      });
+    } else if (action === "finish-run" || action === "abort-run") {
+      runActive = false;
+    }
+  };
+
+  const markInterrupted = () => {
+    setTimeout(() => {
+      const status = document.querySelector("#webmcp-run-status");
+      if (status?.textContent === "No active run.") status.textContent = "Run interrupted and preserved.";
+      runActive = false;
+    }, 0);
+  };
+
+  const onToolChange = async () => {
+    if (!runActive) return;
+    try {
+      const available = await modelContext.getTools();
+      const names = new Set((available ?? []).map((tool) => tool?.name).filter(Boolean));
+      if (expectedToolNames.every((name) => names.has(name))) return;
+      markInterrupted();
+    } catch {
+      markInterrupted();
+    }
+  };
+
+  panel.addEventListener("click", onPanelClick);
+  modelContext.addEventListener("toolchange", onToolChange);
+  return () => {
+    panel.removeEventListener("click", onPanelClick);
+    modelContext.removeEventListener?.("toolchange", onToolChange);
+  };
+}
+
 export async function mountCircuitWebMcp(options = {}) {
   const disposeWireCommitBridge = installCanonicalTerminalClickBridge();
   const handle = await mountCircuitWebMcpCore(options);
@@ -54,6 +103,7 @@ export async function mountCircuitWebMcp(options = {}) {
   }
 
   const componentEditRegistration = await mountOrdinaryComponentEditing(handle);
+  const disposeBenchmarkStatusGuard = installBenchmarkInterruptionStatusGuard(handle);
 
   hardHideUnavailableAssistant();
   surfaceNewPendingAction();
@@ -74,6 +124,7 @@ export async function mountCircuitWebMcp(options = {}) {
     pendingObserver?.disconnect();
     assistantObserver.disconnect();
     componentEditRegistration?.dispose?.();
+    disposeBenchmarkStatusGuard();
     disposeWireCommitBridge();
   }, { once: true });
 

@@ -19,6 +19,8 @@
   line-height: 1.4;
 }
 
+.webmcp-card[hidden] { display: none; }
+
 .webmcp-card--pending {
   border-left: 4px solid #b7791f;
   background: #fff8ea;
