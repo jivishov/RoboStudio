@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests/browser",
-  testMatch: "webmcpCircuit.spec.js",
+  testMatch: "webmcp*.spec.js",
   fullyParallel: false,
   workers: 1,
   timeout: 45_000,
